@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { findMovieBySlug, getVideosForMovie, mockCelebrities, mockVideos } from '@/lib/mockData';
+import { getMovieBySlug, getVideosForMovie, getCelebritiesForMovie } from '@/lib/db';
+import type { Video, Celebrity } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 import CelebrityCard from '@/components/CelebrityCard';
 
@@ -12,7 +13,12 @@ function formatViews(n: number): string {
 }
 
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
-    const movie = findMovieBySlug(params.slug);
+    let movie;
+    try {
+        movie = await getMovieBySlug(params.slug);
+    } catch (error) {
+        console.error('[MovieDetail] metadata DB error:', error);
+    }
     const title = movie ? `${getLocalizedField(movie.title_localized, params.locale) || movie.title} Nude Scenes` : 'Movie';
     return {
         title: `${title} — CelebSkin`,
@@ -20,9 +26,15 @@ export async function generateMetadata({ params }: { params: { locale: string; s
     };
 }
 
-export default function MovieDetailPage({ params }: { params: { locale: string; slug: string } }) {
+export default async function MovieDetailPage({ params }: { params: { locale: string; slug: string } }) {
     const locale = params.locale;
-    const movie = findMovieBySlug(params.slug);
+
+    let movie;
+    try {
+        movie = await getMovieBySlug(params.slug);
+    } catch (error) {
+        console.error('[MovieDetail] DB error:', error);
+    }
 
     if (!movie) {
         return (
@@ -35,10 +47,16 @@ export default function MovieDetailPage({ params }: { params: { locale: string; 
 
     const title = getLocalizedField(movie.title_localized, locale) || movie.title;
     const description = getLocalizedField(movie.description, locale);
-    const videos = getVideosForMovie(movie.slug);
-    const cast = mockCelebrities.filter((c) =>
-        mockVideos.some((v) => v.movie?.slug === movie.slug && v.celebrities?.some((vc) => vc.slug === c.slug))
-    );
+
+    let videos: Video[] = [];
+    let cast: Celebrity[] = [];
+    try {
+        const videosResult = await getVideosForMovie(movie.id);
+        videos = videosResult.data;
+        cast = await getCelebritiesForMovie(movie.id);
+    } catch (error) {
+        console.error('[MovieDetail] relations error:', error);
+    }
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">

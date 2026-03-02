@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
-import { mockCelebrities } from '@/lib/mockData';
+import { getCelebrities } from '@/lib/db';
+import type { Celebrity, PaginatedResult } from '@/lib/types';
 import CelebrityCard from '@/components/CelebrityCard';
 
 const titles: Record<string, string> = {
@@ -19,7 +20,7 @@ export async function generateMetadata({ params }: { params: { locale: string } 
 
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 
-export default function CelebritiesPage({
+export default async function CelebritiesPage({
     params,
     searchParams,
 }: {
@@ -32,19 +33,22 @@ export default function CelebritiesPage({
     const page = parseInt(searchParams.page || '1');
     const perPage = 24;
 
-    let filtered = [...mockCelebrities];
+    const sortMap: Record<string, string> = {
+        popular: 'total_views',
+        az: 'name',
+        videos: 'videos_count',
+    };
+    const orderBy = sortMap[sort] || 'total_views';
 
-    if (letter) {
-        filtered = filtered.filter((c) => c.name.toUpperCase().startsWith(letter));
+    let result: PaginatedResult<Celebrity> = { data: [], total: 0, page: 1, limit: perPage, totalPages: 0 };
+    try {
+        result = await getCelebrities(page, perPage, orderBy, letter || undefined);
+    } catch (error) {
+        console.error('[CelebritiesPage] DB error:', error);
     }
 
-    if (sort === 'az') filtered.sort((a, b) => a.name.localeCompare(b.name));
-    else if (sort === 'videos') filtered.sort((a, b) => b.videos_count - a.videos_count);
-    else filtered.sort((a, b) => b.total_views - a.total_views);
-
-    const total = filtered.length;
-    const totalPages = Math.ceil(total / perPage);
-    const celebs = filtered.slice((page - 1) * perPage, page * perPage);
+    const celebs = result.data;
+    const totalPages = result.totalPages;
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">

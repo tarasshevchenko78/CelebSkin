@@ -1,0 +1,89 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { pool } from '@/lib/db';
+
+export async function GET(request: NextRequest) {
+    const { searchParams } = request.nextUrl;
+    const page = parseInt(searchParams.get('page') || '1');
+    const limit = parseInt(searchParams.get('limit') || '25');
+    const q = searchParams.get('q') || '';
+    const offset = (page - 1) * limit;
+
+    try {
+        const whereClause = q ? `WHERE c.name ILIKE $3` : '';
+        const params = q ? [limit, offset, `%${q}%`] : [limit, offset];
+
+        const [dataResult, countResult] = await Promise.all([
+            pool.query(
+                `SELECT c.* FROM celebrities c ${whereClause} ORDER BY c.total_views DESC LIMIT $1 OFFSET $2`,
+                params
+            ),
+            pool.query(
+                `SELECT COUNT(*) FROM celebrities c ${q ? `WHERE c.name ILIKE $1` : ''}`,
+                q ? [`%${q}%`] : []
+            ),
+        ]);
+
+        return NextResponse.json({
+            data: dataResult.rows,
+            total: parseInt(countResult.rows[0].count),
+            page,
+            limit,
+        });
+    } catch (error) {
+        console.error('[API AdminCelebrities] error:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}
+
+export async function PUT(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const { id, name, bio, photo_url, is_featured } = body;
+
+        if (!id) {
+            return NextResponse.json({ error: 'Celebrity ID required' }, { status: 400 });
+        }
+
+        const updates: string[] = [];
+        const params: unknown[] = [];
+        let paramIndex = 1;
+
+        if (name !== undefined) {
+            updates.push(`name = $${paramIndex++}`);
+            params.push(name);
+        }
+        if (bio !== undefined) {
+            updates.push(`bio = $${paramIndex++}`);
+            params.push(bio);
+        }
+        if (photo_url !== undefined) {
+            updates.push(`photo_url = $${paramIndex++}`);
+            params.push(photo_url);
+        }
+        if (is_featured !== undefined) {
+            updates.push(`is_featured = $${paramIndex++}`);
+            params.push(is_featured);
+        }
+
+        if (updates.length === 0) {
+            return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
+        }
+
+        updates.push(`updated_at = NOW()`);
+        params.push(id);
+
+        const result = await pool.query(
+            `UPDATE celebrities SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+            params
+        );
+
+        if (result.rows.length === 0) {
+            return NextResponse.json({ error: 'Celebrity not found' }, { status: 404 });
+        }
+
+        return NextResponse.json(result.rows[0]);
+    } catch (error) {
+        console.error('[API AdminCelebrities PUT] error:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}

@@ -1,11 +1,16 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { mockTags, getVideosByTag } from '@/lib/mockData';
+import { getTagBySlug, getVideosByTag } from '@/lib/db';
 import VideoCard from '@/components/VideoCard';
 
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
-    const tag = mockTags.find((t) => t.slug === params.slug);
+    let tag;
+    try {
+        tag = await getTagBySlug(params.slug);
+    } catch (error) {
+        console.error('[TagPage] metadata DB error:', error);
+    }
     const tagName = tag ? getLocalizedField(tag.name_localized, params.locale) || tag.name : params.slug;
     return {
         title: `${tagName} — CelebSkin`,
@@ -13,11 +18,19 @@ export async function generateMetadata({ params }: { params: { locale: string; s
     };
 }
 
-export default function TagPage({ params }: { params: { locale: string; slug: string } }) {
+export default async function TagPage({ params }: { params: { locale: string; slug: string } }) {
     const locale = params.locale;
-    const tag = mockTags.find((t) => t.slug === params.slug);
+
+    let tag;
+    let videosResult;
+    try {
+        tag = await getTagBySlug(params.slug);
+        videosResult = await getVideosByTag(params.slug);
+    } catch (error) {
+        console.error('[TagPage] DB error:', error);
+    }
     const tagName = tag ? getLocalizedField(tag.name_localized, locale) || tag.name : params.slug;
-    const videos = getVideosByTag(params.slug);
+    const videos = videosResult?.data || [];
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">

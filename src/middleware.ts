@@ -52,8 +52,8 @@ export function middleware(request: NextRequest) {
 
     // Skip locale handling for specific paths
     if (SKIP_LOCALE_PATHS.some((path) => pathname.startsWith(path))) {
-        // Admin routes: require Basic Auth
-        if (pathname.startsWith('/admin')) {
+        // Admin routes (both /admin and /api/admin): require Basic Auth
+        if (pathname.startsWith('/admin') || pathname.startsWith('/api/admin')) {
             if (!checkBasicAuth(request)) {
                 return new NextResponse('Authentication required', {
                     status: 401,

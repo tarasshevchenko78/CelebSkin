@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { mockMovies } from '@/lib/mockData';
+import { getMovies } from '@/lib/db';
+import type { Movie, PaginatedResult } from '@/lib/types';
 
 const titles: Record<string, string> = {
     en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films',
@@ -17,7 +18,7 @@ export async function generateMetadata({ params }: { params: { locale: string } 
     };
 }
 
-export default function MoviesPage({
+export default async function MoviesPage({
     params,
     searchParams,
 }: {
@@ -29,14 +30,22 @@ export default function MoviesPage({
     const page = parseInt(searchParams.page || '1');
     const perPage = 20;
 
-    const sorted = [...mockMovies];
-    if (sort === 'latest') sorted.sort((a, b) => (b.year || 0) - (a.year || 0));
-    else if (sort === 'az') sorted.sort((a, b) => a.title.localeCompare(b.title));
-    else sorted.sort((a, b) => b.scenes_count - a.scenes_count);
+    const sortMap: Record<string, string> = {
+        scenes: 'scenes_count',
+        latest: 'year',
+        az: 'title',
+    };
+    const orderBy = sortMap[sort] || 'scenes_count';
 
-    const total = sorted.length;
-    const totalPages = Math.ceil(total / perPage);
-    const movies = sorted.slice((page - 1) * perPage, page * perPage);
+    let result: PaginatedResult<Movie> = { data: [], total: 0, page: 1, limit: perPage, totalPages: 0 };
+    try {
+        result = await getMovies(page, perPage, orderBy);
+    } catch (error) {
+        console.error('[MoviesPage] DB error:', error);
+    }
+
+    const movies = result.data;
+    const totalPages = result.totalPages;
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">

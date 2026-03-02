@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { mockVideos, mockCelebrities, mockMovies } from '@/lib/mockData';
+import { getLatestVideos, getTrendingCelebrities, getMovies } from '@/lib/db';
+import type { Video, Celebrity, Movie } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 import CelebrityCard from '@/components/CelebrityCard';
 
@@ -59,10 +60,24 @@ export async function generateMetadata({ params }: { params: { locale: string } 
     };
 }
 
-export default function HomePage({ params }: { params: { locale: string } }) {
+export default async function HomePage({ params }: { params: { locale: string } }) {
     const locale = params.locale;
     const hero = heroText[locale] || heroText.en;
     const sections = sectionTitles[locale] || sectionTitles.en;
+
+    let latestVideos: Video[] = [];
+    let trendingCelebs: Celebrity[] = [];
+    let popularMovies: Movie[] = [];
+
+    try {
+        [latestVideos, trendingCelebs, popularMovies] = await Promise.all([
+            getLatestVideos(12),
+            getTrendingCelebrities(10),
+            getMovies(1, 8, 'scenes_count').then(r => r.data),
+        ]);
+    } catch (error) {
+        console.error('[HomePage] DB query failed:', error);
+    }
 
     return (
         <div>
@@ -99,101 +114,112 @@ export default function HomePage({ params }: { params: { locale: string } }) {
             </section>
 
             {/* Trending Celebrities — horizontal scroll */}
-            <section className="mx-auto max-w-7xl px-4 py-8">
-                <div className="flex items-center justify-between mb-5">
-                    <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.trending}</h2>
-                    <a
-                        href={`/${locale}/celebrity`}
-                        className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                    >
-                        {sections.viewAll} →
-                    </a>
-                </div>
-                <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
-                    {mockCelebrities.map((celeb) => (
-                        <CelebrityCard key={celeb.id} celebrity={celeb} locale={locale} />
-                    ))}
-                </div>
-            </section>
+            {trendingCelebs.length > 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-8">
+                    <div className="flex items-center justify-between mb-5">
+                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.trending}</h2>
+                        <a
+                            href={`/${locale}/celebrity`}
+                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
+                        >
+                            {sections.viewAll} →
+                        </a>
+                    </div>
+                    <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
+                        {trendingCelebs.map((celeb) => (
+                            <CelebrityCard key={celeb.id} celebrity={celeb} locale={locale} />
+                        ))}
+                    </div>
+                </section>
+            )}
 
             {/* Latest Videos — responsive grid */}
-            <section className="mx-auto max-w-7xl px-4 py-8">
-                <div className="flex items-center justify-between mb-5">
-                    <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.latest}</h2>
-                    <a
-                        href={`/${locale}/video`}
-                        className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                    >
-                        {sections.viewAll} →
-                    </a>
-                </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {mockVideos.map((video) => (
-                        <VideoCard key={video.id} video={video} locale={locale} />
-                    ))}
-                </div>
-            </section>
+            {latestVideos.length > 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-8">
+                    <div className="flex items-center justify-between mb-5">
+                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.latest}</h2>
+                        <a
+                            href={`/${locale}/video`}
+                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
+                        >
+                            {sections.viewAll} →
+                        </a>
+                    </div>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                        {latestVideos.map((video) => (
+                            <VideoCard key={video.id} video={video} locale={locale} />
+                        ))}
+                    </div>
+                </section>
+            )}
 
             {/* Popular Movies */}
-            <section className="mx-auto max-w-7xl px-4 py-8 pb-16">
-                <div className="flex items-center justify-between mb-5">
-                    <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.movies}</h2>
-                    <a
-                        href={`/${locale}/movie`}
-                        className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                    >
-                        {sections.viewAll} →
-                    </a>
-                </div>
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                    {mockMovies.map((movie) => {
-                        const movieTitle = getLocalizedField(movie.title_localized, locale) || movie.title;
-                        return (
-                            <a
-                                key={movie.id}
-                                href={`/${locale}/movie/${movie.slug}`}
-                                className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.02]"
-                            >
-                                <div className="relative aspect-[2/3] bg-brand-card rounded-lg overflow-hidden">
-                                    {movie.poster_url ? (
-                                        <img
-                                            src={movie.poster_url}
-                                            alt={movieTitle}
-                                            loading="lazy"
-                                            className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full bg-gradient-to-br from-brand-card via-brand-hover to-brand-card flex flex-col items-center justify-center p-3">
-                                            <svg className="w-8 h-8 text-brand-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                                            </svg>
-                                            <span className="text-xs text-brand-muted text-center leading-tight">{movieTitle}</span>
-                                        </div>
-                                    )}
-                                    {/* Year badge */}
-                                    {movie.year && (
-                                        <span className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                            {movie.year}
+            {popularMovies.length > 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-8 pb-16">
+                    <div className="flex items-center justify-between mb-5">
+                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.movies}</h2>
+                        <a
+                            href={`/${locale}/movie`}
+                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
+                        >
+                            {sections.viewAll} →
+                        </a>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                        {popularMovies.map((movie) => {
+                            const movieTitle = getLocalizedField(movie.title_localized, locale) || movie.title;
+                            return (
+                                <a
+                                    key={movie.id}
+                                    href={`/${locale}/movie/${movie.slug}`}
+                                    className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.02]"
+                                >
+                                    <div className="relative aspect-[2/3] bg-brand-card rounded-lg overflow-hidden">
+                                        {movie.poster_url ? (
+                                            <img
+                                                src={movie.poster_url}
+                                                alt={movieTitle}
+                                                loading="lazy"
+                                                className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-gradient-to-br from-brand-card via-brand-hover to-brand-card flex flex-col items-center justify-center p-3">
+                                                <svg className="w-8 h-8 text-brand-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                                                </svg>
+                                                <span className="text-xs text-brand-muted text-center leading-tight">{movieTitle}</span>
+                                            </div>
+                                        )}
+                                        {movie.year && (
+                                            <span className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                                {movie.year}
+                                            </span>
+                                        )}
+                                        <span className="absolute bottom-1.5 right-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                            {movie.scenes_count} scenes
                                         </span>
-                                    )}
-                                    {/* Scenes count */}
-                                    <span className="absolute bottom-1.5 right-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                        {movie.scenes_count} scenes
-                                    </span>
-                                </div>
-                                <div className="mt-2 px-0.5">
-                                    <h3 className="text-sm font-medium text-brand-text line-clamp-1 group-hover:text-white transition-colors">
-                                        {movieTitle}
-                                    </h3>
-                                    {movie.director && (
-                                        <p className="text-xs text-brand-secondary mt-0.5">{movie.director}</p>
-                                    )}
-                                </div>
-                            </a>
-                        );
-                    })}
-                </div>
-            </section>
+                                    </div>
+                                    <div className="mt-2 px-0.5">
+                                        <h3 className="text-sm font-medium text-brand-text line-clamp-1 group-hover:text-white transition-colors">
+                                            {movieTitle}
+                                        </h3>
+                                        {movie.director && (
+                                            <p className="text-xs text-brand-secondary mt-0.5">{movie.director}</p>
+                                        )}
+                                    </div>
+                                </a>
+                            );
+                        })}
+                    </div>
+                </section>
+            )}
+
+            {/* Empty state when no data */}
+            {latestVideos.length === 0 && trendingCelebs.length === 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-16 text-center">
+                    <p className="text-brand-secondary text-lg">Content is being prepared. Check back soon!</p>
+                </section>
+            )}
         </div>
     );
 }

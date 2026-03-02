@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
-import { mockVideos } from '@/lib/mockData';
+import { getVideos } from '@/lib/db';
+import type { Video, PaginatedResult } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 
 const titles: Record<string, string> = {
@@ -22,7 +23,7 @@ export async function generateMetadata({ params }: { params: { locale: string } 
     };
 }
 
-export default function VideosPage({
+export default async function VideosPage({
     params,
     searchParams,
 }: {
@@ -34,13 +35,22 @@ export default function VideosPage({
     const page = parseInt(searchParams.page || '1');
     const perPage = 12;
 
-    const sorted = [...mockVideos];
-    if (sort === 'views') sorted.sort((a, b) => b.views_count - a.views_count);
-    else if (sort === 'rated') sorted.sort((a, b) => b.likes_count - a.likes_count);
+    const sortMap: Record<string, string> = {
+        latest: 'published_at',
+        views: 'views_count',
+        rated: 'created_at',
+    };
+    const orderBy = sortMap[sort] || 'published_at';
 
-    const total = sorted.length;
-    const totalPages = Math.ceil(total / perPage);
-    const videos = sorted.slice((page - 1) * perPage, page * perPage);
+    let result: PaginatedResult<Video> = { data: [], total: 0, page: 1, limit: perPage, totalPages: 0 };
+    try {
+        result = await getVideos(page, perPage, orderBy);
+    } catch (error) {
+        console.error('[VideosPage] DB error:', error);
+    }
+
+    const videos = result.data;
+    const totalPages = result.totalPages;
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">
@@ -64,13 +74,16 @@ export default function VideosPage({
                 </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {videos.map((video) => (
-                    <VideoCard key={video.id} video={video} locale={locale} />
-                ))}
-            </div>
+            {videos.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {videos.map((video) => (
+                        <VideoCard key={video.id} video={video} locale={locale} />
+                    ))}
+                </div>
+            ) : (
+                <p className="text-center text-brand-secondary py-12">No videos available yet.</p>
+            )}
 
-            {/* Pagination */}
             {totalPages > 1 && (
                 <div className="mt-8 flex items-center justify-center gap-3">
                     {page > 1 && (

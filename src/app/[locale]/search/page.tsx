@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { getLocalizedField } from '@/lib/i18n';
-import { searchMockData } from '@/lib/mockData';
+import type { SearchResult } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 import CelebrityCard from '@/components/CelebrityCard';
 
@@ -29,11 +29,34 @@ export default function SearchPage({ params }: { params: { locale: string } }) {
     const locale = params.locale;
     const [query, setQuery] = useState('');
     const [activeTab, setActiveTab] = useState<string>('all');
+    const [results, setResults] = useState<SearchResult | null>(null);
+    const [loading, setLoading] = useState(false);
 
-    const results = useMemo(() => {
-        if (query.length < 2) return null;
-        return searchMockData(query);
-    }, [query]);
+    const fetchResults = useCallback(async (q: string) => {
+        if (q.length < 2) {
+            setResults(null);
+            return;
+        }
+        setLoading(true);
+        try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            if (res.ok) {
+                const data = await res.json();
+                setResults(data);
+            }
+        } catch (error) {
+            console.error('[Search] fetch error:', error);
+        } finally {
+            setLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            fetchResults(query);
+        }, 300);
+        return () => clearTimeout(timer);
+    }, [query, fetchResults]);
 
     const hasResults = results && (results.videos.length > 0 || results.celebrities.length > 0 || results.movies.length > 0);
 

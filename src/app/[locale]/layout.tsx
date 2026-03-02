@@ -3,6 +3,8 @@ import '../globals.css';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import AgeGate from '@/components/AgeGate';
+import CookieConsent from '@/components/CookieConsent';
 
 export async function generateMetadata({
     params,
@@ -53,9 +55,11 @@ export default function LocaleLayout({
                 />
             </head>
             <body className="min-h-screen bg-brand-bg text-brand-text font-sans antialiased flex flex-col">
+                <AgeGate />
                 <Header locale={locale} />
                 <main className="flex-1">{children}</main>
                 <Footer locale={locale} />
+                <CookieConsent />
             </body>
         </html>
     );

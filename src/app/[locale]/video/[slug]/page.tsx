@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { findVideoBySlug, mockVideos } from '@/lib/mockData';
+import { getVideoBySlug, getRelatedVideos } from '@/lib/db';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
 
@@ -16,7 +16,12 @@ export async function generateMetadata({
 }: {
     params: { locale: string; slug: string };
 }): Promise<Metadata> {
-    const video = findVideoBySlug(params.slug);
+    let video;
+    try {
+        video = await getVideoBySlug(params.slug, params.locale);
+    } catch (error) {
+        console.error('[VideoDetail] metadata DB error:', error);
+    }
     const title = video
         ? getLocalizedField(video.seo_title, params.locale) || getLocalizedField(video.title, params.locale)
         : 'Video';
@@ -33,13 +38,19 @@ export async function generateMetadata({
     };
 }
 
-export default function VideoDetailPage({
+export default async function VideoDetailPage({
     params,
 }: {
     params: { locale: string; slug: string };
 }) {
     const locale = params.locale;
-    const video = findVideoBySlug(params.slug);
+
+    let video;
+    try {
+        video = await getVideoBySlug(params.slug, locale);
+    } catch (error) {
+        console.error('[VideoDetail] DB error:', error);
+    }
 
     if (!video) {
         return (
@@ -52,7 +63,13 @@ export default function VideoDetailPage({
 
     const title = getLocalizedField(video.title, locale);
     const review = getLocalizedField(video.review, locale);
-    const similar = mockVideos.filter((v) => v.id !== video.id).slice(0, 4);
+
+    let similar: import('@/lib/types').Video[] = [];
+    try {
+        similar = await getRelatedVideos(video.id, 4);
+    } catch (error) {
+        console.error('[VideoDetail] related videos error:', error);
+    }
 
     return (
         <div className="mx-auto max-w-6xl px-4 py-6">

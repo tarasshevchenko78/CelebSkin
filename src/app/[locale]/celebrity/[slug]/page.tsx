@@ -1,7 +1,8 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { findCelebrityBySlug, getVideosForCelebrity, mockMovies, mockVideos } from '@/lib/mockData';
+import { getCelebrityBySlug, getVideosForCelebrity, getMoviesForCelebrity } from '@/lib/db';
+import type { Video, Movie } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 
 function formatViews(n: number): string {
@@ -15,7 +16,12 @@ export async function generateMetadata({
 }: {
     params: { locale: string; slug: string };
 }): Promise<Metadata> {
-    const celeb = findCelebrityBySlug(params.slug);
+    let celeb;
+    try {
+        celeb = await getCelebrityBySlug(params.slug);
+    } catch (error) {
+        console.error('[CelebrityDetail] metadata DB error:', error);
+    }
     const name = celeb ? celeb.name : 'Celebrity';
     return {
         title: `${name} Nude Scenes — CelebSkin`,
@@ -23,13 +29,19 @@ export async function generateMetadata({
     };
 }
 
-export default function CelebrityDetailPage({
+export default async function CelebrityDetailPage({
     params,
 }: {
     params: { locale: string; slug: string };
 }) {
     const locale = params.locale;
-    const celeb = findCelebrityBySlug(params.slug);
+
+    let celeb;
+    try {
+        celeb = await getCelebrityBySlug(params.slug);
+    } catch (error) {
+        console.error('[CelebrityDetail] DB error:', error);
+    }
 
     if (!celeb) {
         return (
@@ -42,10 +54,16 @@ export default function CelebrityDetailPage({
 
     const name = getLocalizedField(celeb.name_localized, locale) || celeb.name;
     const bio = getLocalizedField(celeb.bio, locale);
-    const videos = getVideosForCelebrity(celeb.slug);
-    const celebMovies = mockMovies.filter((m) =>
-        mockVideos.some((v) => v.movie?.slug === m.slug && v.celebrities?.some((c) => c.slug === celeb.slug))
-    );
+
+    let videos: Video[] = [];
+    let celebMovies: Movie[] = [];
+    try {
+        const videosResult = await getVideosForCelebrity(celeb.id);
+        videos = videosResult.data;
+        celebMovies = await getMoviesForCelebrity(celeb.id);
+    } catch (error) {
+        console.error('[CelebrityDetail] relations error:', error);
+    }
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">

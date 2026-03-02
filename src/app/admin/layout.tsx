@@ -20,34 +20,25 @@ export default function AdminLayout({
                             <h1 className="text-lg font-bold text-white">CelebSkin Admin</h1>
                         </div>
                         <nav className="flex flex-col gap-1">
-                            <a
-                                href="/admin"
-                                className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                            >
+                            <a href="/admin" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Dashboard
                             </a>
-                            <a
-                                href="/admin/videos"
-                                className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                            >
+                            <a href="/admin/videos" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Videos
                             </a>
-                            <a
-                                href="/admin/celebrities"
-                                className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                            >
+                            <a href="/admin/celebrities" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Celebrities
                             </a>
-                            <a
-                                href="/admin/moderation"
-                                className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                            >
+                            <a href="/admin/moderation" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Moderation
                             </a>
-                            <a
-                                href="/admin/settings"
-                                className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors"
-                            >
+                            <a href="/admin/scraper" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                                Scraper
+                            </a>
+                            <a href="/admin/ai" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                                AI Pipeline
+                            </a>
+                            <a href="/admin/settings" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Settings
                             </a>
                         </nav>
