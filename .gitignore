@@ -34,3 +34,14 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# env files
+.env
+.env.*
+
+# npm artifacts
+next
+site@*
+
+# pipeline logs
+scripts/logs/
