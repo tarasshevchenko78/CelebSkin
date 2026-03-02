@@ -4,6 +4,8 @@ import { getLocalizedField } from '@/lib/i18n';
 import { getTagBySlug, getVideosByTag } from '@/lib/db';
 import VideoCard from '@/components/VideoCard';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
     let tag;
     try {

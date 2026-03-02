@@ -30,7 +30,7 @@ export default function SearchPage({ params }: { params: { locale: string } }) {
     const [query, setQuery] = useState('');
     const [activeTab, setActiveTab] = useState<string>('all');
     const [results, setResults] = useState<SearchResult | null>(null);
-    const [loading, setLoading] = useState(false);
+    const [, setLoading] = useState(false);
 
     const fetchResults = useCallback(async (q: string) => {
         if (q.length < 2) {

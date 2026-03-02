@@ -3,6 +3,8 @@ import { SUPPORTED_LOCALES, type SupportedLocale, getLocalizedField } from '@/li
 import { getBlogPosts } from '@/lib/db';
 import type { BlogPost, PaginatedResult } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+
 const titles: Record<string, string> = {
     en: 'Blog', ru: 'Блог', de: 'Blog', fr: 'Blog',
     es: 'Blog', pt: 'Blog', it: 'Blog',

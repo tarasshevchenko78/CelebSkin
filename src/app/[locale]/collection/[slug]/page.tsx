@@ -5,6 +5,8 @@ import { getCollectionBySlug, getVideosForCollection } from '@/lib/db';
 import type { Video } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
     let collection;
     try {

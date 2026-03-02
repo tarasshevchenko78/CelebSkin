@@ -4,6 +4,8 @@ import { getLocalizedField } from '@/lib/i18n';
 import { getMovieBySlug, getVideosForMovie, getCelebritiesForMovie } from '@/lib/db';
 import type { Video, Celebrity } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
+
+export const dynamic = 'force-dynamic';
 import CelebrityCard from '@/components/CelebrityCard';
 
 function formatViews(n: number): string {

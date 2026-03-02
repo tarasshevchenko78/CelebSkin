@@ -1,5 +1,6 @@
 // CelebSkin Database Layer
 import { Pool } from 'pg';
+import { cached } from './cache';
 import type {
     Video,
     Celebrity,
@@ -99,14 +100,16 @@ export async function getVideos(
 }
 
 export async function getLatestVideos(limit: number = 12): Promise<Video[]> {
-    const result = await pool.query(
-        `SELECT * FROM videos
-     WHERE status = 'published'
-     ORDER BY published_at DESC
-     LIMIT $1`,
-        [limit]
-    );
-    return result.rows;
+    return cached(`latest_videos:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT * FROM videos
+         WHERE status = 'published'
+         ORDER BY published_at DESC
+         LIMIT $1`,
+            [limit]
+        );
+        return result.rows;
+    }, 120);
 }
 
 export async function getFeaturedVideo(): Promise<Video | null> {
@@ -177,14 +180,16 @@ export async function getCelebrities(
 }
 
 export async function getTrendingCelebrities(limit: number = 10): Promise<Celebrity[]> {
-    const result = await pool.query(
-        `SELECT * FROM celebrities
-     WHERE is_featured = true OR videos_count > 0
-     ORDER BY total_views DESC, videos_count DESC
-     LIMIT $1`,
-        [limit]
-    );
-    return result.rows;
+    return cached(`trending_celebs:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT * FROM celebrities
+         WHERE is_featured = true OR videos_count > 0
+         ORDER BY total_views DESC, videos_count DESC
+         LIMIT $1`,
+            [limit]
+        );
+        return result.rows;
+    }, 300);
 }
 
 // ============================================
@@ -578,25 +583,27 @@ export async function getDashboardStats(): Promise<{
     pendingVideos: number;
     totalBlogPosts: number;
 }> {
-    const [videos, published, celebs, movies, views, pending, blogs] = await Promise.all([
-        pool.query(`SELECT COUNT(*) FROM videos`),
-        pool.query(`SELECT COUNT(*) FROM videos WHERE status = 'published'`),
-        pool.query(`SELECT COUNT(*) FROM celebrities`),
-        pool.query(`SELECT COUNT(*) FROM movies`),
-        pool.query(`SELECT COALESCE(SUM(views_count), 0) AS total FROM videos WHERE status = 'published'`),
-        pool.query(`SELECT COUNT(*) FROM videos WHERE status IN ('new', 'processing', 'enriched', 'needs_review')`),
-        pool.query(`SELECT COUNT(*) FROM blog_posts WHERE is_published = true`),
-    ]);
+    return cached('dashboard_stats', async () => {
+        const [videos, published, celebs, movies, views, pending, blogs] = await Promise.all([
+            pool.query(`SELECT COUNT(*) FROM videos`),
+            pool.query(`SELECT COUNT(*) FROM videos WHERE status = 'published'`),
+            pool.query(`SELECT COUNT(*) FROM celebrities`),
+            pool.query(`SELECT COUNT(*) FROM movies`),
+            pool.query(`SELECT COALESCE(SUM(views_count), 0) AS total FROM videos WHERE status = 'published'`),
+            pool.query(`SELECT COUNT(*) FROM videos WHERE status IN ('new', 'processing', 'enriched', 'needs_review')`),
+            pool.query(`SELECT COUNT(*) FROM blog_posts WHERE is_published = true`),
+        ]);
 
-    return {
-        totalVideos: parseInt(videos.rows[0].count),
-        publishedVideos: parseInt(published.rows[0].count),
-        totalCelebrities: parseInt(celebs.rows[0].count),
-        totalMovies: parseInt(movies.rows[0].count),
-        totalViews: parseInt(views.rows[0].total),
-        pendingVideos: parseInt(pending.rows[0].count),
-        totalBlogPosts: parseInt(blogs.rows[0].count),
-    };
+        return {
+            totalVideos: parseInt(videos.rows[0].count),
+            publishedVideos: parseInt(published.rows[0].count),
+            totalCelebrities: parseInt(celebs.rows[0].count),
+            totalMovies: parseInt(movies.rows[0].count),
+            totalViews: parseInt(views.rows[0].total),
+            pendingVideos: parseInt(pending.rows[0].count),
+            totalBlogPosts: parseInt(blogs.rows[0].count),
+        };
+    }, 60);
 }
 
 // ============================================

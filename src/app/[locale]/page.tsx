@@ -4,6 +4,8 @@ import { getLocalizedField } from '@/lib/i18n';
 import { getLatestVideos, getTrendingCelebrities, getMovies } from '@/lib/db';
 import type { Video, Celebrity, Movie } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
+
+export const dynamic = 'force-dynamic';
 import CelebrityCard from '@/components/CelebrityCard';
 
 const heroText: Record<string, { heading: string; sub: string }> = {

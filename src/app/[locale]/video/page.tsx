@@ -4,6 +4,8 @@ import { getVideos } from '@/lib/db';
 import type { Video, PaginatedResult } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 
+export const dynamic = 'force-dynamic';
+
 const titles: Record<string, string> = {
     en: 'All Videos', ru: 'Все видео', de: 'Alle Videos', fr: 'Toutes les vidéos',
     es: 'Todos los videos', pt: 'Todos os vídeos', it: 'Tutti i video',

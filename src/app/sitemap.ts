@@ -1,6 +1,8 @@
 import { MetadataRoute } from 'next';
 import { pool } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://celeb.skin';
 const LOCALES = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
 

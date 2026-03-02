@@ -5,6 +5,8 @@ import { getCelebrityBySlug, getVideosForCelebrity, getMoviesForCelebrity } from
 import type { Video, Movie } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 
+export const dynamic = 'force-dynamic';
+
 function formatViews(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;

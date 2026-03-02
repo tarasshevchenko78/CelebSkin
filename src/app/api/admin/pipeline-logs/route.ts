@@ -1,6 +1,8 @@
 import { NextRequest } from 'next/server';
 import { pool } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(request: NextRequest) {
     const encoder = new TextEncoder();
 
@@ -21,7 +23,7 @@ export async function GET(request: NextRequest) {
                 `);
 
                 sendEvent({ type: 'initial', logs: result.rows });
-            } catch (error) {
+            } catch {
                 sendEvent({ type: 'error', message: 'Failed to fetch logs' });
             }
 

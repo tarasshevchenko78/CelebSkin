@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, getLocalizedField } from '@/lib/i18n';
 import { getBlogPostBySlug } from '@/lib/db';
 
+export const dynamic = 'force-dynamic';
+
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
     let post;
     try {

@@ -2,6 +2,8 @@ import { pool } from '@/lib/db';
 import { getLocalizedField } from '@/lib/i18n';
 import type { Video } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminVideosPage({
     searchParams,
 }: {

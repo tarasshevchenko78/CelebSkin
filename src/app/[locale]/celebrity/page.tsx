@@ -4,6 +4,8 @@ import { getCelebrities } from '@/lib/db';
 import type { Celebrity, PaginatedResult } from '@/lib/types';
 import CelebrityCard from '@/components/CelebrityCard';
 
+export const dynamic = 'force-dynamic';
+
 const titles: Record<string, string> = {
     en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités',
     es: 'Celebridades', pt: 'Celebridades', it: 'Celebrità',

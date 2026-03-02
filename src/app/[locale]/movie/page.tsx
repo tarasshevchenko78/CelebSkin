@@ -4,6 +4,8 @@ import { getLocalizedField } from '@/lib/i18n';
 import { getMovies } from '@/lib/db';
 import type { Movie, PaginatedResult } from '@/lib/types';
 
+export const dynamic = 'force-dynamic';
+
 const titles: Record<string, string> = {
     en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films',
     es: 'Películas', pt: 'Filmes', it: 'Film',
