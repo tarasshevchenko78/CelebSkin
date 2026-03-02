@@ -1,0 +1,38 @@
+# CelebSkin Project Rules
+
+## Stack
+- Next.js 14 with App Router (NOT Pages Router)
+- TypeScript strict mode
+- Tailwind CSS dark theme
+- PostgreSQL 16 with JSONB for 10 languages
+- Redis 7 for caching
+- Node.js 20 LTS
+
+## Architecture
+- All text fields use JSONB: {"en": "...", "ru": "...", "de": "...", ...}
+- 10 languages: en, ru, de, fr, es, pt, it, pl, nl, tr
+- URL: /[locale]/video/[slug], /[locale]/celebrity/[slug], /[locale]/movie/[slug]
+- Table name: "celebrities" (NOT "actresses")
+- Database: celebskin, user: celebskin
+- CDN: BunnyCDN at cdn.celeb.skin
+- Site dir: /opt/celebskin/site
+- Config: /opt/celebskin/config/.env
+- Full spec: /opt/celebskin/MASTER_README.md
+
+## Code Style
+- Use "pg" library for PostgreSQL (NOT Prisma, NOT Drizzle)
+- Server Components by default, "use client" only when needed
+- Parameterized queries ($1, $2) — never string interpolation
+- API routes under /api/
+- Admin under /admin/ (no locale prefix)
+
+## AI Models
+- NEVER change AI models without explicit user request
+- Gemini 2.5 Flash for content generation
+- Gemini 2.5 Pro for complex tasks
+
+## Design
+- Dark theme: bg #0a0a0f, cards #12121a, hover #1a1a2e
+- Accent: #e50914 (red)
+- Text: #e5e5e5, secondary #888
+- Font: Inter

@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🎬 CelebSkin
 
-## Getting Started
+> Celebrity nude scenes from movies & TV shows — multilingual platform with AI-powered content pipeline.
 
-First, run the development server:
+**Live:** [celeb.skin](https://celeb.skin)
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Stack
+
+- **Frontend:** Next.js 14 (App Router), TypeScript, Tailwind CSS
+- **Database:** PostgreSQL 16 (JSONB for 10 languages), pg_trgm fuzzy search
+- **Cache:** Redis 7
+- **CDN:** BunnyCDN
+- **AI:** Gemini 2.5 Flash/Pro
+- **Server:** AbeloHost VPS (NL) + Contabo (DE backend)
+- **Process Manager:** PM2 + Nginx + SSL
+
+## Features
+
+- 10 languages (ru, en, de, fr, es, pt, it, pl, nl, tr) — JSONB strategy
+- Custom HTML5 video player with keyboard controls
+- Fuzzy search via pg_trgm
+- AI Chat with character personas (planned)
+- Telegram bot ecosystem (planned)
+- Admin panel with scraper control
+
+## Project Structure
+
+```
+site/       — Next.js application
+scripts/    — Backend parsers and AI pipeline (Contabo)
+config/     — Environment variables
+db/         — Database schema
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+cd site && npm install && npm run dev
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Architecture
 
-## Learn More
+```
+AbeloHost (NL): Next.js + PostgreSQL + Redis + Nginx
+Contabo (DE):   Parsers + AI + FFmpeg + n8n + Telegram
+BunnyCDN:       Videos + thumbnails + posters
+```
 
-To learn more about Next.js, take a look at the following resources:
+## License
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Private project. All rights reserved.
