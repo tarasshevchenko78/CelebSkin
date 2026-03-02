@@ -1,41 +1,43 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
+import { getLocalizedField } from '@/lib/i18n';
+import { mockTags, getVideosByTag } from '@/lib/mockData';
+import VideoCard from '@/components/VideoCard';
 
-export async function generateMetadata({
-    params,
-}: {
-    params: { locale: string; slug: string };
-}): Promise<Metadata> {
+export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
+    const tag = mockTags.find((t) => t.slug === params.slug);
+    const tagName = tag ? getLocalizedField(tag.name_localized, params.locale) || tag.name : params.slug;
     return {
-        title: `Tag: ${params.slug} — CelebSkin`,
-        alternates: {
-            languages: Object.fromEntries(
-                SUPPORTED_LOCALES.map((loc) => [loc, `/${loc}/tag/${params.slug}`])
-            ),
-        },
+        title: `${tagName} — CelebSkin`,
+        alternates: { languages: Object.fromEntries(SUPPORTED_LOCALES.map((l) => [l, `/${l}/tag/${params.slug}`])) },
     };
 }
 
-export default function TagPage({
-    params,
-}: {
-    params: { locale: string; slug: string };
-}) {
+export default function TagPage({ params }: { params: { locale: string; slug: string } }) {
+    const locale = params.locale;
+    const tag = mockTags.find((t) => t.slug === params.slug);
+    const tagName = tag ? getLocalizedField(tag.name_localized, locale) || tag.name : params.slug;
+    const videos = getVideosByTag(params.slug);
+
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">
-            <h1 className="mb-8 text-3xl font-bold text-white">
-                Tag: {params.slug}
+            <h1 className="mb-6 text-2xl sm:text-3xl font-bold text-white">
+                <span className="text-brand-secondary font-normal mr-2">#</span>{tagName}
             </h1>
-            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-                {[1, 2, 3, 4, 5, 6].map((i) => (
-                    <div
-                        key={i}
-                        className="aspect-video rounded-xl border border-gray-800 bg-gray-900/50 flex items-center justify-center text-gray-600"
-                    >
-                        Video {i}
-                    </div>
-                ))}
-            </div>
+
+            {tag && (
+                <p className="text-sm text-brand-secondary mb-6">{tag.videos_count} videos</p>
+            )}
+
+            {videos.length > 0 ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    {videos.map((v) => (
+                        <VideoCard key={v.id} video={v} locale={locale} />
+                    ))}
+                </div>
+            ) : (
+                <p className="text-center text-brand-secondary py-12">No videos found for this tag.</p>
+            )}
         </div>
     );
 }
