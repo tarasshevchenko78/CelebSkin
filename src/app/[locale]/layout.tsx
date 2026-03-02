@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import '../globals.css';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
+import Header from '@/components/Header';
+import Footer from '@/components/Footer';
 
 export async function generateMetadata({
     params,
@@ -39,36 +41,21 @@ export default function LocaleLayout({
     params: { locale: string };
 }) {
     const locale = params.locale;
-    const dir = locale === 'ar' ? 'rtl' : 'ltr';
 
     return (
-        <html lang={locale} dir={dir} className="dark">
-            <body className="min-h-screen bg-gray-950 text-gray-100 antialiased">
-                <header className="border-b border-gray-800 bg-gray-950/80 backdrop-blur-sm">
-                    <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
-                        <a href={`/${locale}`} className="text-xl font-bold text-white">
-                            CelebSkin
-                        </a>
-                        <div className="flex items-center gap-6">
-                            <a href={`/${locale}/video`} className="text-gray-300 hover:text-white transition-colors">
-                                Videos
-                            </a>
-                            <a href={`/${locale}/celebrity`} className="text-gray-300 hover:text-white transition-colors">
-                                Celebrities
-                            </a>
-                            <a href={`/${locale}/movie`} className="text-gray-300 hover:text-white transition-colors">
-                                Movies
-                            </a>
-                            <a href={`/${locale}/search`} className="text-gray-300 hover:text-white transition-colors">
-                                Search
-                            </a>
-                        </div>
-                    </nav>
-                </header>
-                <main>{children}</main>
-                <footer className="mt-auto border-t border-gray-800 py-8 text-center text-sm text-gray-500">
-                    <p>© {new Date().getFullYear()} CelebSkin. All rights reserved.</p>
-                </footer>
+        <html lang={locale} className="dark">
+            <head>
+                <link rel="preconnect" href="https://fonts.googleapis.com" />
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+                <link
+                    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+                    rel="stylesheet"
+                />
+            </head>
+            <body className="min-h-screen bg-brand-bg text-brand-text font-sans antialiased flex flex-col">
+                <Header locale={locale} />
+                <main className="flex-1">{children}</main>
+                <Footer locale={locale} />
             </body>
         </html>
     );
