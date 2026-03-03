@@ -4,6 +4,18 @@ import type { Video } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
 
+const STATUS_COLORS: Record<string, string> = {
+    new: 'bg-gray-700 text-gray-300',
+    processing: 'bg-blue-900/50 text-blue-300',
+    enriched: 'bg-purple-900/50 text-purple-400',
+    auto_recognized: 'bg-cyan-900/50 text-cyan-400',
+    watermarked: 'bg-indigo-900/50 text-indigo-400',
+    needs_review: 'bg-yellow-900/50 text-yellow-400',
+    published: 'bg-green-900/50 text-green-400',
+    rejected: 'bg-red-900/50 text-red-400',
+    dmca_removed: 'bg-red-900/80 text-red-300',
+};
+
 interface VideoRow extends Video {
     celebrity_names: string | null;
 }
@@ -63,7 +75,7 @@ export default async function AdminVideosPage({
                         href={`/admin/videos${s ? `?status=${s}` : ''}`}
                         className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${
                             status === s
-                                ? 'bg-red-600 text-white'
+                                ? 'bg-purple-600 text-white'
                                 : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                         }`}
                     >
@@ -105,14 +117,7 @@ export default async function AdminVideosPage({
                                     {video.celebrity_names || '—'}
                                 </td>
                                 <td className="p-3">
-                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                                        video.status === 'published' ? 'bg-green-900/50 text-green-400' :
-                                        video.status === 'needs_review' ? 'bg-yellow-900/50 text-yellow-400' :
-                                        video.status === 'rejected' ? 'bg-red-900/50 text-red-400' :
-                                        video.status === 'watermarked' ? 'bg-blue-900/50 text-blue-400' :
-                                        video.status === 'auto_recognized' ? 'bg-purple-900/50 text-purple-400' :
-                                        'bg-gray-800 text-gray-400'
-                                    }`}>
+                                    <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[video.status] || 'bg-gray-800 text-gray-400'}`}>
                                         {video.status}
                                     </span>
                                 </td>

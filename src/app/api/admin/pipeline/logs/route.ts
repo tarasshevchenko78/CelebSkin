@@ -16,7 +16,7 @@ export async function GET(request: NextRequest) {
     try {
         const { stdout } = await execAsync(
             `ssh ${SSH_OPTS} ${CONTABO_HOST} "tail -n ${lines} /opt/celebskin/scripts/logs/pipeline.log 2>/dev/null; echo '---'; ps aux | grep -E 'node.*(scrape|process-with-ai|enrich|watermark|generate-thumb|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{print \\$NF}' 2>/dev/null || echo 'none'"`,
-            { timeout: 15000 }
+            { timeout: 15000, env: { ...process.env, HOME: '/root', SSH_AUTH_SOCK: '' } }
         );
 
         const parts = stdout.split('---');
