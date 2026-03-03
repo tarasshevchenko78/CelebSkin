@@ -310,7 +310,7 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
 // ============================================
 
 async function enrichVideoWithRelations(video: Video): Promise<Video> {
-    const [celebResult, tagResult, movieResult] = await Promise.all([
+    const [celebResult, tagResult, movieResult, rawResult] = await Promise.all([
         pool.query(
             `SELECT c.* FROM celebrities c
        JOIN video_celebrities vc ON vc.celebrity_id = c.id
@@ -330,14 +330,31 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
        LIMIT 1`,
             [video.id]
         ),
+        video.raw_video_id
+            ? pool.query(
+                  `SELECT embed_code, video_file_url FROM raw_videos WHERE id = $1`,
+                  [video.raw_video_id]
+              )
+            : Promise.resolve({ rows: [] }),
     ]);
+
+    const raw = rawResult.rows[0] || null;
+
+    // Fallback: if no CDN video URL, use raw source video_file_url or embed_code
+    const videoUrl = video.video_url || video.video_url_watermarked
+        ? video.video_url
+        : raw?.video_file_url || null;
+    const videoUrlWatermarked = video.video_url_watermarked || null;
 
     return {
         ...video,
+        video_url: videoUrl,
+        video_url_watermarked: videoUrlWatermarked,
         celebrities: celebResult.rows,
         tags: tagResult.rows,
         movie: movieResult.rows[0] || null,
-    };
+        embed_code: raw?.embed_code || null,
+    } as Video;
 }
 
 // Get videos for a specific celebrity

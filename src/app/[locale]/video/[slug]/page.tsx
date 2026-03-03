@@ -75,12 +75,25 @@ export default async function VideoDetailPage({
 
     return (
         <div className="mx-auto max-w-6xl px-4 py-6">
-            {/* Video Player */}
-            <VideoPlayer
-                src={video.video_url_watermarked || video.video_url}
-                poster={video.thumbnail_url}
-                title={title}
-            />
+            {/* Video Player — CDN video, or source embed, or placeholder */}
+            {(video.video_url_watermarked || video.video_url) ? (
+                <VideoPlayer
+                    src={video.video_url_watermarked || video.video_url}
+                    poster={video.thumbnail_url}
+                    title={title}
+                />
+            ) : video.embed_code ? (
+                <div
+                    className="aspect-video w-full rounded-xl overflow-hidden bg-black [&_iframe]:w-full [&_iframe]:h-full"
+                    dangerouslySetInnerHTML={{ __html: video.embed_code }}
+                />
+            ) : (
+                <VideoPlayer
+                    src={null}
+                    poster={video.thumbnail_url}
+                    title={title}
+                />
+            )}
 
             {/* Title & Info */}
             <div className="mt-4">

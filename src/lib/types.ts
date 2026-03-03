@@ -56,6 +56,7 @@ export interface Video {
     tags?: Tag[];
     categories?: Category[];
     movie?: Movie | null;
+    embed_code?: string | null;
 }
 
 export interface Celebrity {

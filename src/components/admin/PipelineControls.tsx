@@ -92,6 +92,13 @@ export default function PipelineControls() {
         test: false,
         categories: [],
     });
+    const [cleanupData, setCleanupData] = useState<{
+        orphanedMoviesCount: number;
+        orphanedMovieCelebsCount: number;
+        orphanedMovies: Array<{ id: number; title: string; year: number | null; celeb_count: string }>;
+    } | null>(null);
+    const [cleanupLoading, setCleanupLoading] = useState(false);
+    const [showCleanup, setShowCleanup] = useState(false);
 
     const fetchStats = useCallback(async () => {
         try {
@@ -186,6 +193,48 @@ export default function PipelineControls() {
                 ? prev.categories.filter(c => c !== slug)
                 : [...prev.categories, slug],
         }));
+    };
+
+    const fetchCleanupPreview = async () => {
+        setCleanupLoading(true);
+        try {
+            const res = await fetch('/api/admin/cleanup');
+            if (res.ok) {
+                const data = await res.json();
+                setCleanupData(data);
+                setShowCleanup(true);
+            }
+        } catch (err) {
+            setMessage({ type: 'error', text: `Failed to analyze: ${err}` });
+        } finally {
+            setCleanupLoading(false);
+        }
+    };
+
+    const runCleanup = async (action: string) => {
+        if (!confirm(`Remove ${cleanupData?.orphanedMoviesCount || 0} orphaned movies and ${cleanupData?.orphanedMovieCelebsCount || 0} movie-celebrity links? This cannot be undone.`)) return;
+        setCleanupLoading(true);
+        setMessage(null);
+        try {
+            const res = await fetch('/api/admin/cleanup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setMessage({ type: 'success', text: `Cleaned: ${data.deletedMovies} movies, ${data.deletedMovieCelebs} movie-celebrity links removed` });
+                setCleanupData(null);
+                setShowCleanup(false);
+                fetchStats();
+            } else {
+                setMessage({ type: 'error', text: data.error });
+            }
+        } catch (err) {
+            setMessage({ type: 'error', text: `Cleanup failed: ${err}` });
+        } finally {
+            setCleanupLoading(false);
+        }
     };
 
     if (loading) {
@@ -443,6 +492,75 @@ export default function PipelineControls() {
                     </div>
                 </div>
             )}
+
+            {/* Database Cleanup */}
+            <div className="rounded-xl border border-orange-800/50 bg-orange-900/10 p-4">
+                <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-medium text-orange-400">Database Cleanup</h3>
+                    <button
+                        onClick={fetchCleanupPreview}
+                        disabled={cleanupLoading}
+                        className="px-3 py-1.5 text-xs rounded-lg bg-orange-800/30 text-orange-300 border border-orange-700/50 hover:bg-orange-800/50 disabled:opacity-50 transition-colors"
+                    >
+                        {cleanupLoading ? 'Analyzing...' : 'Analyze Orphaned Data'}
+                    </button>
+                </div>
+                <p className="text-xs text-gray-500 mb-3">
+                    Remove movies that have no video scenes linked (pulled from full filmography instead of specific video clips).
+                </p>
+
+                {showCleanup && cleanupData && (
+                    <div className="space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="rounded-lg bg-gray-900/50 border border-gray-800 p-3">
+                                <p className="text-xs text-gray-500">Orphaned Movies</p>
+                                <p className="text-lg font-bold text-orange-400">{cleanupData.orphanedMoviesCount}</p>
+                            </div>
+                            <div className="rounded-lg bg-gray-900/50 border border-gray-800 p-3">
+                                <p className="text-xs text-gray-500">Orphaned Movie-Celeb Links</p>
+                                <p className="text-lg font-bold text-orange-400">{cleanupData.orphanedMovieCelebsCount}</p>
+                            </div>
+                        </div>
+
+                        {cleanupData.orphanedMovies.length > 0 && (
+                            <div className="max-h-48 overflow-y-auto rounded-lg bg-gray-900/50 border border-gray-800">
+                                <table className="w-full text-xs">
+                                    <thead className="bg-gray-900/70 sticky top-0">
+                                        <tr>
+                                            <th className="text-left p-2 text-gray-500">Title</th>
+                                            <th className="text-left p-2 text-gray-500">Year</th>
+                                            <th className="text-left p-2 text-gray-500">Celebs</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-gray-800/50">
+                                        {cleanupData.orphanedMovies.map((m) => (
+                                            <tr key={m.id} className="text-gray-400">
+                                                <td className="p-2 truncate max-w-[200px]">{m.title}</td>
+                                                <td className="p-2">{m.year || '—'}</td>
+                                                <td className="p-2">{m.celeb_count}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        )}
+
+                        {cleanupData.orphanedMoviesCount > 0 && (
+                            <button
+                                onClick={() => runCleanup('remove-orphaned-movies')}
+                                disabled={cleanupLoading}
+                                className="w-full px-4 py-2.5 text-sm rounded-lg bg-red-700 text-white font-medium hover:bg-red-600 disabled:opacity-50 transition-colors"
+                            >
+                                {cleanupLoading ? 'Cleaning...' : `Remove ${cleanupData.orphanedMoviesCount} Orphaned Movies`}
+                            </button>
+                        )}
+
+                        {cleanupData.orphanedMoviesCount === 0 && (
+                            <p className="text-xs text-green-400 text-center py-2">No orphaned movies found. Database is clean.</p>
+                        )}
+                    </div>
+                )}
+            </div>
         </div>
     );
 }

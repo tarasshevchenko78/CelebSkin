@@ -1,0 +1,429 @@
+#!/usr/bin/env node
+/**
+ * enrich-metadata.js — TMDB Enrichment for CelebSkin
+ *
+ * IMPORTANT: This script enriches ONLY the specific movie from each video's
+ * AI response — NOT the full filmography of celebrities.
+ *
+ * Logic:
+ * 1. For each video with AI data (ai_raw_response):
+ *    a. Extract movie_title from AI response
+ *    b. Search TMDB for that specific movie
+ *    c. Create/update movie record with poster, description, year
+ *    d. Link video → movie via movie_scenes
+ *    e. Link movie → celebrity via movie_celebrities (only for celebrities in THIS video)
+ * 2. For each celebrity without TMDB data:
+ *    a. Search TMDB for celebrity by name
+ *    b. Fetch photo, bio, birth_date, nationality
+ *    c. DO NOT fetch filmography — we only care about movies linked to our videos
+ *
+ * Usage: node enrich-metadata.js [--limit=N] [--force]
+ *
+ * Deploy: copy to /opt/celebskin/scripts/ on Contabo
+ */
+
+const { Pool } = require('pg');
+const https = require('https');
+
+// ============================================
+// Config
+// ============================================
+const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p';
+
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+});
+
+// Parse CLI args
+const args = process.argv.slice(2);
+const LIMIT = parseInt(args.find(a => a.startsWith('--limit='))?.split('=')[1] || '50');
+const FORCE = args.includes('--force');
+
+// ============================================
+// TMDB API helper
+// ============================================
+function tmdbFetch(path) {
+    const sep = path.includes('?') ? '&' : '?';
+    const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_API_KEY}`;
+
+    return new Promise((resolve, reject) => {
+        https.get(url, (res) => {
+            let data = '';
+            res.on('data', chunk => data += chunk);
+            res.on('end', () => {
+                try {
+                    resolve(JSON.parse(data));
+                } catch (e) {
+                    reject(new Error(`TMDB parse error: ${data.slice(0, 200)}`));
+                }
+            });
+        }).on('error', reject);
+    });
+}
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function slugify(text) {
+    return text
+        .toLowerCase()
+        .replace(/[^\w\s-]/g, '')
+        .replace(/[\s_]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 200);
+}
+
+// ============================================
+// Movie enrichment — search TMDB for specific movie title
+// ============================================
+async function findOrCreateMovie(movieTitle, year) {
+    if (!movieTitle || movieTitle.trim().length < 2) return null;
+
+    const cleanTitle = movieTitle.trim();
+
+    // Check if movie already exists in DB (fuzzy match)
+    const existing = await pool.query(
+        `SELECT * FROM movies WHERE
+            LOWER(title) = LOWER($1)
+            OR similarity(title, $1) > 0.6
+         ORDER BY similarity(title, $1) DESC
+         LIMIT 1`,
+        [cleanTitle]
+    );
+
+    if (existing.rows.length > 0 && !FORCE) {
+        console.log(`  Movie already exists: "${existing.rows[0].title}" (id=${existing.rows[0].id})`);
+        return existing.rows[0];
+    }
+
+    // Search TMDB
+    const searchQuery = encodeURIComponent(cleanTitle);
+    const yearParam = year ? `&year=${year}` : '';
+    const searchResult = await tmdbFetch(`/search/movie?query=${searchQuery}${yearParam}&language=en-US`);
+
+    if (!searchResult.results || searchResult.results.length === 0) {
+        // Try TV shows too
+        const tvResult = await tmdbFetch(`/search/tv?query=${searchQuery}&language=en-US`);
+        if (!tvResult.results || tvResult.results.length === 0) {
+            console.log(`  TMDB: no results for "${cleanTitle}"`);
+            return null;
+        }
+        // Use first TV result
+        return await enrichMovieFromTmdb(tvResult.results[0], 'tv', existing.rows[0] || null);
+    }
+
+    return await enrichMovieFromTmdb(searchResult.results[0], 'movie', existing.rows[0] || null);
+}
+
+async function enrichMovieFromTmdb(tmdbResult, type, existingMovie) {
+    const tmdbId = tmdbResult.id;
+    const title = tmdbResult.title || tmdbResult.name || '';
+    const year = (tmdbResult.release_date || tmdbResult.first_air_date || '').slice(0, 4) || null;
+    const posterPath = tmdbResult.poster_path;
+    const posterUrl = posterPath ? `${TMDB_IMG_BASE}/w500${posterPath}` : null;
+    const overview = tmdbResult.overview || '';
+
+    // Fetch detailed info for genres, director, studio
+    let director = null;
+    let studio = null;
+    let genres = [];
+
+    try {
+        const details = await tmdbFetch(`/${type}/${tmdbId}?append_to_response=credits&language=en-US`);
+        genres = (details.genres || []).map(g => g.name);
+        studio = (details.production_companies || [])[0]?.name || null;
+
+        if (type === 'movie' && details.credits?.crew) {
+            const dir = details.credits.crew.find(c => c.job === 'Director');
+            director = dir?.name || null;
+        }
+    } catch (err) {
+        console.log(`  TMDB details fetch failed: ${err.message}`);
+    }
+
+    // Build localized description
+    const description = { en: overview };
+    // Fetch descriptions in other languages
+    const locales = ['de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'cs', 'ro'];
+    for (const locale of locales) {
+        try {
+            await sleep(100); // Rate limiting
+            const localized = await tmdbFetch(`/${type}/${tmdbId}?language=${locale}`);
+            if (localized.overview) {
+                description[locale] = localized.overview;
+            }
+        } catch {
+            // Skip failed locale
+        }
+    }
+
+    // Build localized title
+    const titleLocalized = { en: title };
+    // Title translations usually come from alternative_titles endpoint but overview fetch already gives us the localized title
+    // For simplicity, keep English title for all locales (TMDB title translations are unreliable)
+
+    const slug = slugify(title + (year ? `-${year}` : ''));
+
+    if (existingMovie) {
+        // Update existing
+        await pool.query(
+            `UPDATE movies SET
+                tmdb_id = COALESCE($1, tmdb_id),
+                poster_url = COALESCE($2, poster_url),
+                description = COALESCE($3::jsonb, description),
+                year = COALESCE($4, year),
+                director = COALESCE($5, director),
+                studio = COALESCE($6, studio),
+                genres = COALESCE($7, genres),
+                title_localized = COALESCE($8::jsonb, title_localized),
+                updated_at = NOW()
+             WHERE id = $9`,
+            [tmdbId, posterUrl, JSON.stringify(description), year ? parseInt(year) : null,
+             director, studio, genres, JSON.stringify(titleLocalized), existingMovie.id]
+        );
+        console.log(`  Updated movie: "${title}" (id=${existingMovie.id})`);
+        return { ...existingMovie, tmdb_id: tmdbId };
+    } else {
+        // Create new movie
+        const result = await pool.query(
+            `INSERT INTO movies (title, title_localized, slug, year, poster_url, description, studio, director, genres, tmdb_id, ai_matched)
+             VALUES ($1, $2::jsonb, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, true)
+             ON CONFLICT (slug) DO UPDATE SET
+                tmdb_id = COALESCE(EXCLUDED.tmdb_id, movies.tmdb_id),
+                poster_url = COALESCE(EXCLUDED.poster_url, movies.poster_url),
+                description = COALESCE(EXCLUDED.description, movies.description),
+                year = COALESCE(EXCLUDED.year, movies.year),
+                director = COALESCE(EXCLUDED.director, movies.director),
+                studio = COALESCE(EXCLUDED.studio, movies.studio),
+                genres = COALESCE(EXCLUDED.genres, movies.genres)
+             RETURNING *`,
+            [title, JSON.stringify(titleLocalized), slug, year ? parseInt(year) : null,
+             posterUrl, JSON.stringify(description), studio, director, genres, tmdbId]
+        );
+        console.log(`  Created movie: "${title}" (id=${result.rows[0].id})`);
+        return result.rows[0];
+    }
+}
+
+// ============================================
+// Celebrity enrichment — TMDB profile only, NO filmography
+// ============================================
+async function enrichCelebrity(celebrity) {
+    if (celebrity.tmdb_id && !FORCE) {
+        console.log(`  Celebrity already enriched: "${celebrity.name}" (tmdb_id=${celebrity.tmdb_id})`);
+        return;
+    }
+
+    // Search TMDB for person
+    const searchQuery = encodeURIComponent(celebrity.name);
+    const searchResult = await tmdbFetch(`/search/person?query=${searchQuery}&language=en-US`);
+
+    if (!searchResult.results || searchResult.results.length === 0) {
+        console.log(`  TMDB: no person results for "${celebrity.name}"`);
+        return;
+    }
+
+    const person = searchResult.results[0];
+    const tmdbId = person.id;
+
+    // Fetch full person details
+    let details;
+    try {
+        details = await tmdbFetch(`/person/${tmdbId}?language=en-US`);
+    } catch (err) {
+        console.log(`  TMDB person details failed: ${err.message}`);
+        return;
+    }
+
+    const photoPath = details.profile_path;
+    const photoUrl = photoPath ? `${TMDB_IMG_BASE}/w500${photoPath}` : null;
+    const bio = { en: details.biography || '' };
+
+    // Fetch localized bios
+    const locales = ['de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'cs', 'ro'];
+    for (const locale of locales) {
+        try {
+            await sleep(100);
+            const localized = await tmdbFetch(`/person/${tmdbId}?language=${locale}`);
+            if (localized.biography) {
+                bio[locale] = localized.biography;
+            }
+        } catch {
+            // Skip
+        }
+    }
+
+    const birthDate = details.birthday || null;
+    const nationality = details.place_of_birth || null;
+    const imdbId = details.imdb_id || null;
+    const aliases = details.also_known_as || [];
+
+    await pool.query(
+        `UPDATE celebrities SET
+            tmdb_id = $1,
+            photo_url = COALESCE($2, photo_url),
+            bio = COALESCE($3::jsonb, bio),
+            birth_date = COALESCE($4, birth_date),
+            nationality = COALESCE($5, nationality),
+            imdb_id = COALESCE($6, imdb_id),
+            aliases = COALESCE($7, aliases),
+            external_ids = jsonb_set(COALESCE(external_ids, '{}'::jsonb), '{tmdb_id}', $8::jsonb),
+            updated_at = NOW()
+         WHERE id = $9`,
+        [tmdbId, photoUrl, JSON.stringify(bio), birthDate, nationality, imdbId,
+         aliases.length > 0 ? aliases : null,
+         JSON.stringify(tmdbId), celebrity.id]
+    );
+
+    console.log(`  Enriched celebrity: "${celebrity.name}" (tmdb_id=${tmdbId})`);
+
+    // NOTE: We do NOT fetch filmography here.
+    // Movies are only linked when they appear in video titles processed by AI.
+}
+
+// ============================================
+// Main: process videos and link specific movies
+// ============================================
+async function main() {
+    if (!TMDB_API_KEY) {
+        console.error('ERROR: TMDB_API_KEY environment variable is required');
+        process.exit(1);
+    }
+
+    console.log(`\n=== CelebSkin TMDB Enrichment ===`);
+    console.log(`Mode: Single-movie per video (no full filmography)`);
+    console.log(`Limit: ${LIMIT}, Force: ${FORCE}\n`);
+
+    // Step 1: Enrich videos that have AI data with movie info
+    console.log('--- Step 1: Link movies from AI responses ---');
+
+    const videosResult = await pool.query(`
+        SELECT v.id, v.ai_raw_response, v.original_title
+        FROM videos v
+        WHERE v.ai_raw_response IS NOT NULL
+          AND v.status NOT IN ('rejected', 'dmca_removed')
+          ${FORCE ? '' : `AND NOT EXISTS (SELECT 1 FROM movie_scenes ms WHERE ms.video_id = v.id)`}
+        ORDER BY v.created_at DESC
+        LIMIT $1
+    `, [LIMIT]);
+
+    console.log(`Found ${videosResult.rows.length} videos to process\n`);
+
+    let moviesLinked = 0;
+    let moviesCreated = 0;
+    let celebsEnriched = 0;
+
+    for (const video of videosResult.rows) {
+        const aiData = video.ai_raw_response;
+        // AI response may have movie_title, movie_name, or movie field
+        const movieTitle = aiData?.movie_title || aiData?.movie_name || aiData?.movie || null;
+
+        if (!movieTitle) {
+            console.log(`[${video.id.slice(0, 8)}] No movie title in AI response, skipping`);
+            continue;
+        }
+
+        const movieYear = aiData?.movie_year || aiData?.year || null;
+        console.log(`[${video.id.slice(0, 8)}] Processing movie: "${movieTitle}" (${movieYear || '?'})`);
+
+        try {
+            const movie = await findOrCreateMovie(movieTitle, movieYear);
+
+            if (movie) {
+                // Link video → movie via movie_scenes
+                await pool.query(
+                    `INSERT INTO movie_scenes (movie_id, video_id, scene_number)
+                     VALUES ($1, $2, 1)
+                     ON CONFLICT (movie_id, video_id) DO NOTHING`,
+                    [movie.id, video.id]
+                );
+                moviesLinked++;
+
+                // Update scenes_count
+                await pool.query(
+                    `UPDATE movies SET scenes_count = (
+                        SELECT COUNT(*) FROM movie_scenes WHERE movie_id = $1
+                    ) WHERE id = $1`,
+                    [movie.id]
+                );
+
+                // Link celebrities from this video to the movie
+                const celebs = await pool.query(
+                    `SELECT c.id, c.name FROM celebrities c
+                     JOIN video_celebrities vc ON vc.celebrity_id = c.id
+                     WHERE vc.video_id = $1`,
+                    [video.id]
+                );
+
+                for (const celeb of celebs.rows) {
+                    await pool.query(
+                        `INSERT INTO movie_celebrities (movie_id, celebrity_id)
+                         VALUES ($1, $2)
+                         ON CONFLICT (movie_id, celebrity_id) DO NOTHING`,
+                        [movie.id, celeb.id]
+                    );
+                }
+            }
+
+            await sleep(300); // TMDB rate limit: ~40 req/10s
+        } catch (err) {
+            console.error(`  ERROR processing movie "${movieTitle}": ${err.message}`);
+        }
+    }
+
+    // Step 2: Enrich celebrities without TMDB data
+    console.log('\n--- Step 2: Enrich celebrities (profile only, no filmography) ---');
+
+    const celebsResult = await pool.query(`
+        SELECT * FROM celebrities
+        WHERE ${FORCE ? 'TRUE' : 'tmdb_id IS NULL'}
+          AND videos_count > 0
+        ORDER BY videos_count DESC
+        LIMIT $1
+    `, [LIMIT]);
+
+    console.log(`Found ${celebsResult.rows.length} celebrities to enrich\n`);
+
+    for (const celeb of celebsResult.rows) {
+        try {
+            await enrichCelebrity(celeb);
+            celebsEnriched++;
+            await sleep(300);
+        } catch (err) {
+            console.error(`  ERROR enriching "${celeb.name}": ${err.message}`);
+        }
+    }
+
+    // Summary
+    console.log('\n=== Enrichment Complete ===');
+    console.log(`Movies linked: ${moviesLinked}`);
+    console.log(`Celebrities enriched: ${celebsEnriched}`);
+
+    // Log to processing_log
+    await pool.query(
+        `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
+        [
+            'tmdb-enrich',
+            'completed',
+            JSON.stringify({
+                moviesLinked,
+                moviesCreated,
+                celebsEnriched,
+                videosProcessed: videosResult.rows.length,
+                celebsProcessed: celebsResult.rows.length,
+                completedAt: new Date().toISOString(),
+            }),
+        ]
+    );
+
+    await pool.end();
+    console.log('Done.\n');
+}
+
+main().catch(err => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+});
