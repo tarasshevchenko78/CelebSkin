@@ -98,7 +98,9 @@ export async function PUT(
         addField('video_url', video_url);
         addField('video_url_watermarked', video_url_watermarked);
 
-        if (updates.length === 0) {
+        const hasTagUpdate = Array.isArray(body.tags);
+
+        if (updates.length === 0 && !hasTagUpdate) {
             return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
         }
 
@@ -107,19 +109,38 @@ export async function PUT(
             updates.push(`published_at = COALESCE(published_at, NOW())`);
         }
 
-        updates.push(`updated_at = NOW()`);
-        values.push(id);
-
-        const result = await pool.query(
-            `UPDATE videos SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
-            values
-        );
-
-        if (result.rows.length === 0) {
-            return NextResponse.json({ error: 'Video not found' }, { status: 404 });
+        let result;
+        if (updates.length > 0) {
+            updates.push(`updated_at = NOW()`);
+            values.push(id);
+            result = await pool.query(
+                `UPDATE videos SET ${updates.join(', ')} WHERE id = $${idx} RETURNING *`,
+                values
+            );
+            if (result.rows.length === 0) {
+                return NextResponse.json({ error: 'Video not found' }, { status: 404 });
+            }
         }
 
-        return NextResponse.json(result.rows[0]);
+        // Handle tags update
+        if (hasTagUpdate) {
+            const tagIds: number[] = body.tags;
+            await pool.query('DELETE FROM video_tags WHERE video_id = $1', [id]);
+            if (tagIds.length > 0) {
+                const tagValues = tagIds.map((tagId, i) => `($1, $${i + 2})`).join(', ');
+                await pool.query(
+                    `INSERT INTO video_tags (video_id, tag_id) VALUES ${tagValues}`,
+                    [id, ...tagIds]
+                );
+            }
+        }
+
+        if (result) {
+            return NextResponse.json(result.rows[0]);
+        }
+        // If only tags were updated, fetch and return the video
+        const videoResult = await pool.query('SELECT * FROM videos WHERE id = $1', [id]);
+        return NextResponse.json(videoResult.rows[0]);
     } catch (error) {
         console.error('[API AdminVideo PUT] error:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });

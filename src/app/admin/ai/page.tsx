@@ -150,6 +150,16 @@ export default async function AdminAiPage() {
                         <span className="text-xs text-gray-500">— better quality, higher cost</span>
                     </div>
                     <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-emerald-400" />
+                        <span className="text-sm text-gray-300">Gemini 3.0 Flash</span>
+                        <span className="text-xs text-gray-500">— next-gen fast, low cost</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 rounded-full bg-indigo-400" />
+                        <span className="text-sm text-gray-300">Gemini 3.0 Pro</span>
+                        <span className="text-xs text-gray-500">— next-gen quality, higher cost</span>
+                    </div>
+                    <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-yellow-400" />
                         <span className="text-sm text-gray-300">TMDB API</span>
                         <span className="text-xs text-gray-500">— celebrity photos, movie posters, bios</span>

@@ -56,6 +56,9 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
     const [bio, setBio] = useState<LocalizedField>({});
     const [photoUrl, setPhotoUrl] = useState('');
     const [isFeatured, setIsFeatured] = useState(false);
+    const [photoImgError, setPhotoImgError] = useState(false);
+    const [vidThumbErrors, setVidThumbErrors] = useState<Set<string>>(new Set());
+    const [moviePosterErrors, setMoviePosterErrors] = useState<Set<number>>(new Set());
 
     const fetchData = useCallback(async () => {
         try {
@@ -69,6 +72,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
             setNameLocalized(data.celebrity.name_localized || {});
             setBio(data.celebrity.bio || {});
             setPhotoUrl(data.celebrity.photo_url || '');
+            setPhotoImgError(false);
             setIsFeatured(data.celebrity.is_featured);
         } catch {
             setMessage({ type: 'error', text: 'Failed to load celebrity' });
@@ -121,8 +125,9 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
             {/* Photo + Metadata */}
             <div className="grid grid-cols-1 lg:grid-cols-[200px_1fr] gap-6">
                 <div className="space-y-3">
-                    {photoUrl ? (
-                        <img src={photoUrl} alt={celebrity.name} className="w-40 h-40 rounded-full object-cover mx-auto border-2 border-gray-700" />
+                    {photoUrl && !photoImgError ? (
+                        <img src={photoUrl} alt={celebrity.name} className="w-40 h-40 rounded-full object-cover mx-auto border-2 border-gray-700"
+                            onError={() => setPhotoImgError(true)} />
                     ) : (
                         <div className="w-40 h-40 rounded-full bg-gray-800 mx-auto flex items-center justify-center text-3xl text-gray-500 border-2 border-gray-700">
                             {celebrity.name.charAt(0)}
@@ -185,8 +190,9 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                             <a key={v.id} href={`/admin/videos/${v.id}`}
                                 className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 transition-colors">
                                 <div className="w-16 aspect-video rounded overflow-hidden bg-gray-800 shrink-0">
-                                    {v.thumbnail_url ? (
-                                        <img src={v.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                                    {v.thumbnail_url && !vidThumbErrors.has(v.id) ? (
+                                        <img src={v.thumbnail_url} alt="" className="w-full h-full object-cover"
+                                            onError={() => setVidThumbErrors(prev => new Set(prev).add(v.id))} />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">?</div>
                                     )}
@@ -219,8 +225,9 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                         {movies.map((m) => (
                             <a key={m.id} href={`/admin/movies/${m.id}`}
                                 className="rounded-lg border border-gray-700 overflow-hidden hover:border-purple-600 transition-colors">
-                                {m.poster_url ? (
-                                    <img src={m.poster_url} alt="" className="w-full aspect-[2/3] object-cover" />
+                                {m.poster_url && !moviePosterErrors.has(m.id) ? (
+                                    <img src={m.poster_url} alt="" className="w-full aspect-[2/3] object-cover"
+                                        onError={() => setMoviePosterErrors(prev => new Set(prev).add(m.id))} />
                                 ) : (
                                     <div className="w-full aspect-[2/3] bg-gray-800 flex items-center justify-center text-gray-600 text-xs">No poster</div>
                                 )}

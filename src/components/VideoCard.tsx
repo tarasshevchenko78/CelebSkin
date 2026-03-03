@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import type { Video } from '@/lib/types';
 import { getLocalizedField, getLocalizedSlug } from '@/lib/i18n';
 
@@ -14,6 +17,7 @@ interface VideoCardProps {
 }
 
 export default function VideoCard({ video, locale, size = 'md' }: VideoCardProps) {
+    const [imgError, setImgError] = useState(false);
     const title = getLocalizedField(video.title, locale);
     const slug = getLocalizedSlug(video.slug, locale);
     const celebrity = video.celebrities?.[0];
@@ -31,11 +35,12 @@ export default function VideoCard({ video, locale, size = 'md' }: VideoCardProps
         >
             {/* Thumbnail */}
             <div className="relative aspect-video bg-brand-card overflow-hidden rounded-lg">
-                {video.thumbnail_url ? (
+                {video.thumbnail_url && !imgError ? (
                     <img
                         src={video.thumbnail_url}
                         alt={title}
                         loading="lazy"
+                        onError={() => setImgError(true)}
                         className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
                     />
                 ) : (

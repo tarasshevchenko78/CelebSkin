@@ -56,6 +56,9 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
     const [posterUrl, setPosterUrl] = useState('');
     const [studio, setStudio] = useState('');
     const [director, setDirector] = useState('');
+    const [posterImgError, setPosterImgError] = useState(false);
+    const [sceneThumbErrors, setSceneThumbErrors] = useState<Set<string>>(new Set());
+    const [castPhotoErrors, setCastPhotoErrors] = useState<Set<number>>(new Set());
 
     const fetchData = useCallback(async () => {
         try {
@@ -70,6 +73,7 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
             setDescription(data.movie.description || {});
             setYear(data.movie.year?.toString() || '');
             setPosterUrl(data.movie.poster_url || '');
+            setPosterImgError(false);
             setStudio(data.movie.studio || '');
             setDirector(data.movie.director || '');
         } catch {
@@ -129,8 +133,9 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
             {/* Poster + Metadata */}
             <div className="grid grid-cols-1 lg:grid-cols-[180px_1fr] gap-6">
                 <div className="space-y-3">
-                    {posterUrl ? (
-                        <img src={posterUrl} alt="" className="w-full aspect-[2/3] rounded-lg object-cover border border-gray-700" />
+                    {posterUrl && !posterImgError ? (
+                        <img src={posterUrl} alt="" className="w-full aspect-[2/3] rounded-lg object-cover border border-gray-700"
+                            onError={() => setPosterImgError(true)} />
                     ) : (
                         <div className="w-full aspect-[2/3] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 border border-gray-700">No poster</div>
                     )}
@@ -194,8 +199,9 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                                 className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-800 transition-colors">
                                 <span className="text-xs text-gray-500 w-6 text-center shrink-0">#{s.scene_number || '—'}</span>
                                 <div className="w-16 aspect-video rounded overflow-hidden bg-gray-800 shrink-0">
-                                    {s.thumbnail_url ? (
-                                        <img src={s.thumbnail_url} alt="" className="w-full h-full object-cover" />
+                                    {s.thumbnail_url && !sceneThumbErrors.has(s.id) ? (
+                                        <img src={s.thumbnail_url} alt="" className="w-full h-full object-cover"
+                                            onError={() => setSceneThumbErrors(prev => new Set(prev).add(s.id))} />
                                     ) : (
                                         <div className="w-full h-full flex items-center justify-center text-gray-600 text-xs">?</div>
                                     )}
@@ -221,8 +227,9 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                         {cast.map((c) => (
                             <a key={c.id} href={`/admin/celebrities/${c.id}`}
                                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-purple-600 transition-colors">
-                                {c.photo_url ? (
-                                    <img src={c.photo_url} alt="" className="w-6 h-6 rounded-full object-cover" />
+                                {c.photo_url && !castPhotoErrors.has(c.id) ? (
+                                    <img src={c.photo_url} alt="" className="w-6 h-6 rounded-full object-cover"
+                                        onError={() => setCastPhotoErrors(prev => new Set(prev).add(c.id))} />
                                 ) : (
                                     <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-[10px] text-gray-400">{c.name.charAt(0)}</div>
                                 )}

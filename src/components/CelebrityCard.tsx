@@ -1,3 +1,6 @@
+'use client';
+
+import { useState } from 'react';
 import type { Celebrity } from '@/lib/types';
 import { getLocalizedField } from '@/lib/i18n';
 
@@ -16,6 +19,7 @@ function getInitials(name: string): string {
 }
 
 export default function CelebrityCard({ celebrity, locale }: CelebrityCardProps) {
+    const [imgError, setImgError] = useState(false);
     const name = getLocalizedField(celebrity.name_localized, locale) || celebrity.name;
 
     return (
@@ -25,11 +29,12 @@ export default function CelebrityCard({ celebrity, locale }: CelebrityCardProps)
         >
             {/* Photo */}
             <div className="relative w-20 h-20 sm:w-24 sm:h-24 rounded-full overflow-hidden border-2 border-brand-border group-hover:border-brand-accent transition-colors duration-300">
-                {celebrity.photo_url ? (
+                {celebrity.photo_url && !imgError ? (
                     <img
                         src={celebrity.photo_url}
                         alt={name}
                         loading="lazy"
+                        onError={() => setImgError(true)}
                         className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
                     />
                 ) : (

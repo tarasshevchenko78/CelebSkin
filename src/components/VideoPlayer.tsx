@@ -26,6 +26,7 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
     const [muted, setMuted] = useState(false);
     const [showControls, setShowControls] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const [videoError, setVideoError] = useState(false);
     const hideTimeout = useRef<NodeJS.Timeout | null>(null);
 
     const togglePlay = useCallback(() => {
@@ -148,14 +149,26 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
             onMouseMove={resetHideTimer}
             onMouseLeave={() => playing && setShowControls(false)}
         >
+            {videoError ? (
+                <div className="w-full h-full flex flex-col items-center justify-center bg-gray-900">
+                    <svg className="w-12 h-12 text-gray-600 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <p className="text-gray-500 text-sm">Video unavailable</p>
+                </div>
+            ) : (
             <video
                 ref={videoRef}
                 src={src}
                 poster={poster || undefined}
+                crossOrigin="anonymous"
+                preload="metadata"
                 className="w-full h-full object-contain"
                 onClick={togglePlay}
+                onError={() => setVideoError(true)}
                 playsInline
             />
+            )}
 
             {/* Center play/pause overlay */}
             {!playing && (

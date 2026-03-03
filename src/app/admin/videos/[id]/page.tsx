@@ -80,12 +80,16 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
     const router = useRouter();
     const [video, setVideo] = useState<VideoData | null>(null);
     const [celebrities, setCelebrities] = useState<CelebrityRef[]>([]);
-    const [tags, setTags] = useState<TagRef[]>([]);
     const [movie, setMovie] = useState<MovieRef | null>(null);
     const [rawVideo, setRawVideo] = useState<RawVideoData | null>(null);
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+    const [editedTags, setEditedTags] = useState<TagRef[]>([]);
+    const [allTags, setAllTags] = useState<TagRef[]>([]);
+    const [showTagDropdown, setShowTagDropdown] = useState(false);
+    const [celebImgErrors, setCelebImgErrors] = useState<Set<number>>(new Set());
+    const [movieImgError, setMovieImgError] = useState(false);
 
     // Editable fields
     const [title, setTitle] = useState<LocalizedField>({});
@@ -101,7 +105,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             const data = await res.json();
             setVideo(data.video);
             setCelebrities(data.celebrities);
-            setTags(data.tags);
+            setEditedTags(data.tags);
             setMovie(data.movie);
             setRawVideo(data.rawVideo);
             setTitle(data.video.title || {});
@@ -119,11 +123,18 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
 
     useEffect(() => { fetchData(); }, [fetchData]);
 
+    useEffect(() => {
+        fetch('/api/admin/tags')
+            .then(r => r.ok ? r.json() : [])
+            .then(setAllTags)
+            .catch(() => {});
+    }, []);
+
     const save = async (overrides?: Record<string, unknown>) => {
         setSaving(true);
         setMessage(null);
         try {
-            const body = { title, review, seo_title: seoTitle, seo_description: seoDesc, status, ...overrides };
+            const body = { title, review, seo_title: seoTitle, seo_description: seoDesc, status, tags: editedTags.map(t => t.id), ...overrides };
             const res = await fetch(`/api/admin/videos/${params.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
@@ -314,8 +325,9 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                         {celebrities.map((c) => (
                             <a key={c.id} href={`/admin/celebrities/${c.id}`}
                                 className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-800 border border-gray-700 hover:border-purple-600 transition-colors">
-                                {c.photo_url ? (
-                                    <img src={c.photo_url} alt="" className="w-6 h-6 rounded-full object-cover" />
+                                {c.photo_url && !celebImgErrors.has(c.id) ? (
+                                    <img src={c.photo_url} alt="" className="w-6 h-6 rounded-full object-cover"
+                                        onError={() => setCelebImgErrors(prev => new Set(prev).add(c.id))} />
                                 ) : (
                                     <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-[10px] text-gray-400">
                                         {c.name.charAt(0)}
@@ -333,8 +345,9 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                     <h3 className="text-sm font-medium text-gray-300 mb-3">Movie</h3>
                     <a href={`/admin/movies/${movie.id}`}
                         className="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 hover:border-purple-600 transition-colors w-fit">
-                        {movie.poster_url ? (
-                            <img src={movie.poster_url} alt="" className="w-8 h-12 rounded object-cover" />
+                        {movie.poster_url && !movieImgError ? (
+                            <img src={movie.poster_url} alt="" className="w-8 h-12 rounded object-cover"
+                                onError={() => setMovieImgError(true)} />
                         ) : (
                             <div className="w-8 h-12 rounded bg-gray-700 flex items-center justify-center text-xs text-gray-500">?</div>
                         )}
@@ -346,18 +359,47 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                 </div>
             )}
 
-            {tags.length > 0 && (
-                <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Tags</h3>
-                    <div className="flex flex-wrap gap-2">
-                        {tags.map((t) => (
-                            <span key={t.id} className="text-xs px-2.5 py-1 rounded-full bg-gray-800 border border-gray-700 text-gray-300">
-                                {typeof t.name === 'string' ? t.name : getLocalizedField(t.name_localized, 'en')}
-                            </span>
-                        ))}
-                    </div>
+            <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+                <h3 className="text-sm font-medium text-gray-300 mb-3">Tags</h3>
+                <div className="flex flex-wrap gap-2 mb-3">
+                    {editedTags.map((t) => (
+                        <span key={t.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-900/30 text-blue-300 border border-blue-800/50">
+                            {typeof t.name === 'string' ? t.name : getLocalizedField(t.name_localized, 'en')}
+                            <button onClick={() => setEditedTags(editedTags.filter(x => x.id !== t.id))}
+                                className="ml-1 text-blue-500 hover:text-blue-300">&times;</button>
+                        </span>
+                    ))}
+                    {editedTags.length === 0 && <span className="text-xs text-gray-600">No tags</span>}
                 </div>
-            )}
+                <div className="relative">
+                    <button
+                        onClick={() => setShowTagDropdown(!showTagDropdown)}
+                        className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 border border-gray-700"
+                    >
+                        + Add tag
+                    </button>
+                    {showTagDropdown && (
+                        <div className="absolute z-10 top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg max-h-48 overflow-y-auto min-w-[200px] shadow-xl">
+                            {allTags
+                                .filter(t => !editedTags.find(et => et.id === t.id))
+                                .map(t => (
+                                    <button key={t.id}
+                                        onClick={() => {
+                                            setEditedTags([...editedTags, t]);
+                                            setShowTagDropdown(false);
+                                        }}
+                                        className="w-full text-left px-3 py-2 text-xs text-gray-200 hover:bg-gray-700"
+                                    >
+                                        {typeof t.name === 'string' ? t.name : getLocalizedField(t.name_localized, 'en')}
+                                    </button>
+                                ))}
+                            {allTags.filter(t => !editedTags.find(et => et.id === t.id)).length === 0 && (
+                                <div className="px-3 py-2 text-xs text-gray-500">No more tags available</div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            </div>
 
             {/* Raw video data */}
             {rawVideo && (
