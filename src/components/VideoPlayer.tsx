@@ -161,7 +161,6 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
                 ref={videoRef}
                 src={src}
                 poster={poster || undefined}
-                crossOrigin="anonymous"
                 preload="metadata"
                 className="w-full h-full object-contain"
                 onClick={togglePlay}

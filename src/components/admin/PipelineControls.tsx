@@ -2,6 +2,31 @@
 
 import { useState, useEffect, useCallback } from 'react';
 
+interface VideoProgressData {
+    step: string;
+    stepLabel: string;
+    videosTotal: number;
+    videosDone: number;
+    currentVideo?: {
+        id: string;
+        title: string;
+        subStep?: string;
+        pct?: number;
+    } | null;
+    completedVideos?: Array<{
+        id: string;
+        title: string;
+        status: string;
+        ms?: number;
+    }>;
+    errors?: Array<{
+        id: string;
+        title: string;
+        error: string;
+    }>;
+    updatedAt: string;
+}
+
 interface PipelineStats {
     raw: {
         total: string;
@@ -32,6 +57,7 @@ interface PipelineStats {
         created_at: string;
     }>;
     runningProcesses: string[];
+    videoProgress: VideoProgressData | null;
     progress: Array<{
         step: string;
         metadata: Record<string, unknown>;
@@ -128,11 +154,13 @@ export default function PipelineControls() {
         }
     }, []);
 
+    const isActive = (stats?.runningProcesses?.length ?? 0) > 0 || stats?.videoProgress != null;
+
     useEffect(() => {
         fetchStats();
-        const interval = setInterval(fetchStats, 10000);
+        const interval = setInterval(fetchStats, isActive ? 5000 : 10000);
         return () => clearInterval(interval);
-    }, [fetchStats]);
+    }, [fetchStats, isActive]);
 
     useEffect(() => {
         if (showLogs) {
@@ -304,8 +332,13 @@ export default function PipelineControls() {
                 </div>
             )}
 
-            {/* Progress Bars for Running Steps */}
-            {stats?.progress && stats.progress.length > 0 && (
+            {/* Real-time Video Progress */}
+            {stats?.videoProgress && (
+                <VideoProgressPanel progress={stats.videoProgress} dbProgress={stats.progress} />
+            )}
+
+            {/* Fallback: DB-based Active Steps (when no file progress available) */}
+            {!stats?.videoProgress && stats?.progress && stats.progress.length > 0 && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
                     <h3 className="text-sm font-medium text-gray-300 mb-3">Active Steps</h3>
                     <div className="space-y-3">
@@ -563,6 +596,111 @@ export default function PipelineControls() {
                     </div>
                 )}
             </div>
+        </div>
+    );
+}
+
+function VideoProgressPanel({ progress, dbProgress }: {
+    progress: VideoProgressData;
+    dbProgress?: Array<{ step: string; elapsed_seconds: number }>;
+}) {
+    const [showCompleted, setShowCompleted] = useState(false);
+    const pct = progress.videosTotal > 0
+        ? Math.round((progress.videosDone / progress.videosTotal) * 100)
+        : 0;
+    const stepIcon = STEP_ICONS[progress.step] || '⏳';
+    const elapsed = dbProgress?.find(p => p.step === `admin:${progress.step}`)?.elapsed_seconds;
+    const completedList = progress.completedVideos || [];
+    const errorList = progress.errors || [];
+
+    return (
+        <div className="rounded-xl border border-purple-800/50 bg-purple-900/10 p-4 space-y-4">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2.5">
+                    <span className="text-xl">{stepIcon}</span>
+                    <div>
+                        <h3 className="text-sm font-semibold text-purple-300">{progress.stepLabel}</h3>
+                        <p className="text-xs text-gray-500">
+                            {progress.videosDone}/{progress.videosTotal} videos
+                            {elapsed != null && <span className="ml-2">{formatElapsed(elapsed)}</span>}
+                        </p>
+                    </div>
+                </div>
+                <span className="text-2xl font-bold text-purple-400 tabular-nums">{pct}%</span>
+            </div>
+
+            {/* Overall progress bar */}
+            <div className="w-full h-2.5 rounded-full bg-gray-800 overflow-hidden">
+                <div
+                    className="h-full rounded-full bg-gradient-to-r from-purple-600 to-pink-500 transition-all duration-700 ease-out"
+                    style={{ width: `${pct}%` }}
+                />
+            </div>
+
+            {/* Current video */}
+            {progress.currentVideo && (
+                <div className="rounded-lg bg-gray-900/60 border border-gray-800 p-3">
+                    <div className="flex items-center gap-2 mb-1.5">
+                        <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                        <span className="text-xs text-gray-400">Processing now</span>
+                    </div>
+                    <p className="text-sm text-gray-200 truncate">{progress.currentVideo.title || progress.currentVideo.id.slice(0, 12)}</p>
+                    {progress.currentVideo.subStep && (
+                        <p className="text-xs text-gray-500 mt-0.5">{progress.currentVideo.subStep}</p>
+                    )}
+                    {progress.currentVideo.pct != null && progress.currentVideo.pct > 0 && (
+                        <div className="mt-2 w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                            <div
+                                className="h-full rounded-full bg-green-500 transition-all duration-500"
+                                style={{ width: `${progress.currentVideo.pct}%` }}
+                            />
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Errors */}
+            {errorList.length > 0 && (
+                <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-red-400">{errorList.length} error{errorList.length > 1 ? 's' : ''}</p>
+                    {errorList.slice(-3).map((e, i) => (
+                        <div key={i} className="flex items-start gap-2 text-xs rounded-lg bg-red-900/20 border border-red-900/30 px-3 py-2">
+                            <span className="text-red-500 shrink-0 mt-0.5">✗</span>
+                            <div className="min-w-0">
+                                <p className="text-red-300 truncate">{e.title || e.id.slice(0, 12)}</p>
+                                <p className="text-red-500/70 truncate">{e.error}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Completed videos (collapsible) */}
+            {completedList.length > 0 && (
+                <div>
+                    <button
+                        onClick={() => setShowCompleted(!showCompleted)}
+                        className="text-xs text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1"
+                    >
+                        <svg className={`w-3 h-3 transition-transform ${showCompleted ? 'rotate-90' : ''}`} fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M9 5l7 7-7 7" />
+                        </svg>
+                        {completedList.length} completed
+                    </button>
+                    {showCompleted && (
+                        <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
+                            {completedList.map((v, i) => (
+                                <div key={i} className="flex items-center gap-2 text-xs px-2 py-1 rounded bg-gray-900/40">
+                                    <span className="text-green-500">✓</span>
+                                    <span className="text-gray-400 truncate flex-1">{v.title || v.id.slice(0, 12)}</span>
+                                    {v.ms && <span className="text-gray-600 shrink-0">{(v.ms / 1000).toFixed(1)}s</span>}
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

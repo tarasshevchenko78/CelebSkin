@@ -127,12 +127,29 @@ export async function GET() {
 
         // Check if any pipeline process is running on Contabo
         let runningProcesses: string[] = [];
+        let videoProgress = null;
         try {
             const { stdout } = await execAsync(
-                `ssh ${SSH_OPTS} ${CONTABO_HOST} "ps aux | grep -E 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{print \\$NF}'"`,
+                `ssh ${SSH_OPTS} ${CONTABO_HOST} "ps aux | grep -E 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{print \\$NF}'; echo '___PROGRESS_SEP___'; cat /opt/celebskin/scripts/logs/progress.json 2>/dev/null || echo 'null'"`,
                 { timeout: 10000, env: { ...process.env, HOME: '/root' } }
             );
-            runningProcesses = stdout.trim().split('\n').filter(Boolean);
+            const parts = stdout.split('___PROGRESS_SEP___');
+            runningProcesses = (parts[0] || '').trim().split('\n').filter(Boolean);
+
+            try {
+                const progressRaw = (parts[1] || '').trim();
+                if (progressRaw && progressRaw !== 'null') {
+                    const parsed = JSON.parse(progressRaw);
+                    // Filter stale data: if updatedAt is older than 60 seconds and no matching process running
+                    const updatedAt = new Date(parsed.updatedAt).getTime();
+                    const age = Date.now() - updatedAt;
+                    if (age < 60000 || runningProcesses.length > 0) {
+                        videoProgress = parsed;
+                    }
+                }
+            } catch {
+                // Invalid JSON — ignore
+            }
         } catch {
             // SSH might fail — not critical
         }
@@ -145,6 +162,7 @@ export async function GET() {
             tags: tagResult.rows[0],
             recentLogs: pipelineLogs.rows,
             runningProcesses,
+            videoProgress,
             progress: progressResult.rows,
             categories,
             actions: Object.entries(PIPELINE_ACTIONS).map(([key, val]) => ({

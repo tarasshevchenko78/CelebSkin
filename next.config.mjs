@@ -8,6 +8,10 @@ const nextConfig = {
             },
             {
                 protocol: 'https',
+                hostname: 'celebskin-cdn.b-cdn.net',
+            },
+            {
+                protocol: 'https',
                 hostname: 'image.tmdb.org',
             },
         ],
