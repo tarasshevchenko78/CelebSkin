@@ -36,3 +36,28 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
+
+export async function DELETE(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const ids: number[] = body.ids;
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return NextResponse.json({ error: 'ids[] required' }, { status: 400 });
+        }
+        if (ids.length > 100) {
+            return NextResponse.json({ error: 'Maximum 100 items per batch' }, { status: 400 });
+        }
+
+        // All FK references to movies(id) have ON DELETE CASCADE
+        const result = await pool.query(
+            `DELETE FROM movies WHERE id = ANY($1::int[]) RETURNING id`,
+            [ids]
+        );
+
+        return NextResponse.json({ deleted: true, count: result.rowCount, ids: result.rows.map((r: { id: number }) => r.id) });
+    } catch (error) {
+        console.error('[API AdminMovies DELETE] error:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}

@@ -89,3 +89,41 @@ export async function PUT(request: NextRequest) {
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
+
+export async function DELETE(request: NextRequest) {
+    try {
+        const body = await request.json();
+        const ids: number[] = body.ids;
+
+        if (!Array.isArray(ids) || ids.length === 0) {
+            return NextResponse.json({ error: 'ids[] required' }, { status: 400 });
+        }
+        if (ids.length > 100) {
+            return NextResponse.json({ error: 'Maximum 100 items per batch' }, { status: 400 });
+        }
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            // Nullify non-cascading FK references
+            await client.query(`UPDATE ai_chat_sessions SET celebrity_id = NULL WHERE celebrity_id = ANY($1::int[])`, [ids]);
+            await client.query(`UPDATE ai_stories SET celebrity_id = NULL WHERE celebrity_id = ANY($1::int[])`, [ids]);
+            await client.query(`UPDATE blog_posts SET celebrity_id = NULL WHERE celebrity_id = ANY($1::int[])`, [ids]);
+            // Delete celebrities (video_celebrities, movie_celebrities, celebrity_photos cascade)
+            const result = await client.query(
+                `DELETE FROM celebrities WHERE id = ANY($1::int[]) RETURNING id`,
+                [ids]
+            );
+            await client.query('COMMIT');
+            return NextResponse.json({ deleted: true, count: result.rowCount, ids: result.rows.map((r: { id: number }) => r.id) });
+        } catch (err) {
+            await client.query('ROLLBACK');
+            throw err;
+        } finally {
+            client.release();
+        }
+    } catch (error) {
+        console.error('[API AdminCelebrities DELETE] error:', error);
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
+    }
+}

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run a pipeline script on Contabo in the background
-# Usage: ./run-remote.sh <script.js> [args...]
+# Usage: ./run-remote.sh [--action=NAME] <script.js> [args...]
 
 # Force clean SSH environment (PM2 may have stale agent socket)
 export HOME=/root
@@ -13,6 +13,13 @@ SSH_BIN="/usr/bin/ssh"
 SCRIPTS_DIR="/opt/celebskin/scripts"
 LOG_FILE="${SCRIPTS_DIR}/logs/pipeline.log"
 
+# Parse --action=NAME if present
+ACTION=""
+if [[ "$1" == --action=* ]]; then
+    ACTION="${1#--action=}"
+    shift
+fi
+
 SCRIPT="$1"
 shift
 ARGS="$*"
@@ -22,11 +29,26 @@ if [ -z "$SCRIPT" ]; then
     exit 1
 fi
 
+# Derive action name from script if not provided
+if [ -z "$ACTION" ]; then
+    case "$SCRIPT" in
+        scrape-boobsradar.js) ACTION="scrape" ;;
+        process-with-ai.js)   ACTION="ai-process" ;;
+        enrich-metadata.js)   ACTION="tmdb-enrich" ;;
+        watermark.js)         ACTION="watermark" ;;
+        generate-thumbnails.js) ACTION="thumbnails" ;;
+        upload-to-cdn.js)     ACTION="cdn-upload" ;;
+        publish-to-site.js)   ACTION="publish" ;;
+        run-pipeline.js)      ACTION="full-pipeline" ;;
+        *)                    ACTION="unknown" ;;
+    esac
+fi
+
 # Use temp file for stderr (command substitution $() would hang waiting for backgrounded process)
 SSH_ERR_FILE=$(mktemp)
 
 $SSH_BIN -f -o ConnectTimeout=10 -o StrictHostKeyChecking=no -o BatchMode=yes -i "$SSH_KEY" "$CONTABO" \
-    "cd $SCRIPTS_DIR && nohup node $SCRIPT $ARGS >> $LOG_FILE 2>&1 </dev/null" \
+    "cd $SCRIPTS_DIR && nohup bash lib/run-and-log.sh $ACTION $SCRIPT $ARGS >> $LOG_FILE 2>&1 </dev/null" \
     </dev/null 2>"$SSH_ERR_FILE"
 
 SSH_EXIT=$?

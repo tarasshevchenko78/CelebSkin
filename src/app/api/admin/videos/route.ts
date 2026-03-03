@@ -91,6 +91,24 @@ export async function PUT(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+    // Bulk delete: { ids: string[] } in body
+    try {
+        const body = await request.json().catch(() => null);
+        if (body?.ids && Array.isArray(body.ids) && body.ids.length > 0) {
+            if (body.ids.length > 100) {
+                return NextResponse.json({ error: 'Maximum 100 items per batch' }, { status: 400 });
+            }
+            const result = await pool.query(
+                `DELETE FROM videos WHERE id = ANY($1::uuid[]) RETURNING id`,
+                [body.ids]
+            );
+            return NextResponse.json({ deleted: true, count: result.rowCount, ids: result.rows.map((r: { id: string }) => r.id) });
+        }
+    } catch {
+        // Fall through to single delete
+    }
+
+    // Single delete: ?id= in query param
     const { searchParams } = request.nextUrl;
     const id = searchParams.get('id');
 
