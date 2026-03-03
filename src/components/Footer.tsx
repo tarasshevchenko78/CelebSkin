@@ -1,11 +1,9 @@
 import { SUPPORTED_LOCALES, LOCALE_NAMES } from '@/lib/i18n';
 
 const footerLinks = [
-    { key: 'about', labels: { en: 'About', ru: 'О нас', de: 'Über uns', fr: 'À propos', es: 'Acerca de', pt: 'Sobre', it: 'Chi siamo', pl: 'O nas', nl: 'Over ons', tr: 'Hakkında' } },
     { key: 'dmca', labels: { en: 'DMCA', ru: 'DMCA', de: 'DMCA', fr: 'DMCA', es: 'DMCA', pt: 'DMCA', it: 'DMCA', pl: 'DMCA', nl: 'DMCA', tr: 'DMCA' } },
     { key: 'privacy', labels: { en: 'Privacy Policy', ru: 'Конфиденциальность', de: 'Datenschutz', fr: 'Confidentialité', es: 'Privacidad', pt: 'Privacidade', it: 'Privacy', pl: 'Prywatność', nl: 'Privacy', tr: 'Gizlilik' } },
     { key: 'terms', labels: { en: 'Terms', ru: 'Условия', de: 'Nutzungsbedingungen', fr: 'Conditions', es: 'Términos', pt: 'Termos', it: 'Termini', pl: 'Regulamin', nl: 'Voorwaarden', tr: 'Şartlar' } },
-    { key: 'contact', labels: { en: 'Contact', ru: 'Контакты', de: 'Kontakt', fr: 'Contact', es: 'Contacto', pt: 'Contato', it: 'Contatto', pl: 'Kontakt', nl: 'Contact', tr: 'İletişim' } },
 ];
 
 export default function Footer({ locale }: { locale: string }) {

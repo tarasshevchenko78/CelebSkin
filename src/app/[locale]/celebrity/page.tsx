@@ -12,10 +12,24 @@ const titles: Record<string, string> = {
     pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler',
 };
 
+const descriptions: Record<string, string> = {
+    en: 'Browse celebrities with nude scenes from movies and TV shows. Sort by popularity, name or number of scenes.',
+    ru: 'Каталог знаменитостей с откровенными сценами из фильмов и сериалов.',
+    de: 'Prominente mit Nacktszenen aus Filmen und Serien durchsuchen.',
+    fr: 'Parcourez les célébrités avec des scènes nues dans les films et séries.',
+    es: 'Explora celebridades con escenas de desnudos en películas y series.',
+    pt: 'Navegue por celebridades com cenas de nudez em filmes e séries.',
+    it: 'Sfoglia celebrità con scene di nudo in film e serie TV.',
+    pl: 'Przeglądaj celebrytów z nagimi scenami z filmów i seriali.',
+    nl: 'Blader door beroemdheden met naaktscènes uit films en series.',
+    tr: 'Film ve dizilerde çıplak sahneleri olan ünlülere göz atın.',
+};
+
 export async function generateMetadata({ params }: { params: { locale: string } }): Promise<Metadata> {
     const locale = params.locale as SupportedLocale;
     return {
         title: `${titles[locale] || titles.en} — CelebSkin`,
+        description: descriptions[locale] || descriptions.en,
         alternates: { languages: Object.fromEntries(SUPPORTED_LOCALES.map((l) => [l, `/${l}/celebrity`])) },
     };
 }

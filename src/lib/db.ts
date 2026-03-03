@@ -310,7 +310,7 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
 // ============================================
 
 async function enrichVideoWithRelations(video: Video): Promise<Video> {
-    const [celebResult, tagResult] = await Promise.all([
+    const [celebResult, tagResult, movieResult] = await Promise.all([
         pool.query(
             `SELECT c.* FROM celebrities c
        JOIN video_celebrities vc ON vc.celebrity_id = c.id
@@ -323,12 +323,20 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
        WHERE vt.video_id = $1`,
             [video.id]
         ),
+        pool.query(
+            `SELECT m.* FROM movies m
+       JOIN movie_scenes ms ON ms.movie_id = m.id
+       WHERE ms.video_id = $1
+       LIMIT 1`,
+            [video.id]
+        ),
     ]);
 
     return {
         ...video,
         celebrities: celebResult.rows,
         tags: tagResult.rows,
+        movie: movieResult.rows[0] || null,
     };
 }
 

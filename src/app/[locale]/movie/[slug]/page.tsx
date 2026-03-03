@@ -1,12 +1,11 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES } from '@/lib/i18n';
-import { getLocalizedField } from '@/lib/i18n';
+import { SUPPORTED_LOCALES, getLocalizedField } from '@/lib/i18n';
 import { getMovieBySlug, getVideosForMovie, getCelebritiesForMovie } from '@/lib/db';
 import type { Video, Celebrity } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
+import CelebrityCard from '@/components/CelebrityCard';
 
 export const dynamic = 'force-dynamic';
-import CelebrityCard from '@/components/CelebrityCard';
 
 function formatViews(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

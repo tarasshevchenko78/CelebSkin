@@ -1,23 +1,27 @@
-import { createClient } from 'redis';
+import { createClient, type RedisClientType } from 'redis';
 
-const redisClient = createClient({
-    url: `redis://:${process.env.REDIS_PASSWORD || ''}@${process.env.REDIS_HOST || '127.0.0.1'}:${process.env.REDIS_PORT || '6379'}`,
-});
+let redisClient: RedisClientType | null = null;
 
-let isConnected = false;
+function buildClient(): RedisClientType {
+    const client = createClient({
+        url: `redis://:${process.env.REDIS_PASSWORD || ''}@${process.env.REDIS_HOST || '127.0.0.1'}:${process.env.REDIS_PORT || '6379'}`,
+    });
+    client.on('error', (err) => {
+        console.error('[Redis] Error:', err.message);
+    });
+    return client as RedisClientType;
+}
 
-async function getClient() {
-    if (!isConnected) {
+async function getClient(): Promise<RedisClientType> {
+    if (!redisClient || !redisClient.isReady) {
+        if (redisClient) {
+            try { await redisClient.disconnect(); } catch { /* ignore */ }
+        }
+        redisClient = buildClient();
         await redisClient.connect();
-        isConnected = true;
     }
     return redisClient;
 }
-
-redisClient.on('error', (err) => {
-    console.error('[Redis] Error:', err.message);
-    isConnected = false;
-});
 
 /**
  * Cache wrapper: returns cached data if available, otherwise calls fn() and caches result.

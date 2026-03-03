@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES } from '@/lib/i18n';
-import { getLocalizedField } from '@/lib/i18n';
+import { SUPPORTED_LOCALES, getLocalizedField } from '@/lib/i18n';
 import { getVideoBySlug, getRelatedVideos } from '@/lib/db';
+import type { Video } from '@/lib/types';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
 
@@ -12,6 +12,19 @@ function formatViews(n: number): string {
     if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
     return n.toString();
 }
+
+const sectionLabels: Record<string, { celebrities: string; movie: string; tags: string; review: string; similar: string; views: string; notFound: string; back: string }> = {
+    en: { celebrities: 'Celebrities', movie: 'Movie', tags: 'Tags', review: 'Review', similar: 'Similar Videos', views: 'views', notFound: 'Video not found', back: 'Back to videos' },
+    ru: { celebrities: 'Знаменитости', movie: 'Фильм', tags: 'Теги', review: 'Обзор', similar: 'Похожие видео', views: 'просмотров', notFound: 'Видео не найдено', back: 'Назад к видео' },
+    de: { celebrities: 'Prominente', movie: 'Film', tags: 'Tags', review: 'Bewertung', similar: 'Ähnliche Videos', views: 'Aufrufe', notFound: 'Video nicht gefunden', back: 'Zurück zu Videos' },
+    fr: { celebrities: 'Célébrités', movie: 'Film', tags: 'Tags', review: 'Critique', similar: 'Vidéos similaires', views: 'vues', notFound: 'Vidéo non trouvée', back: 'Retour aux vidéos' },
+    es: { celebrities: 'Celebridades', movie: 'Película', tags: 'Etiquetas', review: 'Reseña', similar: 'Videos similares', views: 'vistas', notFound: 'Video no encontrado', back: 'Volver a videos' },
+    pt: { celebrities: 'Celebridades', movie: 'Filme', tags: 'Tags', review: 'Análise', similar: 'Vídeos semelhantes', views: 'visualizações', notFound: 'Vídeo não encontrado', back: 'Voltar aos vídeos' },
+    it: { celebrities: 'Celebrità', movie: 'Film', tags: 'Tag', review: 'Recensione', similar: 'Video simili', views: 'visualizzazioni', notFound: 'Video non trovato', back: 'Torna ai video' },
+    pl: { celebrities: 'Celebryci', movie: 'Film', tags: 'Tagi', review: 'Recenzja', similar: 'Podobne filmy', views: 'wyświetleń', notFound: 'Wideo nie znaleziono', back: 'Wróć do wideo' },
+    nl: { celebrities: 'Beroemdheden', movie: 'Film', tags: 'Tags', review: 'Recensie', similar: "Vergelijkbare video's", views: 'weergaven', notFound: 'Video niet gevonden', back: "Terug naar video's" },
+    tr: { celebrities: 'Ünlüler', movie: 'Film', tags: 'Etiketler', review: 'İnceleme', similar: 'Benzer Videolar', views: 'görüntüleme', notFound: 'Video bulunamadı', back: 'Videolara dön' },
+};
 
 export async function generateMetadata({
     params,
@@ -29,14 +42,20 @@ export async function generateMetadata({
         : 'Video';
     const description = video ? getLocalizedField(video.seo_description, params.locale) : '';
 
+    // Use localized slugs from JSONB for proper hreflang
+    const languages = video
+        ? Object.fromEntries(
+              SUPPORTED_LOCALES.map((loc) => {
+                  const localizedSlug = video.slug[loc] || video.slug['en'] || params.slug;
+                  return [loc, `/${loc}/video/${localizedSlug}`];
+              })
+          )
+        : Object.fromEntries(SUPPORTED_LOCALES.map((loc) => [loc, `/${loc}/video/${params.slug}`]));
+
     return {
         title: `${title} — CelebSkin`,
         description,
-        alternates: {
-            languages: Object.fromEntries(
-                SUPPORTED_LOCALES.map((loc) => [loc, `/${loc}/video/${params.slug}`])
-            ),
-        },
+        alternates: { languages },
     };
 }
 
@@ -54,11 +73,13 @@ export default async function VideoDetailPage({
         console.error('[VideoDetail] DB error:', error);
     }
 
+    const labels = sectionLabels[locale] || sectionLabels.en;
+
     if (!video) {
         return (
             <div className="mx-auto max-w-7xl px-4 py-20 text-center">
-                <h1 className="text-2xl font-bold text-white mb-4">Video not found</h1>
-                <a href={`/${locale}/video`} className="text-brand-accent hover:underline">← Back to videos</a>
+                <h1 className="text-2xl font-bold text-white mb-4">{labels.notFound}</h1>
+                <a href={`/${locale}/video`} className="text-brand-accent hover:underline">← {labels.back}</a>
             </div>
         );
     }
@@ -66,7 +87,7 @@ export default async function VideoDetailPage({
     const title = getLocalizedField(video.title, locale);
     const review = getLocalizedField(video.review, locale);
 
-    let similar: import('@/lib/types').Video[] = [];
+    let similar: Video[] = [];
     try {
         similar = await getRelatedVideos(video.id, 4);
     } catch (error) {
@@ -93,7 +114,7 @@ export default async function VideoDetailPage({
                     {video.quality && (
                         <span className="bg-brand-accent text-white text-xs font-bold px-2 py-0.5 rounded">{video.quality}</span>
                     )}
-                    <span className="text-brand-secondary">{formatViews(video.views_count)} views</span>
+                    <span className="text-brand-secondary">{formatViews(video.views_count)} {labels.views}</span>
                     <div className="flex items-center gap-2 ml-auto">
                         <button className="flex items-center gap-1 text-brand-secondary hover:text-green-400 transition-colors">
                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>
@@ -112,7 +133,7 @@ export default async function VideoDetailPage({
                     {/* Celebrities */}
                     {video.celebrities && video.celebrities.length > 0 && (
                         <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Celebrities</h2>
+                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">{labels.celebrities}</h2>
                             <div className="flex flex-wrap gap-3">
                                 {video.celebrities.map((celeb) => (
                                     <a
@@ -133,7 +154,7 @@ export default async function VideoDetailPage({
                     {/* Movie */}
                     {video.movie && (
                         <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Movie</h2>
+                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">{labels.movie}</h2>
                             <a
                                 href={`/${locale}/movie/${video.movie.slug}`}
                                 className="flex items-center gap-3 rounded-lg bg-brand-card border border-brand-border px-3 py-2 hover:bg-brand-hover transition-colors w-fit"
@@ -152,7 +173,7 @@ export default async function VideoDetailPage({
                     {/* Tags */}
                     {video.tags && video.tags.length > 0 && (
                         <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Tags</h2>
+                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">{labels.tags}</h2>
                             <div className="flex flex-wrap gap-2">
                                 {video.tags.map((tag) => (
                                     <a
@@ -170,7 +191,7 @@ export default async function VideoDetailPage({
                     {/* Review */}
                     {review && (
                         <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Review</h2>
+                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">{labels.review}</h2>
                             <p className="text-sm text-brand-text/80 leading-relaxed">{review}</p>
                         </section>
                     )}
@@ -178,7 +199,7 @@ export default async function VideoDetailPage({
 
                 {/* Sidebar — Similar Videos */}
                 <aside>
-                    <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Similar Videos</h2>
+                    <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">{labels.similar}</h2>
                     <div className="flex flex-col gap-3">
                         {similar.map((v) => (
                             <VideoCard key={v.id} video={v} locale={locale} size="sm" />

@@ -1,12 +1,11 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
-import { getLocalizedField } from '@/lib/i18n';
+import { SUPPORTED_LOCALES, type SupportedLocale, getLocalizedField } from '@/lib/i18n';
 import { getLatestVideos, getTrendingCelebrities, getMovies } from '@/lib/db';
 import type { Video, Celebrity, Movie } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
+import CelebrityCard from '@/components/CelebrityCard';
 
 export const dynamic = 'force-dynamic';
-import CelebrityCard from '@/components/CelebrityCard';
 
 const heroText: Record<string, { heading: string; sub: string }> = {
     en: { heading: 'Celebrity Nude Scenes from Movies & TV Shows', sub: 'Discover the most iconic scenes featuring your favorite stars' },
@@ -21,17 +20,17 @@ const heroText: Record<string, { heading: string; sub: string }> = {
     tr: { heading: 'Film ve dizilerden ünlülerin çıplak sahneleri', sub: 'En sevdiğiniz yıldızların en ikonik sahnelerini keşfedin' },
 };
 
-const sectionTitles: Record<string, { trending: string; latest: string; movies: string; viewAll: string }> = {
-    en: { trending: 'Trending Celebrities', latest: 'Latest Videos', movies: 'Popular Movies', viewAll: 'View All' },
-    ru: { trending: 'Популярные знаменитости', latest: 'Новые видео', movies: 'Популярные фильмы', viewAll: 'Смотреть все' },
-    de: { trending: 'Beliebte Prominente', latest: 'Neueste Videos', movies: 'Beliebte Filme', viewAll: 'Alle anzeigen' },
-    fr: { trending: 'Célébrités tendances', latest: 'Dernières vidéos', movies: 'Films populaires', viewAll: 'Voir tout' },
-    es: { trending: 'Celebridades en tendencia', latest: 'Últimos videos', movies: 'Películas populares', viewAll: 'Ver todo' },
-    pt: { trending: 'Celebridades em alta', latest: 'Últimos vídeos', movies: 'Filmes populares', viewAll: 'Ver tudo' },
-    it: { trending: 'Celebrità di tendenza', latest: 'Ultimi video', movies: 'Film popolari', viewAll: 'Vedi tutto' },
-    pl: { trending: 'Popularne gwiazdy', latest: 'Najnowsze filmy', movies: 'Popularne filmy', viewAll: 'Zobacz wszystko' },
-    nl: { trending: 'Trending beroemdheden', latest: 'Nieuwste video\'s', movies: 'Populaire films', viewAll: 'Alles bekijken' },
-    tr: { trending: 'Trend Ünlüler', latest: 'Son Videolar', movies: 'Popüler Filmler', viewAll: 'Tümünü Gör' },
+const sectionTitles: Record<string, { trending: string; latest: string; movies: string; viewAll: string; scenes: string }> = {
+    en: { trending: 'Trending Celebrities', latest: 'Latest Videos', movies: 'Popular Movies', viewAll: 'View All', scenes: 'scenes' },
+    ru: { trending: 'Популярные знаменитости', latest: 'Новые видео', movies: 'Популярные фильмы', viewAll: 'Смотреть все', scenes: 'сцен' },
+    de: { trending: 'Beliebte Prominente', latest: 'Neueste Videos', movies: 'Beliebte Filme', viewAll: 'Alle anzeigen', scenes: 'Szenen' },
+    fr: { trending: 'Célébrités tendances', latest: 'Dernières vidéos', movies: 'Films populaires', viewAll: 'Voir tout', scenes: 'scènes' },
+    es: { trending: 'Celebridades en tendencia', latest: 'Últimos videos', movies: 'Películas populares', viewAll: 'Ver todo', scenes: 'escenas' },
+    pt: { trending: 'Celebridades em alta', latest: 'Últimos vídeos', movies: 'Filmes populares', viewAll: 'Ver tudo', scenes: 'cenas' },
+    it: { trending: 'Celebrità di tendenza', latest: 'Ultimi video', movies: 'Film popolari', viewAll: 'Vedi tutto', scenes: 'scene' },
+    pl: { trending: 'Popularne gwiazdy', latest: 'Najnowsze filmy', movies: 'Popularne filmy', viewAll: 'Zobacz wszystko', scenes: 'scen' },
+    nl: { trending: 'Trending beroemdheden', latest: 'Nieuwste video\'s', movies: 'Populaire films', viewAll: 'Alles bekijken', scenes: 'scènes' },
+    tr: { trending: 'Trend Ünlüler', latest: 'Son Videolar', movies: 'Popüler Filmler', viewAll: 'Tümünü Gör', scenes: 'sahne' },
 };
 
 const pageMeta: Record<string, { title: string; description: string }> = {
@@ -198,7 +197,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
                                             </span>
                                         )}
                                         <span className="absolute bottom-1.5 right-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                            {movie.scenes_count} scenes
+                                            {movie.scenes_count} {sections.scenes}
                                         </span>
                                     </div>
                                     <div className="mt-2 px-0.5">

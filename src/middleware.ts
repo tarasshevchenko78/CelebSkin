@@ -31,11 +31,14 @@ function detectLocaleFromHeader(acceptLanguage: string | null): string {
 }
 
 function checkBasicAuth(request: NextRequest): boolean {
+    const adminUser = process.env.ADMIN_USER;
+    const adminPassword = process.env.ADMIN_PASSWORD;
+
+    // Deny access if admin credentials are not configured
+    if (!adminUser || !adminPassword) return false;
+
     const authHeader = request.headers.get('authorization');
     if (!authHeader || !authHeader.startsWith('Basic ')) return false;
-
-    const adminUser = process.env.ADMIN_USER || 'admin';
-    const adminPassword = process.env.ADMIN_PASSWORD || '';
 
     try {
         const base64 = authHeader.slice(6);

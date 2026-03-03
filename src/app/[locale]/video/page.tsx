@@ -11,6 +11,18 @@ const titles: Record<string, string> = {
     es: 'Todos los videos', pt: 'Todos os vídeos', it: 'Tutti i video',
     pl: 'Wszystkie filmy', nl: "Alle video's", tr: 'Tüm Videolar',
 };
+const descriptions: Record<string, string> = {
+    en: 'Browse all celebrity nude scenes from movies and TV shows. Filter by latest, most viewed or top rated.',
+    ru: 'Все откровенные сцены знаменитостей из фильмов и сериалов. Сортировка по дате, просмотрам и рейтингу.',
+    de: 'Alle Nacktszenen von Prominenten aus Filmen und Serien durchsuchen.',
+    fr: 'Parcourez toutes les scènes nues de célébrités dans les films et séries.',
+    es: 'Explora todas las escenas de desnudos de celebridades en películas y series.',
+    pt: 'Navegue por todas as cenas de nudez de celebridades em filmes e séries.',
+    it: 'Sfoglia tutte le scene di nudo di celebrità da film e serie TV.',
+    pl: 'Przeglądaj wszystkie nagie sceny celebrytów z filmów i seriali.',
+    nl: 'Blader door alle naaktscènes van beroemdheden uit films en series.',
+    tr: 'Film ve dizilerden tüm ünlü çıplak sahnelerine göz atın.',
+};
 const sortLabels: Record<string, Record<string, string>> = {
     latest: { en: 'Latest', ru: 'Новые' },
     views: { en: 'Most Viewed', ru: 'Популярные' },
@@ -21,6 +33,7 @@ export async function generateMetadata({ params }: { params: { locale: string } 
     const locale = params.locale as SupportedLocale;
     return {
         title: `${titles[locale] || titles.en} — CelebSkin`,
+        description: descriptions[locale] || descriptions.en,
         alternates: { languages: Object.fromEntries(SUPPORTED_LOCALES.map((l) => [l, `/${l}/video`])) },
     };
 }
