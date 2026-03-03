@@ -130,7 +130,7 @@ export async function GET() {
         let videoProgress = null;
         try {
             const { stdout } = await execAsync(
-                `ssh ${SSH_OPTS} ${CONTABO_HOST} "ps aux | grep -E 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{print \\$NF}'; echo '___PROGRESS_SEP___'; cat /opt/celebskin/scripts/logs/progress.json 2>/dev/null || echo 'null'"`,
+                `ssh ${SSH_OPTS} ${CONTABO_HOST} "ps aux | grep -E 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{for(i=1;i<=NF;i++){if(\\$i~/\\\\.js$/){sub(/.*\\\\//,\\\"\\\",\\$i);print \\$i;break}}}'; echo '___PROGRESS_SEP___'; cat /opt/celebskin/scripts/logs/progress.json 2>/dev/null || echo 'null'"`,
                 { timeout: 10000, env: { ...process.env, HOME: '/root' } }
             );
             const parts = stdout.split('___PROGRESS_SEP___');
