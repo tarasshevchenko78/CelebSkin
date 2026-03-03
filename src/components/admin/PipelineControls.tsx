@@ -32,6 +32,13 @@ interface PipelineStats {
         created_at: string;
     }>;
     runningProcesses: string[];
+    progress: Array<{
+        step: string;
+        metadata: Record<string, unknown>;
+        created_at: string;
+        elapsed_seconds: number;
+    }>;
+    categories: Array<{ slug: string; name: string; videos_count: number }>;
     actions: Array<{ id: string; label: string; script: string }>;
 }
 
@@ -40,6 +47,7 @@ interface ActionOption {
     model: string;
     force: boolean;
     test: boolean;
+    categories: string[];
 }
 
 const GEMINI_MODELS = [
@@ -60,10 +68,20 @@ const STEP_ICONS: Record<string, string> = {
     'full-pipeline': '⚡',
 };
 
+function formatElapsed(seconds: number): string {
+    if (seconds < 60) return `${seconds}s`;
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (mins < 60) return `${mins}m ${secs}s`;
+    const hours = Math.floor(mins / 60);
+    return `${hours}h ${mins % 60}m`;
+}
+
 export default function PipelineControls() {
     const [stats, setStats] = useState<PipelineStats | null>(null);
     const [loading, setLoading] = useState(true);
     const [running, setRunning] = useState<string | null>(null);
+    const [stopping, setStopping] = useState(false);
     const [logs, setLogs] = useState<string>('');
     const [showLogs, setShowLogs] = useState(false);
     const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -72,6 +90,7 @@ export default function PipelineControls() {
         model: 'gemini-2.5-flash',
         force: false,
         test: false,
+        categories: [],
     });
 
     const fetchStats = useCallback(async () => {
@@ -102,14 +121,14 @@ export default function PipelineControls() {
 
     useEffect(() => {
         fetchStats();
-        const interval = setInterval(fetchStats, 10000); // Refresh every 10s
+        const interval = setInterval(fetchStats, 10000);
         return () => clearInterval(interval);
     }, [fetchStats]);
 
     useEffect(() => {
         if (showLogs) {
             fetchLogs();
-            const logInterval = setInterval(fetchLogs, 5000); // Refresh logs every 5s
+            const logInterval = setInterval(fetchLogs, 5000);
             return () => clearInterval(logInterval);
         }
     }, [showLogs, fetchLogs]);
@@ -140,6 +159,35 @@ export default function PipelineControls() {
         }
     };
 
+    const stopAll = async () => {
+        if (!confirm('Stop all running pipeline processes on Contabo?')) return;
+        setStopping(true);
+        setMessage(null);
+        try {
+            const res = await fetch('/api/admin/pipeline', { method: 'DELETE' });
+            const data = await res.json();
+            if (res.ok) {
+                setMessage({ type: 'success', text: `✓ ${data.message}` });
+                setTimeout(fetchStats, 2000);
+            } else {
+                setMessage({ type: 'error', text: `✗ ${data.error}` });
+            }
+        } catch (err) {
+            setMessage({ type: 'error', text: `✗ Connection error: ${err}` });
+        } finally {
+            setStopping(false);
+        }
+    };
+
+    const toggleCategory = (slug: string) => {
+        setOptions(prev => ({
+            ...prev,
+            categories: prev.categories.includes(slug)
+                ? prev.categories.filter(c => c !== slug)
+                : [...prev.categories, slug],
+        }));
+    };
+
     if (loading) {
         return (
             <div className="flex items-center justify-center py-12">
@@ -150,6 +198,7 @@ export default function PipelineControls() {
 
     const raw = stats?.raw;
     const videos = stats?.videos;
+    const hasRunning = (stats?.runningProcesses?.length ?? 0) > 0;
 
     return (
         <div className="space-y-6">
@@ -180,6 +229,52 @@ export default function PipelineControls() {
                 <StatCard label="Tags" value={stats?.tags?.total || '0'} color="text-orange-400" />
                 <StatCard label="Avg Confidence" value={`${(parseFloat(videos?.avg_confidence || '0') * 100).toFixed(1)}%`} color="text-blue-400" />
             </div>
+
+            {/* Running Processes + Stop Button */}
+            {hasRunning && (
+                <div className="rounded-xl border border-yellow-800/50 bg-yellow-900/10 p-4">
+                    <div className="flex items-center justify-between mb-2">
+                        <h3 className="text-sm font-medium text-yellow-400">Running Processes on Contabo</h3>
+                        <button
+                            onClick={stopAll}
+                            disabled={stopping}
+                            className="px-4 py-1.5 text-sm rounded-lg bg-red-600 text-white font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
+                        >
+                            {stopping ? 'Stopping...' : 'Stop All'}
+                        </button>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        {stats!.runningProcesses.map((proc, i) => (
+                            <span key={i} className="text-xs px-2 py-1 rounded bg-yellow-900/30 text-yellow-300 border border-yellow-800/50 animate-pulse">
+                                {proc}
+                            </span>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Progress Bars for Running Steps */}
+            {stats?.progress && stats.progress.length > 0 && (
+                <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Active Steps</h3>
+                    <div className="space-y-3">
+                        {stats.progress.map((p, i) => (
+                            <div key={i} className="flex items-center gap-3">
+                                <span className="text-lg">{STEP_ICONS[p.step.replace('admin:', '')] || '⏳'}</span>
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <span className="text-xs text-gray-300 font-medium">{p.step}</span>
+                                        <span className="text-xs text-gray-500">{formatElapsed(p.elapsed_seconds)}</span>
+                                    </div>
+                                    <div className="w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                                        <div className="h-full rounded-full bg-purple-500 animate-pulse" style={{ width: '60%' }} />
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Options Panel */}
             <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
@@ -229,6 +324,30 @@ export default function PipelineControls() {
                         </label>
                     </div>
                 </div>
+
+                {/* Categories */}
+                {stats?.categories && stats.categories.length > 0 && (
+                    <div className="mt-4 pt-4 border-t border-gray-800">
+                        <label className="text-xs text-gray-500 block mb-2">
+                            Categories {options.categories.length > 0 && <span className="text-purple-400">({options.categories.length} selected)</span>}
+                        </label>
+                        <div className="flex flex-wrap gap-2">
+                            {stats.categories.map(cat => (
+                                <button
+                                    key={cat.slug}
+                                    onClick={() => toggleCategory(cat.slug)}
+                                    className={`text-xs px-2.5 py-1 rounded-lg border transition-colors ${
+                                        options.categories.includes(cat.slug)
+                                            ? 'border-purple-500 bg-purple-900/30 text-purple-300'
+                                            : 'border-gray-700 bg-gray-800/50 text-gray-400 hover:border-gray-600'
+                                    }`}
+                                >
+                                    {cat.name} <span className="text-gray-600">({cat.videos_count})</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                )}
             </div>
 
             {/* Pipeline Steps */}
@@ -277,20 +396,6 @@ export default function PipelineControls() {
                     </button>
                 </div>
             </div>
-
-            {/* Running Processes */}
-            {stats?.runningProcesses && stats.runningProcesses.length > 0 && (
-                <div className="rounded-xl border border-yellow-800/50 bg-yellow-900/10 p-4">
-                    <h3 className="text-sm font-medium text-yellow-400 mb-2">🔄 Running Processes on Contabo</h3>
-                    <div className="flex flex-wrap gap-2">
-                        {stats.runningProcesses.map((proc, i) => (
-                            <span key={i} className="text-xs px-2 py-1 rounded bg-yellow-900/30 text-yellow-300 border border-yellow-800/50">
-                                {proc}
-                            </span>
-                        ))}
-                    </div>
-                </div>
-            )}
 
             {/* Live Logs */}
             <div className="rounded-xl border border-gray-800 bg-gray-900/50 overflow-hidden">

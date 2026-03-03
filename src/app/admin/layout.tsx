@@ -29,6 +29,9 @@ export default function AdminLayout({
                             <a href="/admin/celebrities" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Celebrities
                             </a>
+                            <a href="/admin/movies" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                                Movies
+                            </a>
                             <a href="/admin/moderation" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Moderation
                             </a>

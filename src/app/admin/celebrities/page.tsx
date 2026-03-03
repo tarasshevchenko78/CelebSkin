@@ -79,7 +79,12 @@ export default async function AdminCelebritiesPage({
                                         </div>
                                     )}
                                 </td>
-                                <td className="p-3 text-gray-200 font-medium">{celeb.name}</td>
+                                <td className="p-3">
+                                    <a href={`/admin/celebrities/${celeb.id}`}
+                                       className="text-gray-200 font-medium hover:text-white hover:underline">
+                                        {celeb.name}
+                                    </a>
+                                </td>
                                 <td className="p-3 text-gray-400">{celeb.videos_count}</td>
                                 <td className="p-3 text-gray-400">{celeb.movies_count}</td>
                                 <td className="p-3 text-gray-400">{celeb.total_views.toLocaleString()}</td>

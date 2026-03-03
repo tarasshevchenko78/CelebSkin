@@ -98,6 +98,33 @@ export async function GET() {
             pool.query(`SELECT COUNT(*) AS total FROM tags`),
         ]);
 
+        // Get currently running steps with elapsed time
+        const progressResult = await pool.query(`
+            SELECT step, metadata, created_at,
+                   EXTRACT(EPOCH FROM (NOW() - created_at))::int AS elapsed_seconds
+            FROM processing_log
+            WHERE status = 'started'
+              AND created_at > NOW() - INTERVAL '6 hours'
+              AND NOT EXISTS (
+                  SELECT 1 FROM processing_log pl2
+                  WHERE pl2.step = processing_log.step
+                    AND pl2.status IN ('completed', 'failed')
+                    AND pl2.created_at > processing_log.created_at
+              )
+            ORDER BY created_at DESC
+        `);
+
+        // Get categories from DB
+        let categories: Array<{ slug: string; name: string; videos_count: number }> = [];
+        try {
+            const catResult = await pool.query(
+                `SELECT slug, name, videos_count FROM categories ORDER BY videos_count DESC`
+            );
+            categories = catResult.rows;
+        } catch {
+            // categories table might not exist
+        }
+
         // Check if any pipeline process is running on Contabo
         let runningProcesses: string[] = [];
         try {
@@ -118,6 +145,8 @@ export async function GET() {
             tags: tagResult.rows[0],
             recentLogs: pipelineLogs.rows,
             runningProcesses,
+            progress: progressResult.rows,
+            categories,
             actions: Object.entries(PIPELINE_ACTIONS).map(([key, val]) => ({
                 id: key,
                 label: val.label,
@@ -136,7 +165,7 @@ export async function POST(request: NextRequest) {
         const body = await request.json();
         const { action, options } = body as {
             action: string;
-            options?: { limit?: number; model?: string; force?: boolean; test?: boolean };
+            options?: { limit?: number; model?: string; force?: boolean; test?: boolean; categories?: string[] };
         };
 
         const pipelineAction = PIPELINE_ACTIONS[action];
@@ -155,6 +184,9 @@ export async function POST(request: NextRequest) {
         if (options?.test) args.push('--test');
         if (action === 'full-pipeline' && options?.test) args.push('--test');
         if (action === 'publish') args.push('--auto');
+        if (options?.categories && options.categories.length > 0) {
+            args.push(`--categories=${options.categories.join(',')}`);
+        }
 
         const argsStr = args.length > 0 ? ' ' + args.join(' ') : '';
         const scriptArgs = `${pipelineAction.script}${argsStr}`;
@@ -183,6 +215,44 @@ export async function POST(request: NextRequest) {
         console.error('[Pipeline API] Error starting action:', error);
         return NextResponse.json(
             { error: `Failed to start pipeline: ${error instanceof Error ? error.message : 'Unknown error'}` },
+            { status: 500 }
+        );
+    }
+}
+
+// DELETE — stop all pipeline processes on Contabo
+export async function DELETE() {
+    try {
+        await pool.query(
+            `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
+            ['admin:stop-all', 'started', JSON.stringify({ stoppedAt: new Date().toISOString() })]
+        );
+
+        let killed = 0;
+        try {
+            const { stdout } = await execAsync(
+                `ssh ${SSH_OPTS} ${CONTABO_HOST} "pkill -f 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' 2>/dev/null; echo \\$?"`,
+                { timeout: 15000, env: { ...process.env, HOME: '/root' } }
+            );
+            const exitCode = parseInt(stdout.trim());
+            killed = exitCode === 0 ? 1 : 0;
+        } catch {
+            // pkill exit code 1 means no processes matched — still success
+        }
+
+        await pool.query(
+            `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
+            ['admin:stop-all', 'completed', JSON.stringify({ killed, stoppedAt: new Date().toISOString() })]
+        );
+
+        return NextResponse.json({
+            success: true,
+            message: killed > 0 ? 'Pipeline processes stopped' : 'No running processes found',
+        });
+    } catch (error) {
+        console.error('[Pipeline API] Error stopping:', error);
+        return NextResponse.json(
+            { error: `Failed to stop pipeline: ${error instanceof Error ? error.message : 'Unknown error'}` },
             { status: 500 }
         );
     }
