@@ -23,6 +23,11 @@ const PIPELINE_ACTIONS: Record<string, { script: string; label: string; timeout:
         label: 'AI Processing (Gemini)',
         timeout: 1200,
     },
+    'visual-recognize': {
+        script: 'visual-recognize.js',
+        label: 'Visual Recognition (Gemini Vision)',
+        timeout: 1800,
+    },
     'tmdb-enrich': {
         script: 'enrich-metadata.js',
         label: 'TMDB Enrichment',
@@ -78,6 +83,7 @@ export async function GET() {
                     COUNT(*) FILTER (WHERE status = 'auto_recognized') AS auto_recognized,
                     COUNT(*) FILTER (WHERE status = 'watermarked') AS watermarked,
                     COUNT(*) FILTER (WHERE status = 'needs_review') AS needs_review,
+                    COUNT(*) FILTER (WHERE status = 'unknown_with_suggestions') AS unknown_with_suggestions,
                     COUNT(*) FILTER (WHERE status = 'published') AS published,
                     COUNT(*) FILTER (WHERE status = 'rejected') AS rejected,
                     COALESCE(AVG(ai_confidence) FILTER (WHERE ai_confidence IS NOT NULL), 0) AS avg_confidence
@@ -130,7 +136,7 @@ export async function GET() {
         let videoProgress = null;
         try {
             const { stdout } = await execAsync(
-                `ssh ${SSH_OPTS} ${CONTABO_HOST} "ps aux | grep -E 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{for(i=1;i<=NF;i++){if(\\$i~/\\\\.js$/){sub(/.*\\\\//,\\\"\\\",\\$i);print \\$i;break}}}'; echo '___PROGRESS_SEP___'; cat /opt/celebskin/scripts/logs/progress.json 2>/dev/null || echo 'null'"`,
+                `ssh ${SSH_OPTS} ${CONTABO_HOST} "ps aux | grep -E 'node.*(scrape|process-with-ai|visual-recognize|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' | grep -v grep | awk '{for(i=1;i<=NF;i++){if(\\$i~/\\\\.js$/){sub(/.*\\\\//,\\\"\\\",\\$i);print \\$i;break}}}'; echo '___PROGRESS_SEP___'; cat /opt/celebskin/scripts/logs/progress.json 2>/dev/null || echo 'null'"`,
                 { timeout: 10000, env: { ...process.env, HOME: '/root' } }
             );
             const parts = stdout.split('___PROGRESS_SEP___');
@@ -249,7 +255,7 @@ export async function DELETE() {
         let killed = 0;
         try {
             const { stdout } = await execAsync(
-                `ssh ${SSH_OPTS} ${CONTABO_HOST} "pkill -f 'node.*(scrape|process-with-ai|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' 2>/dev/null; echo \\$?"`,
+                `ssh ${SSH_OPTS} ${CONTABO_HOST} "pkill -f 'node.*(scrape|process-with-ai|visual-recognize|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' 2>/dev/null; echo \\$?"`,
                 { timeout: 15000, env: { ...process.env, HOME: '/root' } }
             );
             const exitCode = parseInt(stdout.trim());

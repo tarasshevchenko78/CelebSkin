@@ -6,6 +6,8 @@ export const dynamic = 'force-dynamic';
 
 interface VideoRow extends Video {
     celebrity_names: string | null;
+    movie_title: string | null;
+    movie_year: number | null;
 }
 
 export default async function AdminVideosPage({
@@ -31,7 +33,13 @@ export default async function AdminVideosPage({
                         (SELECT string_agg(c.name, ', ' ORDER BY c.name)
                          FROM celebrities c
                          JOIN video_celebrities vc ON vc.celebrity_id = c.id
-                         WHERE vc.video_id = v.id) AS celebrity_names
+                         WHERE vc.video_id = v.id) AS celebrity_names,
+                        (SELECT m.title FROM movies m
+                         JOIN movie_scenes ms ON ms.movie_id = m.id
+                         WHERE ms.video_id = v.id LIMIT 1) AS movie_title,
+                        (SELECT m.year FROM movies m
+                         JOIN movie_scenes ms ON ms.movie_id = m.id
+                         WHERE ms.video_id = v.id LIMIT 1) AS movie_year
                  FROM videos v ${whereClause}
                  ORDER BY v.created_at DESC LIMIT $1 OFFSET $2`,
                 params

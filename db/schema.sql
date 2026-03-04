@@ -141,6 +141,10 @@ CREATE TABLE videos (
     ai_raw_response JSONB,
     enrichment_layers_used TEXT[],
 
+    -- Visual recognition data
+    recognition_data JSONB,              -- Gemini Vision results (movie/actor suggestions, OCR, etc.)
+    recognition_method VARCHAR(20),      -- 'metadata' | 'visual' | 'manual'
+
     -- Stats
     views_count BIGINT DEFAULT 0,
     likes_count INT DEFAULT 0,

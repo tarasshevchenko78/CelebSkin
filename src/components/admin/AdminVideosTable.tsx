@@ -19,6 +19,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 interface VideoRow extends Video {
     celebrity_names: string | null;
+    movie_title: string | null;
+    movie_year: number | null;
 }
 
 // Re-export for page.tsx typing
@@ -72,6 +74,7 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                             <th className="text-left p-3 text-gray-400 font-medium w-16">Thumb</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Title</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Celebrity</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Movie</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Status</th>
                             <th className="text-left p-3 text-gray-400 font-medium">AI</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Views</th>
@@ -105,6 +108,11 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                                 <td className="p-3 text-gray-400 text-xs max-w-[150px] truncate">
                                     {video.celebrity_names || '\u2014'}
                                 </td>
+                                <td className="p-3 text-gray-400 text-xs max-w-[140px] truncate">
+                                    {video.movie_title ? (
+                                        <span>{video.movie_title}{video.movie_year ? ` (${video.movie_year})` : ''}</span>
+                                    ) : '\u2014'}
+                                </td>
                                 <td className="p-3">
                                     <span className={`text-xs px-2 py-0.5 rounded-full ${STATUS_COLORS[video.status] || 'bg-gray-800 text-gray-400'}`}>
                                         {video.status}
@@ -136,7 +144,7 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                         ))}
                         {videos.length === 0 && (
                             <tr>
-                                <td colSpan={8} className="p-8 text-center text-gray-500">
+                                <td colSpan={9} className="p-8 text-center text-gray-500">
                                     No videos found
                                 </td>
                             </tr>

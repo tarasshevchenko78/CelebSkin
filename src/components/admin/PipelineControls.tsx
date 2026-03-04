@@ -93,6 +93,7 @@ interface PipelineStats {
         auto_recognized: string;
         watermarked: string;
         needs_review: string;
+        unknown_with_suggestions: string;
         published: string;
         rejected: string;
         avg_confidence: string;
@@ -138,6 +139,7 @@ const GEMINI_MODELS = [
 const STEP_ICONS: Record<string, string> = {
     'scrape': '🕷️',
     'ai-process': '🤖',
+    'visual-recognize': '👁️',
     'tmdb-enrich': '🎬',
     'watermark': '💧',
     'thumbnails': '📸',
@@ -369,6 +371,7 @@ export default function PipelineControls() {
                 <StatCard label="Videos Enriched" value={String(Number(videos?.enriched || 0) + Number(videos?.auto_recognized || 0))} color="text-purple-400" />
                 <StatCard label="Videos Published" value={videos?.published || '0'} color="text-green-400" />
                 <StatCard label="Needs Review" value={videos?.needs_review || '0'} color="text-yellow-400" />
+                <StatCard label="Unknown + Suggestions" value={videos?.unknown_with_suggestions || '0'} color="text-orange-400" />
             </div>
 
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -510,6 +513,7 @@ export default function PipelineControls() {
                     {[
                         { id: 'scrape', label: 'Scrape', desc: 'Boobsradar' },
                         { id: 'ai-process', label: 'AI Process', desc: 'Gemini' },
+                        { id: 'visual-recognize', label: 'Visual', desc: 'Gemini Vision' },
                         { id: 'tmdb-enrich', label: 'TMDB Enrich', desc: 'Photos & Posters' },
                         { id: 'watermark', label: 'Watermark', desc: 'celeb.skin overlay' },
                         { id: 'thumbnails', label: 'Thumbnails', desc: 'Screenshots & GIF' },
@@ -675,10 +679,11 @@ export default function PipelineControls() {
 // Multi-step pipeline progress view (conveyor belt)
 // ============================================
 
-const STEP_ORDER = ['scrape', 'ai-process', 'tmdb-enrich', 'watermark', 'thumbnails', 'cdn-upload', 'publish'];
+const STEP_ORDER = ['scrape', 'ai-process', 'visual-recognize', 'tmdb-enrich', 'watermark', 'thumbnails', 'cdn-upload', 'publish'];
 const STEP_LABELS: Record<string, string> = {
     'scrape': 'Scraping',
     'ai-process': 'AI Processing',
+    'visual-recognize': 'Visual Recognition',
     'tmdb-enrich': 'TMDB Enrichment',
     'watermark': 'Watermarking',
     'thumbnails': 'Thumbnails',

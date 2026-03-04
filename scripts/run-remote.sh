@@ -34,6 +34,7 @@ if [ -z "$ACTION" ]; then
     case "$SCRIPT" in
         scrape-boobsradar.js) ACTION="scrape" ;;
         process-with-ai.js)   ACTION="ai-process" ;;
+        visual-recognize.js)  ACTION="visual-recognize" ;;
         enrich-metadata.js)   ACTION="tmdb-enrich" ;;
         watermark.js)         ACTION="watermark" ;;
         generate-thumbnails.js) ACTION="thumbnails" ;;
