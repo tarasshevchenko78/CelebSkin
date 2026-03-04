@@ -139,10 +139,14 @@ export default async function CelebrityDetailPage({
                             return (
                                 <a key={movie.id} href={`/${locale}/movie/${movie.slug}`} className="group">
                                     <div className="aspect-[2/3] rounded-xl overflow-hidden bg-brand-card border border-brand-border group-hover:border-brand-accent/50 transition-colors">
-                                        <div className="w-full h-full bg-gradient-to-br from-brand-card to-brand-hover flex flex-col items-center justify-center p-3">
-                                            <svg className="w-8 h-8 text-brand-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4" /></svg>
-                                            <span className="text-xs text-brand-muted text-center">{movieTitle}</span>
-                                        </div>
+                                        {movie.poster_url ? (
+                                            <img src={movie.poster_url} alt={movieTitle} className="w-full h-full object-cover" />
+                                        ) : (
+                                            <div className="w-full h-full bg-gradient-to-br from-brand-card to-brand-hover flex flex-col items-center justify-center p-3">
+                                                <svg className="w-8 h-8 text-brand-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4" /></svg>
+                                                <span className="text-xs text-brand-muted text-center">{movieTitle}</span>
+                                            </div>
+                                        )}
                                     </div>
                                     <div className="mt-2">
                                         <h3 className="text-sm font-medium text-brand-text group-hover:text-white transition-colors line-clamp-1">{movieTitle}</h3>

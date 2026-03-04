@@ -133,9 +133,13 @@ export default async function VideoDetailPage({
                                         href={`/${locale}/celebrity/${celeb.slug}`}
                                         className="flex items-center gap-2.5 rounded-lg bg-brand-card border border-brand-border px-3 py-2 hover:bg-brand-hover transition-colors"
                                     >
-                                        <div className="w-9 h-9 rounded-full bg-brand-hover flex items-center justify-center text-sm font-semibold text-brand-secondary shrink-0">
-                                            {celeb.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                                        </div>
+                                        {celeb.photo_url ? (
+                                            <img src={celeb.photo_url} alt={celeb.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
+                                        ) : (
+                                            <div className="w-9 h-9 rounded-full bg-brand-hover flex items-center justify-center text-sm font-semibold text-brand-secondary shrink-0">
+                                                {celeb.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
+                                            </div>
+                                        )}
                                         <span className="text-sm text-brand-text">{celeb.name}</span>
                                     </a>
                                 ))}
@@ -151,9 +155,13 @@ export default async function VideoDetailPage({
                                 href={`/${locale}/movie/${video.movie.slug}`}
                                 className="flex items-center gap-3 rounded-lg bg-brand-card border border-brand-border px-3 py-2 hover:bg-brand-hover transition-colors w-fit"
                             >
-                                <div className="w-10 h-14 rounded bg-brand-hover flex items-center justify-center text-xs text-brand-muted shrink-0">
-                                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4" /></svg>
-                                </div>
+                                {video.movie.poster_url ? (
+                                    <img src={video.movie.poster_url} alt={getLocalizedField(video.movie.title_localized, locale) || video.movie.title} className="w-10 h-14 rounded object-cover shrink-0" />
+                                ) : (
+                                    <div className="w-10 h-14 rounded bg-brand-hover flex items-center justify-center text-xs text-brand-muted shrink-0">
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4" /></svg>
+                                    </div>
+                                )}
                                 <div>
                                     <span className="text-sm text-brand-text block">{getLocalizedField(video.movie.title_localized, locale) || video.movie.title}</span>
                                     {video.movie.year && <span className="text-xs text-brand-muted">{video.movie.year}</span>}
