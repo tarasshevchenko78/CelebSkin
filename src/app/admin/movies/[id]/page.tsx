@@ -57,6 +57,7 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
     const [studio, setStudio] = useState('');
     const [director, setDirector] = useState('');
     const [posterImgError, setPosterImgError] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [sceneThumbErrors, setSceneThumbErrors] = useState<Set<string>>(new Set());
     const [castPhotoErrors, setCastPhotoErrors] = useState<Set<number>>(new Set());
 
@@ -142,6 +143,39 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                     <input value={posterUrl} onChange={(e) => setPosterUrl(e.target.value)}
                         placeholder="Poster URL..."
                         className="w-full text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-gray-200" />
+                    <label className={`block w-full text-center text-xs px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                        uploading ? 'bg-gray-700 text-gray-500' : 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-800/50'
+                    }`}>
+                        {uploading ? 'Uploading...' : 'Upload Poster'}
+                        <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                            onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file || !movie) return;
+                                setUploading(true);
+                                setMessage(null);
+                                try {
+                                    const fd = new FormData();
+                                    fd.append('file', file);
+                                    fd.append('type', 'movie');
+                                    fd.append('id', String(movie.id));
+                                    fd.append('slug', movie.slug);
+                                    const res = await fetch('/api/admin/upload', { method: 'POST', body: fd });
+                                    const data = await res.json();
+                                    if (res.ok) {
+                                        setPosterUrl(data.url);
+                                        setPosterImgError(false);
+                                        setMessage({ type: 'success', text: `Poster uploaded: ${data.url}` });
+                                    } else {
+                                        setMessage({ type: 'error', text: data.error });
+                                    }
+                                } catch (err) {
+                                    setMessage({ type: 'error', text: `Upload failed: ${err}` });
+                                } finally {
+                                    setUploading(false);
+                                    e.target.value = '';
+                                }
+                            }} />
+                    </label>
                 </div>
 
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">

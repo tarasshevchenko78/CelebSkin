@@ -57,6 +57,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
     const [photoUrl, setPhotoUrl] = useState('');
     const [isFeatured, setIsFeatured] = useState(false);
     const [photoImgError, setPhotoImgError] = useState(false);
+    const [uploading, setUploading] = useState(false);
     const [vidThumbErrors, setVidThumbErrors] = useState<Set<string>>(new Set());
     const [moviePosterErrors, setMoviePosterErrors] = useState<Set<number>>(new Set());
 
@@ -133,9 +134,42 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                             {celebrity.name.charAt(0)}
                         </div>
                     )}
-                    <input value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)}
+                    <input value={photoUrl} onChange={(e) => { setPhotoUrl(e.target.value); setPhotoImgError(false); }}
                         placeholder="Photo URL..."
                         className="w-full text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-gray-200" />
+                    <label className={`block w-full text-center text-xs px-2 py-1.5 rounded cursor-pointer transition-colors ${
+                        uploading ? 'bg-gray-700 text-gray-500' : 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-800/50'
+                    }`}>
+                        {uploading ? 'Uploading...' : 'Upload Photo'}
+                        <input type="file" accept="image/*" className="hidden" disabled={uploading}
+                            onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file || !celebrity) return;
+                                setUploading(true);
+                                setMessage(null);
+                                try {
+                                    const fd = new FormData();
+                                    fd.append('file', file);
+                                    fd.append('type', 'celebrity');
+                                    fd.append('id', String(celebrity.id));
+                                    fd.append('slug', celebrity.slug);
+                                    const res = await fetch('/api/admin/upload', { method: 'POST', body: fd });
+                                    const data = await res.json();
+                                    if (res.ok) {
+                                        setPhotoUrl(data.url);
+                                        setPhotoImgError(false);
+                                        setMessage({ type: 'success', text: `Photo uploaded: ${data.url}` });
+                                    } else {
+                                        setMessage({ type: 'error', text: data.error });
+                                    }
+                                } catch (err) {
+                                    setMessage({ type: 'error', text: `Upload failed: ${err}` });
+                                } finally {
+                                    setUploading(false);
+                                    e.target.value = '';
+                                }
+                            }} />
+                    </label>
                 </div>
 
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">

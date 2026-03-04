@@ -35,6 +35,8 @@ interface StepProgressData {
         error: string;
     }>;
     elapsedMs?: number;
+    startedAt?: string;
+    finishedAt?: string;
     updatedAt?: string;
 }
 
@@ -44,6 +46,12 @@ interface PipelineProgressData {
     currentStep: string;
     currentLabel: string;
     elapsedMs: number;
+    status?: 'finished';
+    stepTimings?: Array<{
+        step: string;
+        success: boolean;
+        duration: number;
+    }>;
 }
 
 interface VideoProgressData {
@@ -703,19 +711,30 @@ function PipelineProgressView({ progress }: {
         const totalElapsed = pipelineInfo?.elapsedMs || Math.max(...activeSteps.map(s => s.elapsedMs || 0), 0);
         const completedCount = activeSteps.filter(s => s.status === 'completed').length;
         const activeCount = activeSteps.filter(s => s.status === 'active').length;
+        const pendingCount = activeSteps.length - completedCount - activeCount;
+        const isFinished = pipelineInfo?.status === 'finished';
 
         return (
             <div className="space-y-3">
                 {/* Pipeline header */}
-                <div className="flex items-center justify-between rounded-xl border border-gray-800 bg-gray-900/50 px-4 py-3">
+                <div className={`flex items-center justify-between rounded-xl border px-4 py-3 ${
+                    isFinished ? 'border-green-800/50 bg-green-900/10' : 'border-gray-800 bg-gray-900/50'
+                }`}>
                     <div className="flex items-center gap-2">
-                        <span className="text-lg">⚡</span>
-                        <span className="text-sm font-medium text-gray-300">Pipeline</span>
+                        <span className="text-lg">{isFinished ? '✅' : '⚡'}</span>
+                        <span className={`text-sm font-medium ${isFinished ? 'text-green-400' : 'text-gray-300'}`}>
+                            {isFinished ? 'Pipeline Complete' : 'Pipeline'}
+                        </span>
                         <span className="text-xs text-gray-500">
-                            {completedCount} done, {activeCount} active, {activeSteps.length - completedCount - activeCount} pending
+                            {isFinished
+                                ? `${completedCount} steps completed`
+                                : `${completedCount} done, ${activeCount} active, ${pendingCount} pending`
+                            }
                         </span>
                     </div>
-                    {totalElapsed > 0 && <span className="text-sm text-gray-500">{formatMs(totalElapsed)}</span>}
+                    <span className={`text-sm font-semibold tabular-nums ${isFinished ? 'text-green-400' : 'text-gray-500'}`}>
+                        {totalElapsed > 0 ? formatMs(totalElapsed) : ''}
+                    </span>
                 </div>
 
                 {/* Step panels — show ALL steps (pending, active, completed) */}
@@ -755,7 +774,7 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
     const isCompleted = data.status === 'completed';
     const pct = data.videosTotal > 0
         ? Math.round((data.videosDone / data.videosTotal) * 100)
-        : 0;
+        : (isCompleted ? 100 : 0);
     const icon = STEP_ICONS[stepId] || '⏳';
     const label = data.stepLabel || STEP_LABELS[stepId] || stepId;
     const eta = data.elapsedMs && data.videosDone > 0 && !isCompleted
@@ -764,6 +783,15 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
     const completedList = data.completedVideos || [];
     const errorList = data.errors || [];
     const downloads = data.downloads || [];
+
+    // Calculate step duration from startedAt/finishedAt or elapsedMs
+    let stepDuration = '';
+    if (data.startedAt && data.finishedAt) {
+        const durationMs = new Date(data.finishedAt).getTime() - new Date(data.startedAt).getTime();
+        stepDuration = formatMs(durationMs);
+    } else if (data.elapsedMs && data.elapsedMs > 0) {
+        stepDuration = formatMs(data.elapsedMs);
+    }
 
     const isPending = data.status === 'pending';
     const borderColor = isCompleted ? 'border-green-800/50' : isPending ? 'border-gray-800/50' : 'border-purple-800/50';
@@ -792,10 +820,13 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
                     <div>
                         <h3 className={`text-sm font-semibold ${isCompleted ? 'text-green-400' : 'text-purple-300'}`}>
                             {label} {isCompleted && '✓'}
+                            {isCompleted && stepDuration && (
+                                <span className="ml-2 text-xs font-normal text-green-600">({stepDuration})</span>
+                            )}
                         </h3>
                         <p className="text-xs text-gray-500">
                             {data.videosDone}/{data.videosTotal} videos
-                            {data.elapsedMs ? <span className="ml-2 text-gray-600">{formatMs(data.elapsedMs)}</span> : null}
+                            {!isCompleted && stepDuration ? <span className="ml-2 text-gray-600">{stepDuration}</span> : null}
                             {eta && <span className="ml-2 text-cyan-500">ETA: {eta}</span>}
                         </p>
                     </div>
@@ -809,7 +840,7 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
             <div className="w-full h-2 rounded-full bg-gray-800 overflow-hidden">
                 <div
                     className={`h-full rounded-full ${barGradient} transition-all duration-700 ease-out`}
-                    style={{ width: `${pct}%` }}
+                    style={{ width: `${isCompleted ? 100 : pct}%` }}
                 />
             </div>
 
