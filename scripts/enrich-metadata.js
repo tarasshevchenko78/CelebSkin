@@ -22,8 +22,16 @@
  * Deploy: copy to /opt/celebskin/scripts/ on Contabo
  */
 
-const { Pool } = require('pg');
-const https = require('https');
+import pg from 'pg';
+const { Pool } = pg;
+import https from 'https';
+import dotenv from "dotenv";
+import { fileURLToPath } from "url";
+import path from "path";
+import { writeProgress, clearProgress } from "./lib/progress.js";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, ".env") });
 
 // ============================================
 // Config
@@ -33,7 +41,11 @@ const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p';
 
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
+    host: process.env.DB_HOST || "185.224.82.214",
+    port: parseInt(process.env.DB_PORT || "5432"),
+    database: process.env.DB_NAME || "celebskin",
+    user: process.env.DB_USER || "celebskin",
+    password: process.env.DB_PASSWORD || "",
 });
 
 // Parse CLI args
@@ -147,7 +159,7 @@ async function enrichMovieFromTmdb(tmdbResult, type, existingMovie) {
     // Build localized description
     const description = { en: overview };
     // Fetch descriptions in other languages
-    const locales = ['de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'cs', 'ro'];
+    const locales = ['ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
     for (const locale of locales) {
         try {
             await sleep(100); // Rate limiting
@@ -243,7 +255,7 @@ async function enrichCelebrity(celebrity) {
     const bio = { en: details.biography || '' };
 
     // Fetch localized bios
-    const locales = ['de', 'fr', 'es', 'it', 'pt', 'nl', 'pl', 'cs', 'ro'];
+    const locales = ['ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
     for (const locale of locales) {
         try {
             await sleep(100);
@@ -293,6 +305,7 @@ async function main() {
         process.exit(1);
     }
 
+    const startedAt = Date.now();
     console.log(`\n=== CelebSkin TMDB Enrichment ===`);
     console.log(`Mode: Single-movie per video (no full filmography)`);
     console.log(`Limit: ${LIMIT}, Force: ${FORCE}\n`);
@@ -315,8 +328,21 @@ async function main() {
     let moviesLinked = 0;
     let moviesCreated = 0;
     let celebsEnriched = 0;
+    let _done = 0;
+    const _completed = [];
+    const _errors = [];
 
     for (const video of videosResult.rows) {
+        _done++;
+        const _start = Date.now();
+        writeProgress({
+            step: 'tmdb-enrich', stepLabel: 'TMDB Enrichment',
+            videosTotal: videosResult.rows.length, videosDone: _done,
+            currentVideo: { id: video.id, title: video.original_title, subStep: 'Processing' },
+            completedVideos: _completed.slice(-10),
+            errors: _errors.slice(-10),
+            elapsedMs: Date.now() - startedAt,
+        });
         const aiData = video.ai_raw_response;
         // AI response may have movie_title, movie_name, or movie field
         const movieTitle = aiData?.movie_title || aiData?.movie_name || aiData?.movie || null;
@@ -341,6 +367,7 @@ async function main() {
                     [movie.id, video.id]
                 );
                 moviesLinked++;
+                _completed.push({ id: video.id, title: video.original_title, status: 'ok', ms: Date.now() - _start });
 
                 // Update scenes_count
                 await pool.query(
@@ -371,6 +398,7 @@ async function main() {
             await sleep(300); // TMDB rate limit: ~40 req/10s
         } catch (err) {
             console.error(`  ERROR processing movie "${movieTitle}": ${err.message}`);
+            _errors.push({ id: video.id, title: video.original_title, error: err.message });
         }
     }
 
@@ -398,6 +426,7 @@ async function main() {
     }
 
     // Summary
+    clearProgress();
     console.log('\n=== Enrichment Complete ===');
     console.log(`Movies linked: ${moviesLinked}`);
     console.log(`Celebrities enriched: ${celebsEnriched}`);
