@@ -15,7 +15,7 @@ interface StepProgressData {
     stepLabel: string;
     videosTotal: number;
     videosDone: number;
-    status: 'active' | 'completed' | 'pending';
+    status: 'active' | 'completed' | 'pending' | 'idle' | 'waiting';
     currentVideo?: {
         id: string;
         title: string;
@@ -38,6 +38,7 @@ interface StepProgressData {
     startedAt?: string;
     finishedAt?: string;
     updatedAt?: string;
+    conveyorRun?: number;
 }
 
 interface PipelineProgressData {
@@ -46,11 +47,14 @@ interface PipelineProgressData {
     currentStep: string;
     currentLabel: string;
     elapsedMs: number;
-    status?: 'finished';
+    status?: 'finished' | 'running';
+    mode?: 'conveyor' | 'sequential';
     stepTimings?: Array<{
         step: string;
         success: boolean;
         duration: number;
+        processed?: number;
+        runs?: number;
     }>;
 }
 
@@ -711,8 +715,11 @@ function PipelineProgressView({ progress }: {
         const totalElapsed = pipelineInfo?.elapsedMs || Math.max(...activeSteps.map(s => s.elapsedMs || 0), 0);
         const completedCount = activeSteps.filter(s => s.status === 'completed').length;
         const activeCount = activeSteps.filter(s => s.status === 'active').length;
-        const pendingCount = activeSteps.length - completedCount - activeCount;
+        const idleCount = activeSteps.filter(s => s.status === 'idle').length;
+        const waitingCount = activeSteps.filter(s => s.status === 'waiting').length;
+        const pendingCount = activeSteps.length - completedCount - activeCount - idleCount - waitingCount;
         const isFinished = pipelineInfo?.status === 'finished';
+        const isConveyor = pipelineInfo?.mode === 'conveyor';
 
         return (
             <div className="space-y-3">
@@ -721,14 +728,16 @@ function PipelineProgressView({ progress }: {
                     isFinished ? 'border-green-800/50 bg-green-900/10' : 'border-gray-800 bg-gray-900/50'
                 }`}>
                     <div className="flex items-center gap-2">
-                        <span className="text-lg">{isFinished ? '✅' : '⚡'}</span>
+                        <span className="text-lg">{isFinished ? '✅' : isConveyor ? '🔄' : '⚡'}</span>
                         <span className={`text-sm font-medium ${isFinished ? 'text-green-400' : 'text-gray-300'}`}>
-                            {isFinished ? 'Pipeline Complete' : 'Pipeline'}
+                            {isFinished ? 'Pipeline Complete' : isConveyor ? 'Conveyor Pipeline' : 'Pipeline'}
                         </span>
                         <span className="text-xs text-gray-500">
                             {isFinished
                                 ? `${completedCount} steps completed`
-                                : `${completedCount} done, ${activeCount} active, ${pendingCount} pending`
+                                : isConveyor
+                                    ? `${activeCount} active, ${idleCount} idle, ${completedCount} done`
+                                    : `${completedCount} done, ${activeCount} active, ${pendingCount} pending`
                             }
                         </span>
                     </div>
@@ -794,8 +803,10 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
     }
 
     const isPending = data.status === 'pending';
-    const borderColor = isCompleted ? 'border-green-800/50' : isPending ? 'border-gray-800/50' : 'border-purple-800/50';
-    const bgColor = isCompleted ? 'bg-green-900/10' : isPending ? 'bg-gray-900/20' : 'bg-purple-900/10';
+    const isIdle = data.status === 'idle';
+    const isWaiting = data.status === 'waiting';
+    const borderColor = isCompleted ? 'border-green-800/50' : isPending || isWaiting ? 'border-gray-800/50' : isIdle ? 'border-blue-800/30' : 'border-purple-800/50';
+    const bgColor = isCompleted ? 'bg-green-900/10' : isPending || isWaiting ? 'bg-gray-900/20' : isIdle ? 'bg-blue-900/5' : 'bg-purple-900/10';
     const barGradient = isCompleted
         ? 'bg-gradient-to-r from-green-600 to-emerald-500'
         : 'bg-gradient-to-r from-purple-600 to-pink-500';
@@ -807,6 +818,33 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
                 <span className="text-lg">{icon}</span>
                 <span className="text-sm text-gray-500">{label}</span>
                 <span className="text-xs text-gray-600 ml-auto">pending</span>
+            </div>
+        );
+    }
+
+    // Waiting for dependency — compact single line
+    if (isWaiting) {
+        return (
+            <div className={`rounded-xl border ${borderColor} ${bgColor} px-4 py-2.5 flex items-center gap-2.5 opacity-60`}>
+                <span className="text-lg">{icon}</span>
+                <span className="text-sm text-gray-400">{label}</span>
+                <span className="text-xs text-gray-500 ml-auto">waiting for dependency...</span>
+            </div>
+        );
+    }
+
+    // Idle (conveyor polling) — compact with pulse
+    if (isIdle) {
+        return (
+            <div className={`rounded-xl border ${borderColor} ${bgColor} px-4 py-2.5 flex items-center gap-2.5`}>
+                <span className="text-lg">{icon}</span>
+                <span className="text-sm text-blue-300">{label}</span>
+                <span className="text-xs text-blue-500/70 ml-auto flex items-center gap-1.5">
+                    {data.videosDone > 0
+                        ? `${data.videosDone} processed — polling for more...`
+                        : 'polling for items...'}
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400/50 animate-pulse" />
+                </span>
             </div>
         );
     }
