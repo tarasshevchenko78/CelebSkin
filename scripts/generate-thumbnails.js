@@ -39,7 +39,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = join(__dirname, 'tmp');
 const CDN_URL = process.env.BUNNY_CDN_URL || 'https://cdn.celeb.skin';
 
-const DEFAULTS = {
+export const DEFAULTS = {
     thumbCount: 8,
     thumbWidth: 320,
     gifDuration: 4,
@@ -164,7 +164,7 @@ async function downloadVideo(url, destPath) {
 // Process Single Video
 // ============================================
 
-async function processVideo(video, config) {
+export async function processVideo(video, config) {
     const videoId = video.id;
     const videoUrl = video.video_url_watermarked || video.video_url;
 
@@ -304,7 +304,7 @@ async function processVideo(video, config) {
             `UPDATE videos SET
                 screenshots = $2::jsonb,
                 sprite_data = $3::jsonb,
-                thumbnail_url = COALESCE(thumbnail_url, $4),
+                thumbnail_url = $4,
                 duration_seconds = COALESCE(duration_seconds, $5),
                 duration_formatted = COALESCE(duration_formatted, $6),
                 quality = COALESCE(quality, $7),
@@ -396,10 +396,11 @@ async function main() {
         : `status IN ('watermarked', 'enriched', 'auto_recognized') AND (screenshots IS NULL OR screenshots = '[]'::jsonb)`;
 
     const { rows: videos } = await query(
-        `SELECT id, video_url, video_url_watermarked, screenshots, duration_seconds
-         FROM videos
-         WHERE ${statusFilter} AND (video_url IS NOT NULL OR video_url_watermarked IS NOT NULL)
-         ORDER BY created_at DESC
+        `SELECT v.id, v.video_url, v.video_url_watermarked, v.screenshots, v.duration_seconds,
+                COALESCE(v.title->>'en', v.id::text) as display_title
+         FROM videos v
+         WHERE ${statusFilter} AND (v.video_url IS NOT NULL OR v.video_url_watermarked IS NOT NULL)
+         ORDER BY v.created_at DESC
          LIMIT $1`,
         [config.limit]
     );
@@ -421,10 +422,11 @@ async function main() {
         const num = ++processed;
         logger.info(`\n[${num}/${videos.length}] Video: ${video.id}`);
         const _start = Date.now();
+        const vTitle = video.display_title || video.id;
         writeProgress({
             step: 'thumbnails', stepLabel: 'Thumbnail Generation',
             videosTotal: videos.length, videosDone: num - 1,
-            currentVideo: { id: video.id, title: video.id, subStep: 'Generating thumbnails + sprites' },
+            currentVideo: { id: video.id, title: vTitle, subStep: 'Generating thumbnails + sprites' },
             completedVideos: _completed.slice(-10),
             errors: _errors.slice(-10),
             elapsedMs: Date.now() - startedAt,
@@ -435,7 +437,7 @@ async function main() {
         switch (result.status) {
             case 'ok':
                 generated++;
-                _completed.push({ id: video.id, title: video.id, status: 'ok', ms: Date.now() - _start });
+                _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
                 logger.info(`  ✓ ${result.frames} frames${result.hasGif ? ' + GIF' : ''}`);
                 break;
             case 'skip':
@@ -444,7 +446,7 @@ async function main() {
                 break;
             case 'error':
                 errors++;
-                _errors.push({ id: video.id, title: video.id, error: result.reason });
+                _errors.push({ id: video.id, title: vTitle, error: result.reason });
                 logger.error(`  ✗ Error: ${result.reason}`);
                 break;
         }
@@ -452,26 +454,18 @@ async function main() {
     }
 
     logger.info('\n' + '='.repeat(60));
-    const elapsedMs = Date.now() - startedAt;
     completeStep({
-        videosDone: generated,
-        videosTotal: processed,
-        elapsedMs,
+        videosDone: generated + skipped,
+        videosTotal: videos.length,
+        elapsedMs: Date.now() - startedAt,
         completedVideos: _completed.slice(-20),
         errors: _errors.slice(-20),
-        errorCount: errors,
     });
     logger.info('THUMBNAIL GENERATION SUMMARY');
     logger.info(`Processed: ${processed}`);
     logger.info(`Generated: ${generated}`);
     logger.info(`Skipped: ${skipped}`);
     logger.info(`Errors: ${errors}`);
-    if (errors > 0) {
-        logger.error(`⚠️  ${errors} video(s) failed thumbnail generation:`);
-        for (const e of _errors) {
-            logger.error(`  - ${e.id}: ${e.error}`);
-        }
-    }
 }
 
 function parseArgs() {
@@ -485,7 +479,10 @@ function parseArgs() {
     return args;
 }
 
-main().catch(err => {
-    logger.error('Fatal error:', err);
-    process.exit(1);
-});
+const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (_isMain) {
+    main().catch(err => {
+        logger.error('Fatal error:', err);
+        process.exit(1);
+    });
+}

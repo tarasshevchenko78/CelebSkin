@@ -445,6 +445,9 @@ async function main() {
                 -- Videos with local tmp paths (normal pipeline flow)
                 v.video_url_watermarked LIKE 'tmp/%'
                 OR v.thumbnail_url LIKE 'tmp/%'
+                -- Videos where screenshots array has tmp/ paths (thumbnails generated but not yet on CDN)
+                OR (v.screenshots IS NOT NULL AND v.screenshots::text LIKE '%tmp/%'
+                    AND (v.sprite_url IS NULL OR v.sprite_url NOT LIKE '%b-cdn%'))
                 -- Published videos that still have non-CDN video URLs (missed by earlier pipeline runs)
                 OR (v.status = 'published' AND v.video_url IS NOT NULL
                     AND v.video_url NOT LIKE '%b-cdn.net%'
@@ -506,7 +509,6 @@ async function main() {
         elapsedMs: Date.now() - startedAt,
         completedVideos: _completed.slice(-20),
         errors: _errors.slice(-20),
-        errorCount: _errors.length,
     });
     logger.info('CDN UPLOAD SUMMARY');
     logger.info(`Video media uploads: ${videoUploads}`);
