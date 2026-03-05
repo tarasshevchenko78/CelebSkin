@@ -390,6 +390,19 @@ for (let i = 0; i < pending.length; i += CONCURRENCY) {
     }));
 }
 
-clearProgress();
+const elapsedMs = Date.now() - startedAt;
+completeStep({
+    videosDone: processed,
+    videosTotal: pending.length,
+    elapsedMs,
+    completedVideos: _completed.slice(-20),
+    errors: _errors.slice(-20),
+    errorCount: failed,
+});
 logger.info(`=== Done: ${processed} processed, ${failed} failed ===`);
-process.exit(0);
+if (failed > 0) {
+    logger.error(`⚠️  ${failed} video(s) failed AI processing:`);
+    for (const e of _errors) {
+        logger.error(`  - ${e.id} (${e.title}): ${e.error}`);
+    }
+}

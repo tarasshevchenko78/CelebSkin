@@ -18,10 +18,11 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+import { fileURLToPath } from 'url';
 import slugify from 'slugify';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, clearProgress } from './lib/progress.js';
+import { writeProgress, completeStep } from './lib/progress.js';
 
 const LANGS = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
 const SITE_URL = process.env.SITE_URL || 'https://celeb.skin';
@@ -65,7 +66,7 @@ function generateMultilingualSlugs(titleJsonb, videoId) {
 // Update Counts
 // ============================================
 
-async function updateAllCounts() {
+export async function updateAllCounts() {
     logger.info('  Updating counts...');
 
     // Celebrity video counts
@@ -151,10 +152,54 @@ async function linkMovieScenes(videoId) {
 }
 
 // ============================================
+// Pre-Publish Validation
+// ============================================
+
+const CDN_PATTERNS = ['b-cdn.net', 'cdn.celeb.skin'];
+
+function isCdnUrl(url) {
+    if (!url) return false;
+    return CDN_PATTERNS.some(pattern => url.includes(pattern));
+}
+
+export function validateVideoForPublish(video) {
+    const warnings = [];
+    const errors = [];
+
+    // CRITICAL: Video must have CDN URL (either watermarked or original on CDN)
+    const hasWatermarkedCdn = isCdnUrl(video.video_url_watermarked);
+    const hasVideoCdn = isCdnUrl(video.video_url);
+
+    if (!hasWatermarkedCdn && !hasVideoCdn) {
+        errors.push(`NO_CDN_VIDEO: video_url points to source (${(video.video_url || 'null').substring(0, 60)}...), will expire`);
+    }
+
+    // CRITICAL: Must have CDN thumbnail
+    if (!isCdnUrl(video.thumbnail_url)) {
+        errors.push(`NO_CDN_THUMBNAIL: thumbnail_url=${(video.thumbnail_url || 'null').substring(0, 60)}`);
+    }
+
+    // WARNING: Missing sprite/preview (not critical but bad UX)
+    if (!video.sprite_url) {
+        warnings.push('NO_SPRITE: sprite sheet missing');
+    }
+    if (!video.preview_gif_url) {
+        warnings.push('NO_PREVIEW_GIF: preview animation missing');
+    }
+
+    // WARNING: No celebrities linked
+    if (video.celebrity_count === 0 || video.celebrity_count === undefined) {
+        warnings.push('NO_CELEBRITIES: no celebrities linked to this video');
+    }
+
+    return { valid: errors.length === 0, errors, warnings };
+}
+
+// ============================================
 // Publish Single Video
 // ============================================
 
-async function publishVideo(video, dryRun = false) {
+export async function publishVideo(video, dryRun = false) {
     const videoId = video.id;
 
     // Generate multilingual slugs
@@ -257,9 +302,11 @@ async function main() {
     }
 
     const { rows: videos } = await query(
-        `SELECT id, title, slug, raw_video_id, video_url, video_url_watermarked,
-                thumbnail_url, ai_confidence, status
-         FROM videos
+        `SELECT v.id, v.title, v.slug, v.raw_video_id, v.video_url, v.video_url_watermarked,
+                v.thumbnail_url, v.sprite_url, v.preview_gif_url, v.ai_confidence, v.status,
+                COALESCE(v.title->>'en', v.id::text) as display_title,
+                (SELECT COUNT(*) FROM video_celebrities vc WHERE vc.video_id = v.id) as celebrity_count
+         FROM videos v
          WHERE ${statusFilter}
          ORDER BY ai_confidence DESC NULLS LAST, created_at ASC
          LIMIT $1`,
@@ -272,37 +319,79 @@ async function main() {
     let published = 0;
     let skipped = 0;
     let failed = 0;
+    let blocked = 0;
     const _completed = [];
     const _errors = [];
+    const _warnings = [];
+    const _blocked = [];
 
     for (const video of videos) {
         try {
             const _start = Date.now();
+            const vTitle = video.display_title || video.id;
             writeProgress({
                 step: 'publish', stepLabel: 'Publishing Videos',
-                videosTotal: videos.length, videosDone: published+skipped+failed,
-                currentVideo: { id: video.id, title: video.id, subStep: 'Processing' },
+                videosTotal: videos.length, videosDone: published+skipped+failed+blocked,
+                currentVideo: { id: video.id, title: vTitle, subStep: 'Validating' },
                 completedVideos: _completed.slice(-10),
                 errors: _errors.slice(-10),
                 elapsedMs: Date.now() - startedAt,
             });
+
+            // Pre-publish validation
+            const validation = validateVideoForPublish(video);
+
+            if (!validation.valid) {
+                blocked++;
+                _blocked.push({ id: video.id, title: vTitle, errors: validation.errors });
+                logger.error(`  ✗ BLOCKED: ${vTitle}`);
+                for (const err of validation.errors) {
+                    logger.error(`    ❌ ${err}`);
+                }
+                for (const warn of validation.warnings) {
+                    logger.warn(`    ⚠️ ${warn}`);
+                }
+                // Log to processing_log
+                await query(
+                    `INSERT INTO processing_log (video_id, step, status, metadata) VALUES ($1, 'publish_validation', 'blocked', $2::jsonb)`,
+                    [video.id, JSON.stringify({ errors: validation.errors, warnings: validation.warnings })]
+                );
+                continue;
+            }
+
+            // Log warnings but continue publishing
+            if (validation.warnings.length > 0) {
+                _warnings.push({ id: video.id, title: vTitle, warnings: validation.warnings });
+                for (const warn of validation.warnings) {
+                    logger.warn(`  ⚠️ ${warn}`);
+                }
+            }
+
             const result = await publishVideo(video, dryRun);
 
             if (result.status === 'ok') {
                 published++;
-                _completed.push({ id: video.id, title: video.id, status: 'ok', ms: Date.now() - _start });
+                _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
                 logger.info(`  [${published}] "${result.title || 'untitled'}" → /video/${result.slug}${result.scenesLinked ? ` (${result.scenesLinked} movie scenes)` : ''}`);
             } else {
                 skipped++;
             }
         } catch (err) {
             failed++;
-            _errors.push({ id: video.id, title: video.id, error: err.message });
+            _errors.push({ id: video.id, title: video.display_title || video.id, error: err.message });
             logger.error(`  ✗ Error publishing ${video.id}: ${err.message}`);
         }
     }
 
-    clearProgress();
+    const allErrors = [..._errors, ..._blocked.map(b => ({ ...b, error: b.errors.join('; ') }))];
+    completeStep({
+        videosDone: published + skipped + failed + blocked,
+        videosTotal: videos.length,
+        elapsedMs: Date.now() - startedAt,
+        completedVideos: _completed.slice(-20),
+        errors: allErrors.slice(-20),
+        errorCount: failed + blocked,
+    });
 
     // Update all counts after publishing batch
     if (published > 0 && !dryRun) {
@@ -313,8 +402,26 @@ async function main() {
     logger.info('\n' + '='.repeat(60));
     logger.info('PUBLISHING SUMMARY');
     logger.info(`Published: ${published}`);
+    logger.info(`Blocked by validation: ${blocked}`);
     logger.info(`Skipped: ${skipped}`);
     logger.info(`Failed: ${failed}`);
+
+    if (_blocked.length > 0) {
+        logger.info('\n⛔ BLOCKED VIDEOS (need fixing before publish):');
+        for (const item of _blocked) {
+            logger.info(`  ${item.title}:`);
+            for (const err of item.errors) {
+                logger.info(`    ❌ ${err}`);
+            }
+        }
+    }
+
+    if (_warnings.length > 0) {
+        logger.info('\n⚠️ PUBLISHED WITH WARNINGS:');
+        for (const item of _warnings) {
+            logger.info(`  ${item.title}: ${item.warnings.join(', ')}`);
+        }
+    }
 
     if (published > 0 && !dryRun) {
         logger.info(`\nSite URLs (examples):`);
@@ -333,7 +440,10 @@ function parseArgs() {
     return args;
 }
 
-main().catch(err => {
-    logger.error('Fatal error:', err);
-    process.exit(1);
-});
+const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (_isMain) {
+    main().catch(err => {
+        logger.error('Fatal error:', err);
+        process.exit(1);
+    });
+}

@@ -108,11 +108,21 @@ export function completeStep(finalData = {}) {
     if (_lastStep) {
         const existing = readProgressFile();
         if (existing.steps && existing.steps[_lastStep]) {
+            // Always ensure error tracking fields are present
+            const errorCount = finalData.errorCount ?? (finalData.errors?.length || 0);
+            const hasErrors = errorCount > 0;
+
             Object.assign(existing.steps[_lastStep], finalData, {
                 status: "completed",
+                errorCount,
+                hasErrors,
                 finishedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
             });
+            // Keep only last 20 error details to avoid bloating progress.json
+            if (existing.steps[_lastStep].errors?.length > 20) {
+                existing.steps[_lastStep].errors = existing.steps[_lastStep].errors.slice(0, 20);
+            }
             delete existing.steps[_lastStep].currentVideo;
             delete existing.steps[_lastStep].downloads;
             writeProgressFile(existing);
@@ -138,8 +148,11 @@ export function markStepDone(stepName, finalData = {}) {
     if (existing.steps && existing.steps[stepName]) {
         // Only update if not already completed by the script itself
         if (existing.steps[stepName].status !== 'completed') {
+            const errorCount = finalData.errorCount ?? (finalData.errors?.length || 0);
             Object.assign(existing.steps[stepName], finalData, {
                 status: "completed",
+                errorCount,
+                hasErrors: errorCount > 0,
                 finishedAt: new Date().toISOString(),
                 updatedAt: new Date().toISOString(),
             });
@@ -177,6 +190,26 @@ export function writePipelineProgress(data) {
         updatedAt: new Date().toISOString(),
     };
     writeProgressFile(existing);
+}
+
+/**
+ * Read completed step result data (called by orchestrator to check for errors).
+ * @param {string} stepName - e.g. 'watermark'
+ * @returns {{ errorCount: number, hasErrors: boolean, videosDone: number, errors: Array }} | null
+ */
+export function readStepResult(stepName) {
+    const progress = readProgressFile();
+    const step = progress.steps?.[stepName];
+    if (!step) return null;
+    return {
+        status: step.status,
+        errorCount: step.errorCount || 0,
+        hasErrors: step.hasErrors || false,
+        videosDone: step.videosDone || 0,
+        videosTotal: step.videosTotal || 0,
+        errors: step.errors || [],
+        elapsedMs: step.elapsedMs || 0,
+    };
 }
 
 /**

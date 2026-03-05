@@ -30,7 +30,7 @@ import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, clearProgress } from './lib/progress.js';
+import { writeProgress, completeStep } from './lib/progress.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -310,12 +310,26 @@ async function main() {
     }
 
     logger.info('\n' + '='.repeat(60));
-    clearProgress();
+    const elapsedMs = Date.now() - startedAt;
+    completeStep({
+        videosDone: watermarked,
+        videosTotal: processed,
+        elapsedMs,
+        completedVideos: _completed.slice(-20),
+        errors: _errors.slice(-20),
+        errorCount: errors,
+    });
     logger.info('WATERMARK SUMMARY');
     logger.info(`Processed: ${processed}`);
     logger.info(`Watermarked: ${watermarked}`);
     logger.info(`Skipped: ${skipped}`);
     logger.info(`Errors: ${errors}`);
+    if (errors > 0) {
+        logger.error(`⚠️  ${errors} video(s) failed watermarking:`);
+        for (const e of _errors) {
+            logger.error(`  - ${e.id}: ${e.error}`);
+        }
+    }
     if (totalOriginalSize > 0) {
         logger.info(`Total: ${(totalOriginalSize/1024/1024).toFixed(1)}MB → ${(totalWatermarkedSize/1024/1024).toFixed(1)}MB`);
     }

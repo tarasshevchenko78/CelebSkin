@@ -29,7 +29,7 @@ import { readFile, rm, stat, access } from 'fs/promises';
 import axios from 'axios';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, clearProgress } from './lib/progress.js';
+import { writeProgress, completeStep } from './lib/progress.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = join(__dirname, 'tmp');
@@ -91,9 +91,25 @@ async function fileExists(path) {
 // Upload Video Media
 // ============================================
 
-async function uploadVideoMedia(video, force = false, cleanup = false) {
+export async function uploadVideoMedia(video, force = false, cleanup = false) {
     const videoId = video.id;
     const workDir = join(TMP_DIR, videoId);
+
+    // Special case: published video with CDN watermark but non-CDN video_url
+    // Just update video_url to the existing CDN watermarked URL
+    if (video.status === 'published'
+        && video.video_url_watermarked
+        && video.video_url_watermarked.includes('b-cdn.net')
+        && video.video_url
+        && !video.video_url.includes('b-cdn.net')
+        && !video.video_url.includes('cdn.celeb.skin')) {
+        logger.info(`  Fixing video_url → CDN watermarked URL`);
+        await query(
+            `UPDATE videos SET video_url = $2, updated_at = NOW() WHERE id = $1`,
+            [videoId, video.video_url_watermarked]
+        );
+        return { status: 'ok', uploadCount: 0, urls: { video_url: video.video_url_watermarked }, fixOnly: true };
+    }
 
     // Check if workDir exists
     if (!await fileExists(workDir)) {
@@ -191,8 +207,12 @@ async function uploadVideoMedia(video, force = false, cleanup = false) {
     if (uploadedUrls.video_url_watermarked) {
         updates.push(`video_url_watermarked = $${paramIdx++}`);
         values.push(uploadedUrls.video_url_watermarked);
+        // CRITICAL: Also update video_url to CDN watermarked version
+        // so frontend plays from CDN, not from expiring source URLs
+        updates.push(`video_url = $${paramIdx++}`);
+        values.push(uploadedUrls.video_url_watermarked);
     }
-    if (uploadedUrls.video_url) {
+    if (uploadedUrls.video_url && !uploadedUrls.video_url_watermarked) {
         updates.push(`video_url = $${paramIdx++}`);
         values.push(uploadedUrls.video_url);
     }
@@ -415,12 +435,24 @@ async function main() {
     if (!args.photosOnly) {
         logger.info('\n--- Uploading Video Media ---');
 
-        // Get videos with local files (watermarked or with thumbnails in tmp/)
+        // Get videos with local files OR non-CDN URLs that need uploading
+        // Includes: videos with tmp/ paths, AND published videos still pointing to source URLs
         const { rows: videos } = await query(
-            `SELECT v.id, v.video_url, v.video_url_watermarked, v.status
+            `SELECT v.id, v.video_url, v.video_url_watermarked, v.status,
+                    COALESCE(v.title->>'en', v.id::text) as display_title
              FROM videos v
-             WHERE (v.video_url_watermarked LIKE 'tmp/%' OR v.thumbnail_url LIKE 'tmp/%')
-             AND v.status IN ('watermarked', 'enriched', 'auto_recognized', 'needs_review')
+             WHERE (
+                -- Videos with local tmp paths (normal pipeline flow)
+                v.video_url_watermarked LIKE 'tmp/%'
+                OR v.thumbnail_url LIKE 'tmp/%'
+                -- Published videos that still have non-CDN video URLs (missed by earlier pipeline runs)
+                OR (v.status = 'published' AND v.video_url IS NOT NULL
+                    AND v.video_url NOT LIKE '%b-cdn.net%'
+                    AND v.video_url NOT LIKE '%cdn.celeb.skin%'
+                    AND v.video_url_watermarked IS NOT NULL
+                    AND v.video_url_watermarked LIKE '%b-cdn.net%')
+             )
+             AND v.status IN ('watermarked', 'enriched', 'auto_recognized', 'needs_review', 'published')
              ORDER BY v.created_at ASC
              LIMIT $1`,
             [limit]
@@ -432,10 +464,11 @@ async function main() {
             const batch = videos.slice(i, i + CONCURRENCY);
             await Promise.all(batch.map(async (video) => {
             const _start = Date.now();
+            const vTitle = video.display_title || video.id;
             writeProgress({
                 step: 'cdn-upload', stepLabel: 'CDN Upload',
                 videosTotal: videos.length, videosDone: videoUploads,
-                currentVideo: { id: video.id, title: video.id, subStep: 'Uploading to BunnyCDN' },
+                currentVideo: { id: video.id, title: vTitle, subStep: 'Uploading to BunnyCDN' },
                 completedVideos: _completed.slice(-10),
                 errors: _errors.slice(-10),
                 elapsedMs: Date.now() - startedAt,
@@ -445,11 +478,11 @@ async function main() {
 
             if (result.status === 'ok') {
                 videoUploads++;
-                _completed.push({ id: video.id, title: video.id, status: 'ok', ms: Date.now() - _start });
+                _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
                 logger.info(`  ✓ ${result.uploadCount} files uploaded`);
             } else {
                 logger.info(`  - ${result.reason}`);
-                _errors.push({ id: video.id, title: video.id, error: result.reason || 'skipped' });
+                _errors.push({ id: video.id, title: vTitle, error: result.reason || 'skipped' });
             }
             }));
         }
@@ -467,7 +500,14 @@ async function main() {
 
     // Summary
     logger.info('\n' + '='.repeat(60));
-    clearProgress();
+    completeStep({
+        videosDone: videoUploads + photoUploads + posterUploads,
+        videosTotal: videoUploads + photoUploads + posterUploads,
+        elapsedMs: Date.now() - startedAt,
+        completedVideos: _completed.slice(-20),
+        errors: _errors.slice(-20),
+        errorCount: _errors.length,
+    });
     logger.info('CDN UPLOAD SUMMARY');
     logger.info(`Video media uploads: ${videoUploads}`);
     logger.info(`Celebrity photos: ${photoUploads}`);
@@ -486,7 +526,10 @@ function parseArgs() {
     return args;
 }
 
-main().catch(err => {
-    logger.error('Fatal error:', err);
-    process.exit(1);
-});
+const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (_isMain) {
+    main().catch(err => {
+        logger.error('Fatal error:', err);
+        process.exit(1);
+    });
+}

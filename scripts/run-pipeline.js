@@ -38,7 +38,7 @@ import { query } from './lib/db.js';
 import logger from './lib/logger.js';
 import {
     writePipelineProgress, clearAllProgress, initSteps,
-    markStepDone, writeStepStatus, readProgressFile,
+    markStepDone, writeStepStatus, readProgressFile, readStepResult,
 } from './lib/progress.js';
 
 const execFileAsync = promisify(execFile);
@@ -382,6 +382,11 @@ async function runStepWorker(step, stepState, allStepStates, extraArgs, testMode
 }
 
 function buildWorkerResult(step, state, stepStart) {
+    // Read step errors from progress.json (written by the script itself)
+    const stepResult = readStepResult(step.name);
+    const videoErrors = stepResult?.errorCount || 0;
+    const videoErrorDetails = stepResult?.errors || [];
+
     return {
         step: step.name,
         success: state.phase !== 'failed',
@@ -389,6 +394,8 @@ function buildWorkerResult(step, state, stepStart) {
         processed: state.totalProcessed,
         runs: state.totalRuns,
         errors: state.errors.length,
+        videoErrors,              // per-video errors within the step
+        videoErrorDetails,        // error details [{id, title, error}]
     };
 }
 
@@ -570,6 +577,157 @@ function printStats(stats, label) {
 }
 
 // ============================================
+// Final Validation — check data integrity after pipeline
+// ============================================
+
+async function runFinalValidation() {
+    logger.info('\n🔍 Running final validation...');
+
+    const report = [];
+    let critical = 0;
+    let warnings = 0;
+
+    // 1. Published videos with non-CDN video_url (will expire!)
+    try {
+        const { rows } = await query(`
+            SELECT id, COALESCE(title->>'en', id::text) as title, video_url
+            FROM videos WHERE status = 'published'
+            AND video_url IS NOT NULL
+            AND video_url NOT LIKE '%b-cdn.net%'
+            AND video_url NOT LIKE '%cdn.celeb.skin%'
+        `);
+        if (rows.length > 0) {
+            critical++;
+            report.push({
+                level: 'critical',
+                code: 'NON_CDN_VIDEO_URL',
+                message: `${rows.length} published video(s) have expiring source URLs (not CDN)`,
+                items: rows.map(r => `${r.title} → ${(r.video_url || '').substring(0, 60)}...`),
+            });
+        }
+    } catch (err) {
+        logger.warn(`  Validation query failed: ${err.message}`);
+    }
+
+    // 2. Published videos without CDN thumbnails
+    try {
+        const { rows } = await query(`
+            SELECT id, COALESCE(title->>'en', id::text) as title, thumbnail_url
+            FROM videos WHERE status = 'published'
+            AND (thumbnail_url IS NULL
+                 OR (thumbnail_url NOT LIKE '%b-cdn.net%' AND thumbnail_url NOT LIKE '%cdn.celeb.skin%'))
+        `);
+        if (rows.length > 0) {
+            critical++;
+            report.push({
+                level: 'critical',
+                code: 'NON_CDN_THUMBNAIL',
+                message: `${rows.length} published video(s) without CDN thumbnails`,
+                items: rows.map(r => `${r.title} → ${(r.thumbnail_url || 'NULL').substring(0, 60)}`),
+            });
+        }
+    } catch (err) {
+        logger.warn(`  Validation query failed: ${err.message}`);
+    }
+
+    // 3. Published videos without watermark
+    try {
+        const { rows } = await query(`
+            SELECT id, COALESCE(title->>'en', id::text) as title
+            FROM videos WHERE status = 'published'
+            AND (video_url_watermarked IS NULL OR video_url_watermarked = '')
+        `);
+        if (rows.length > 0) {
+            critical++;
+            report.push({
+                level: 'critical',
+                code: 'NO_WATERMARK',
+                message: `${rows.length} published video(s) without watermark`,
+                items: rows.map(r => r.title),
+            });
+        }
+    } catch (err) {
+        logger.warn(`  Validation query failed: ${err.message}`);
+    }
+
+    // 4. Celebrities without photos
+    try {
+        const { rows } = await query(`
+            SELECT c.id, c.name, c.tmdb_id,
+                   (SELECT COUNT(*) FROM video_celebrities vc
+                    JOIN videos v ON v.id = vc.video_id
+                    WHERE vc.celebrity_id = c.id AND v.status = 'published') as pub_videos
+            FROM celebrities c
+            WHERE (c.photo_url IS NULL OR c.photo_url = '')
+            AND EXISTS (SELECT 1 FROM video_celebrities vc
+                        JOIN videos v ON v.id = vc.video_id
+                        WHERE vc.celebrity_id = c.id AND v.status = 'published')
+        `);
+        if (rows.length > 0) {
+            warnings++;
+            report.push({
+                level: 'warning',
+                code: 'CELEBRITY_NO_PHOTO',
+                message: `${rows.length} celebrity(s) with published videos but no photo`,
+                items: rows.map(r => `${r.name} (${r.pub_videos} videos, tmdb=${r.tmdb_id || 'none'})`),
+            });
+        }
+    } catch (err) {
+        logger.warn(`  Validation query failed: ${err.message}`);
+    }
+
+    // 5. Published videos without sprite/preview
+    try {
+        const { rows } = await query(`
+            SELECT id, COALESCE(title->>'en', id::text) as title
+            FROM videos WHERE status = 'published'
+            AND (sprite_url IS NULL OR preview_gif_url IS NULL)
+        `);
+        if (rows.length > 0) {
+            warnings++;
+            report.push({
+                level: 'warning',
+                code: 'MISSING_PREVIEWS',
+                message: `${rows.length} published video(s) missing sprite or preview GIF`,
+                items: rows.map(r => r.title),
+            });
+        }
+    } catch (err) {
+        logger.warn(`  Validation query failed: ${err.message}`);
+    }
+
+    // 6. Videos stuck in intermediate states
+    try {
+        const { rows } = await query(`
+            SELECT status, COUNT(*) as cnt
+            FROM videos
+            WHERE status IN ('watermarked', 'enriched', 'auto_recognized', 'new')
+            GROUP BY status
+        `);
+        if (rows.length > 0) {
+            const items = rows.map(r => `${r.status}: ${r.cnt}`);
+            warnings++;
+            report.push({
+                level: 'warning',
+                code: 'STUCK_VIDEOS',
+                message: `Videos in intermediate states: ${items.join(', ')}`,
+                items,
+            });
+        }
+    } catch (err) {
+        logger.warn(`  Validation query failed: ${err.message}`);
+    }
+
+    if (report.length === 0) {
+        logger.info('  ✅ All validation checks passed!');
+    } else {
+        logger.info(`  Found: ${critical} critical, ${warnings} warnings`);
+    }
+
+    return { critical, warnings, report };
+}
+
+// ============================================
 // Main
 // ============================================
 
@@ -579,12 +737,13 @@ async function main() {
     const startStep = args.step || 1;
     const onlyStep = args.only;
     const skipSteps = new Set(args.skip || []);
+    const isConveyor2 = args.conveyor2;
     const isSequential = args.sequential || !!onlyStep;
 
     logger.info('═'.repeat(60));
     logger.info('  CelebSkin — Full Automation Pipeline');
     logger.info('═'.repeat(60));
-    logger.info(`Mode: ${isSequential ? 'SEQUENTIAL' : 'CONVEYOR'} ${testMode ? '(TEST)' : '(PRODUCTION)'}`);
+    logger.info(`Mode: ${isConveyor2 ? 'CONVEYOR2 (per-file)' : isSequential ? 'SEQUENTIAL' : 'CONVEYOR'} ${testMode ? '(TEST)' : '(PRODUCTION)'}`);
     logger.info(`Time: ${new Date().toISOString()}`);
 
     // Show initial stats
@@ -628,24 +787,53 @@ async function main() {
 
     // Run pipeline
     let results;
-    if (isSequential) {
+    if (isConveyor2) {
+        const { runConveyor: runConveyor2 } = await import('./conveyor.js');
+        results = await runConveyor2({
+            limit: args.limit,
+            skipScrape: skipSteps.has('scrape'),
+            skipSteps: args.skip || [],
+            pipelineStart,
+        });
+    } else if (isSequential) {
         results = await runSequential(stepsToRun, extraArgs, testMode, pipelineStart);
     } else {
         results = await runConveyor(stepsToRun, extraArgs, testMode, pipelineStart);
     }
+
+    // ============================================
+    // Final Validation — check published videos integrity
+    // ============================================
+    const validationIssues = await runFinalValidation();
 
     // Write final pipeline status (don't clear — keep results visible)
     const totalDuration = ((Date.now() - pipelineStart) / 1000).toFixed(1);
     const successful = results.filter(r => r.success).length;
     const failed = results.filter(r => !r.success).length;
 
+    // Collect per-video errors across all steps
+    const totalVideoErrors = results.reduce((sum, r) => sum + (r.videoErrors || 0), 0);
+    const stepsWithErrors = results.filter(r => (r.videoErrors || 0) > 0);
+
+    // Determine final status — strict: any errors = not clean success
+    let finalStatus = 'finished';
+    if (failed > 0 || validationIssues.critical > 0) {
+        finalStatus = 'finished_with_errors';
+    } else if (totalVideoErrors > 0) {
+        finalStatus = 'finished_with_errors';
+    } else if (validationIssues.warnings > 0) {
+        finalStatus = 'finished_with_warnings';
+    }
+
     writePipelineProgress({
         totalSteps: stepsToRun.length,
         completedSteps: successful,
         currentStep: 'done',
-        currentLabel: 'Pipeline Complete',
+        currentLabel: finalStatus === 'finished' ? 'Pipeline Complete ✓' :
+                      finalStatus === 'finished_with_errors' ? 'Pipeline Complete ⚠️ WITH ERRORS' :
+                      'Pipeline Complete (with warnings)',
         elapsedMs: Date.now() - pipelineStart,
-        status: 'finished',
+        status: finalStatus,
         mode: isSequential ? 'sequential' : 'conveyor',
         stepTimings: results.map(r => ({
             step: r.step,
@@ -653,7 +841,11 @@ async function main() {
             duration: parseFloat(r.duration),
             processed: r.processed || 0,
             runs: r.runs || 1,
+            videoErrors: r.videoErrors || 0,
+            videoErrorDetails: (r.videoErrorDetails || []).slice(0, 5),
         })),
+        totalVideoErrors,
+        validation: validationIssues.report,
     });
 
     // Show final stats
@@ -666,13 +858,54 @@ async function main() {
     logger.info('═'.repeat(60));
     logger.info(`Total time: ${totalDuration}s`);
     logger.info(`Mode: ${isSequential ? 'sequential' : 'conveyor'}`);
+    logger.info(`Status: ${finalStatus.toUpperCase()}`);
     logger.info(`Steps: ${successful} succeeded, ${failed} failed`);
+    if (totalVideoErrors > 0) {
+        logger.info(`Video errors: ${totalVideoErrors} across ${stepsWithErrors.length} step(s)`);
+    }
     logger.info('');
 
     for (const result of results) {
-        const icon = result.success ? '✓' : '✗';
+        const hasVideoErrs = (result.videoErrors || 0) > 0;
+        const icon = !result.success ? '✗' : hasVideoErrs ? '⚠' : '✓';
         const extra = result.runs > 1 ? ` (${result.runs} runs, ${result.processed} processed)` : '';
-        logger.info(`  ${icon} ${result.step} (${result.duration}s)${extra}${result.error ? ` — ${result.error}` : ''}`);
+        const errInfo = hasVideoErrs ? ` — ${result.videoErrors} video error(s)` : '';
+        logger.info(`  ${icon} ${result.step} (${result.duration}s)${extra}${errInfo}${result.error ? ` — ${result.error}` : ''}`);
+    }
+
+    // Detailed per-step error report
+    if (totalVideoErrors > 0) {
+        logger.info('\n' + '─'.repeat(40));
+        logger.info('PER-STEP ERROR DETAILS');
+        logger.info('─'.repeat(40));
+        for (const result of stepsWithErrors) {
+            logger.error(`\n❌ ${result.step}: ${result.videoErrors} error(s)`);
+            for (const err of (result.videoErrorDetails || []).slice(0, 10)) {
+                logger.error(`  - ${err.id || err.title || 'unknown'}: ${err.error || 'unknown error'}`);
+            }
+            if ((result.videoErrorDetails || []).length > 10) {
+                logger.error(`  ... and ${result.videoErrorDetails.length - 10} more`);
+            }
+        }
+    }
+
+    // Validation report
+    if (validationIssues.critical > 0 || validationIssues.warnings > 0) {
+        logger.info('\n' + '─'.repeat(40));
+        logger.info('VALIDATION REPORT');
+        logger.info('─'.repeat(40));
+        for (const issue of validationIssues.report) {
+            const icon = issue.level === 'critical' ? '❌' : '⚠️';
+            logger.info(`  ${icon} ${issue.message}`);
+            if (issue.items?.length > 0) {
+                for (const item of issue.items.slice(0, 5)) {
+                    logger.info(`    - ${item}`);
+                }
+                if (issue.items.length > 5) {
+                    logger.info(`    ... and ${issue.items.length - 5} more`);
+                }
+            }
+        }
     }
 
     // Changes
@@ -689,17 +922,22 @@ async function main() {
 
     logger.info('\n═'.repeat(60));
 
-    // Exit with error code if any required step failed
+    // Exit with error code if critical issues found
     if (failed > 0 && results.some(r => !r.success && STEPS.find(s => s.name === r.step)?.required)) {
         process.exit(1);
+    }
+    if (validationIssues.critical > 0) {
+        logger.error(`\n⛔ Pipeline finished with ${validationIssues.critical} critical validation issues!`);
+        process.exit(2);
     }
 }
 
 function parseArgs() {
-    const args = { test: false, step: null, only: null, skip: [], limit: null, autoPublish: false, sequential: false };
+    const args = { test: false, step: null, only: null, skip: [], limit: null, autoPublish: false, sequential: false, conveyor2: false };
     for (const arg of process.argv.slice(2)) {
         if (arg === '--test') args.test = true;
         if (arg === '--sequential') args.sequential = true;
+        if (arg === '--conveyor2') args.conveyor2 = true;
         if (arg === '--auto-publish') args.autoPublish = true;
         if (arg.startsWith('--step=')) args.step = parseInt(arg.split('=')[1]);
         if (arg.startsWith('--only=')) args.only = arg.split('=')[1];
