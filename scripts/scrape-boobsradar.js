@@ -33,7 +33,7 @@ import { pipeline } from 'stream/promises';
 import axios from 'axios';
 import BoobsRadarAdapter from './adapters/boobsradar-adapter.js';
 import logger from './lib/logger.js';
-import { insertRawVideo, query } from './lib/db.js';
+import { insertRawVideo, query, log as dbLog } from './lib/db.js';
 import { writeProgress, clearProgress } from './lib/progress.js';
 
 // Ensure source 'boobsradar' exists in DB; cache the ID
@@ -394,14 +394,20 @@ async function main() {
           continue;
         }
 
-        // Проверяем в БД — не скачано ли уже
+        // Проверяем в БД — не скачано ли уже (raw_videos + videos)
         try {
           const { rows: existingRows } = await query(
-            "SELECT id, status FROM raw_videos WHERE source_video_id = $1 OR source_url = $2",
-            [videoSlug, videoItem.url]
+            `SELECT 'raw' as src, id, status FROM raw_videos
+             WHERE source_video_id = $1 OR source_url = $2
+             UNION ALL
+             SELECT 'video' as src, id::text, status FROM videos
+             WHERE original_title ILIKE $3
+             LIMIT 1`,
+            [videoSlug, videoItem.url, `%${videoItem.title.substring(0, 40)}%`]
           );
           if (existingRows.length > 0) {
-            logger.info(`    Пропуск (уже в БД, status=${existingRows[0].status}): ${videoSlug}`);
+            const r = existingRows[0];
+            logger.info(`    Пропуск (уже в БД [${r.src}], status=${r.status}): ${videoSlug}`);
             progress.processedVideos.push(videoSlug);
             progress.stats.totalSkipped++;
             continue;
@@ -430,6 +436,27 @@ async function main() {
 
           const metadata = await adapter.parseVideoPage(videoItem.url);
           metadata.found_in_category = { title: category.title, slug: catSlug };
+
+          // Вторичная проверка дубликатов по video_file_url (тот же файл в разных категориях)
+          if (metadata.video_file_url) {
+            // Извлекаем уникальный ID файла из URL (напр. /38000/38091/38091.mp4)
+            const fileIdMatch = metadata.video_file_url.match(/\/(\d+)\/(\d+)\.mp4/);
+            const fileId = fileIdMatch ? fileIdMatch[2] : null;
+            if (fileId) {
+              try {
+                const { rows: dupRows } = await query(
+                  `SELECT id FROM raw_videos WHERE video_file_url LIKE $1 LIMIT 1`,
+                  [`%/${fileId}.mp4%`]
+                );
+                if (dupRows.length > 0) {
+                  logger.info(`    Пропуск (дубль по video_file: ID ${fileId}): ${videoSlug}`);
+                  progress.processedVideos.push(videoSlug);
+                  progress.stats.totalSkipped++;
+                  continue;
+                }
+              } catch { /* ignore */ }
+            }
+          }
 
           if (config.withAi) {
             await enrichWithAI(metadata);
@@ -509,9 +536,17 @@ async function main() {
               });
               if (dbId) {
                 logger.info(`${tag} В БД: ${shortTitle}`);
+                await dbLog(null, 'scrape', 'completed', `Scraped: ${shortTitle}`, {
+                    raw_video_id: dbId, source_video_id: videoSlug,
+                    has_video: !!metadata.local_video, has_preview: !!metadata.local_preview,
+                    category: catSlug, file_url: metadata.video_file_url || null,
+                });
               }
             } catch (dbErr) {
               logger.warn(`${tag} БД: ошибка — ${dbErr.message}`);
+              await dbLog(null, 'scrape', 'error', `DB insert failed: ${shortTitle}: ${dbErr.message}`, {
+                  source_video_id: videoSlug, category: catSlug,
+              }).catch(() => {});
             }
 
             // Прогресс
@@ -521,6 +556,9 @@ async function main() {
           } catch (err) {
             logger.error(`${tag} Ошибка: ${err.message}`);
             progress.stats.totalFailed++;
+            await dbLog(null, 'scrape', 'error', `Scrape failed: ${shortTitle}: ${err.message}`, {
+                source_video_id: videoSlug, category: catSlug,
+            }).catch(() => {});
           }
         }));
 

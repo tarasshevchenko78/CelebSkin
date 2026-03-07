@@ -30,14 +30,14 @@ import { promisify } from 'util';
 import axios from 'axios';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
-import { query } from './lib/db.js';
+import { query, log as dbLog } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, completeStep } from './lib/progress.js';
+import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = join(__dirname, 'tmp');
-const CDN_URL = process.env.BUNNY_CDN_URL || 'https://cdn.celeb.skin';
+const CDN_URL = process.env.BUNNY_CDN_URL || 'https://celebskin-cdn.b-cdn.net';
 
 export const DEFAULTS = {
     thumbCount: 8,
@@ -167,6 +167,7 @@ async function downloadVideo(url, destPath) {
 export async function processVideo(video, config) {
     const videoId = video.id;
     const videoUrl = video.video_url_watermarked || video.video_url;
+    const vTitle = video.display_title || videoId;
 
     if (!videoUrl) {
         return { status: 'skip', reason: 'no_video_url' };
@@ -193,13 +194,16 @@ export async function processVideo(video, config) {
                 logger.info(`  Using local file: ${videoUrl}`);
             } catch {
                 logger.error(`  Local file not found: ${localPath}`);
+                removeActiveItem(videoId);
                 return { status: 'error', reason: 'local_file_not_found' };
             }
         } else {
             videoPath = join(workDir, 'video.mp4');
             logger.info(`  Downloading video...`);
+            setActiveItem(videoId, { label: vTitle, subStep: 'Downloading', pct: 0 });
             const downloaded = await downloadVideo(videoUrl, videoPath);
             if (!downloaded) {
+                removeActiveItem(videoId);
                 return { status: 'error', reason: 'download_failed' };
             }
         }
@@ -216,6 +220,7 @@ export async function processVideo(video, config) {
         // Format duration
         const durationFormatted = formatDuration(duration);
 
+        setActiveItem(videoId, { label: vTitle, subStep: 'Extracting frames', pct: 10 });
         // Extract frames at evenly spaced intervals
         const thumbCount = config.thumbCount;
         const width = config.thumbWidth;
@@ -242,10 +247,12 @@ export async function processVideo(video, config) {
         }
 
         if (framePaths.length < 2) {
+            removeActiveItem(videoId);
             return { status: 'error', reason: 'not_enough_frames' };
         }
 
         logger.info(`  ${framePaths.length} screenshots extracted`);
+        setActiveItem(videoId, { label: vTitle, subStep: 'Creating sprite', pct: 50 });
 
         // Create sprite sheet
         const spritePath = join(workDir, 'sprite.jpg');
@@ -257,6 +264,7 @@ export async function processVideo(video, config) {
         }
 
         // Create preview GIF
+        setActiveItem(videoId, { label: vTitle, subStep: 'Creating GIF', pct: 75 });
         const gifPath = join(workDir, 'preview.gif');
         let hasGif = false;
         try {
@@ -296,6 +304,7 @@ export async function processVideo(video, config) {
             : resolution.height >= 480 ? '480p'
             : '360p';
 
+        setActiveItem(videoId, { label: vTitle, subStep: 'Saving to DB', pct: 95 });
         // Update DB — store local paths (will be updated to CDN URLs by upload-to-cdn.js)
         // Screenshots stored as relative paths in work dir
         const screenshotPaths = screenshotFiles.map(f => `tmp/${videoId}/${f}`);
@@ -340,6 +349,7 @@ export async function processVideo(video, config) {
             ]
         );
 
+        removeActiveItem(videoId);
         return {
             status: 'ok',
             frames: framePaths.length,
@@ -347,6 +357,8 @@ export async function processVideo(video, config) {
             workDir,
         };
     } catch (err) {
+        removeActiveItem(videoId);
+        await dbLog(videoId, 'thumbnails', 'error', `Thumbnail generation failed: ${err.message}`);
         return { status: 'error', reason: err.message };
     }
     // NOTE: Don't clean up workDir yet — upload-to-cdn.js needs the files
@@ -391,9 +403,10 @@ async function main() {
     await mkdir(TMP_DIR, { recursive: true });
 
     // Get videos that need thumbnails
+    // STRICT: Only process watermarked videos (completed watermark step)
     const statusFilter = config.force
-        ? `status IN ('watermarked', 'enriched', 'auto_recognized', 'needs_review', 'published')`
-        : `status IN ('watermarked', 'enriched', 'auto_recognized') AND (screenshots IS NULL OR screenshots = '[]'::jsonb)`;
+        ? `status IN ('watermarked', 'needs_review', 'published')`
+        : `status = 'watermarked' AND (screenshots IS NULL OR screenshots = '[]'::jsonb)`;
 
     const { rows: videos } = await query(
         `SELECT v.id, v.video_url, v.video_url_watermarked, v.screenshots, v.duration_seconds,

@@ -26,14 +26,28 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
     const [muted, setMuted] = useState(false);
     const [showControls, setShowControls] = useState(true);
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const [videoError, setVideoError] = useState(false);
+    const [videoError, setVideoError] = useState<string | null>(null);
     const hideTimeout = useRef<NodeJS.Timeout | null>(null);
 
     const togglePlay = useCallback(() => {
         const v = videoRef.current;
         if (!v) return;
-        if (v.paused) { v.play(); setPlaying(true); }
-        else { v.pause(); setPlaying(false); }
+        if (v.paused) {
+            const playPromise = v.play();
+            if (playPromise !== undefined) {
+                playPromise
+                    .then(() => setPlaying(true))
+                    .catch((err) => {
+                        console.warn('[VideoPlayer] play() rejected:', err.message);
+                        setPlaying(false);
+                    });
+            } else {
+                setPlaying(true);
+            }
+        } else {
+            v.pause();
+            setPlaying(false);
+        }
     }, []);
 
     const toggleMute = useCallback(() => {
@@ -155,6 +169,7 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
                     <p className="text-gray-500 text-sm">Video unavailable</p>
+                    <p className="text-gray-600 text-xs mt-1">{videoError}</p>
                 </div>
             ) : (
             <video
@@ -162,9 +177,16 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
                 src={src}
                 poster={poster || undefined}
                 preload="metadata"
+                crossOrigin="anonymous"
                 className="w-full h-full object-contain"
                 onClick={togglePlay}
-                onError={() => setVideoError(true)}
+                onError={(e) => {
+                    const v = e.currentTarget;
+                    const err = v.error;
+                    const msg = err ? `${err.code}: ${err.message || 'Unknown error'}` : 'Load failed';
+                    console.error('[VideoPlayer] error:', msg, 'src:', src);
+                    setVideoError(msg);
+                }}
                 playsInline
             />
             )}

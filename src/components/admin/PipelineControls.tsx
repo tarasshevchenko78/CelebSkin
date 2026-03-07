@@ -10,6 +10,14 @@ interface DownloadProgress {
     pct: number;
 }
 
+interface ActiveItem {
+    id: string;
+    label: string;
+    subStep: string;
+    pct: number;
+    startedAt: number;
+}
+
 interface StepProgressData {
     step: string;
     stepLabel: string;
@@ -23,6 +31,7 @@ interface StepProgressData {
         pct?: number;
     } | null;
     downloads?: DownloadProgress[];
+    activeItems?: ActiveItem[];
     completedVideos?: Array<{
         id: string;
         title: string;
@@ -299,6 +308,30 @@ export default function PipelineControls() {
         }
     };
 
+    const drainPipeline = async () => {
+        if (!confirm('Stop scraping and finish processing all videos already in pipeline?')) return;
+        setStopping(true);
+        setMessage(null);
+        try {
+            const res = await fetch('/api/admin/pipeline', {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode: 'drain' }),
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setMessage({ type: 'success', text: `✓ ${data.message}` });
+                setTimeout(fetchStats, 2000);
+            } else {
+                setMessage({ type: 'error', text: `✗ ${data.error}` });
+            }
+        } catch (err) {
+            setMessage({ type: 'error', text: `✗ Connection error: ${err}` });
+        } finally {
+            setStopping(false);
+        }
+    };
+
     const toggleCategory = (slug: string) => {
         setOptions(prev => ({
             ...prev,
@@ -398,13 +431,24 @@ export default function PipelineControls() {
                 <div className="rounded-xl border border-yellow-800/50 bg-yellow-900/10 p-4">
                     <div className="flex items-center justify-between mb-2">
                         <h3 className="text-sm font-medium text-yellow-400">Running Processes on Contabo</h3>
-                        <button
-                            onClick={stopAll}
-                            disabled={stopping}
-                            className="px-4 py-1.5 text-sm rounded-lg bg-red-600 text-white font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
-                        >
-                            {stopping ? 'Stopping...' : 'Stop All'}
-                        </button>
+                        <div className="flex gap-2">
+                            <button
+                                onClick={drainPipeline}
+                                disabled={stopping}
+                                className="px-4 py-1.5 text-sm rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-500 disabled:opacity-50 transition-colors"
+                                title="Stop scraping new videos, finish processing videos already in pipeline"
+                            >
+                                {stopping ? 'Stopping...' : 'Finish & Stop'}
+                            </button>
+                            <button
+                                onClick={stopAll}
+                                disabled={stopping}
+                                className="px-4 py-1.5 text-sm rounded-lg bg-red-600 text-white font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
+                                title="Kill all pipeline processes immediately"
+                            >
+                                {stopping ? 'Stopping...' : 'Stop All'}
+                            </button>
+                        </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
                         {stats!.runningProcesses.map((proc, i) => (
@@ -781,9 +825,10 @@ function PipelineProgressView({ progress }: {
 function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData }) {
     const [showCompleted, setShowCompleted] = useState(false);
     const isCompleted = data.status === 'completed';
+    const noItemsProcessed = data.videosDone === 0 && data.videosTotal === 0;
     const pct = data.videosTotal > 0
         ? Math.round((data.videosDone / data.videosTotal) * 100)
-        : (isCompleted ? 100 : 0);
+        : (isCompleted && !noItemsProcessed ? 100 : 0);
     const icon = STEP_ICONS[stepId] || '⏳';
     const label = data.stepLabel || STEP_LABELS[stepId] || stepId;
     const eta = data.elapsedMs && data.videosDone > 0 && !isCompleted
@@ -808,7 +853,7 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
     const borderColor = isCompleted ? 'border-green-800/50' : isPending || isWaiting ? 'border-gray-800/50' : isIdle ? 'border-blue-800/30' : 'border-purple-800/50';
     const bgColor = isCompleted ? 'bg-green-900/10' : isPending || isWaiting ? 'bg-gray-900/20' : isIdle ? 'bg-blue-900/5' : 'bg-purple-900/10';
     const barGradient = isCompleted
-        ? 'bg-gradient-to-r from-green-600 to-emerald-500'
+        ? (noItemsProcessed ? 'bg-gray-700' : 'bg-gradient-to-r from-green-600 to-emerald-500')
         : 'bg-gradient-to-r from-purple-600 to-pink-500';
 
     // Pending step — compact single line
@@ -863,14 +908,16 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
                             )}
                         </h3>
                         <p className="text-xs text-gray-500">
-                            {data.videosDone}/{data.videosTotal} videos
+                            {noItemsProcessed && isCompleted
+                                ? 'no items to process'
+                                : <>{data.videosDone}/{data.videosTotal} videos</>}
                             {!isCompleted && stepDuration ? <span className="ml-2 text-gray-600">{stepDuration}</span> : null}
                             {eta && <span className="ml-2 text-cyan-500">ETA: {eta}</span>}
                         </p>
                     </div>
                 </div>
-                <span className={`text-xl font-bold tabular-nums ${isCompleted ? 'text-green-400' : 'text-purple-400'}`}>
-                    {pct}%
+                <span className={`text-xl font-bold tabular-nums ${isCompleted ? (noItemsProcessed ? 'text-gray-500' : 'text-green-400') : 'text-purple-400'}`}>
+                    {noItemsProcessed && isCompleted ? '—' : `${pct}%`}
                 </span>
             </div>
 
@@ -912,8 +959,49 @@ function StepPanel({ stepId, data }: { stepId: string; data: StepProgressData })
                 </div>
             )}
 
-            {/* Current video (when active, no downloads) */}
-            {data.currentVideo && !isCompleted && downloads.length === 0 && (
+            {/* Active items — per-video progress bars (like downloads but for processing steps) */}
+            {(data.activeItems?.length ?? 0) > 0 && !isCompleted && (
+                <div className="space-y-1.5">
+                    <p className="text-xs text-gray-400">Processing ({data.activeItems!.length})</p>
+                    {data.activeItems!.map((item, i) => {
+                        const elapsed = Date.now() - item.startedAt;
+                        const elapsedStr = elapsed > 1000 ? `${Math.floor(elapsed / 1000)}s` : '';
+                        const itemEta = item.pct > 5 && item.pct < 100
+                            ? formatMs(Math.round((elapsed / item.pct) * (100 - item.pct)))
+                            : '';
+                        return (
+                            <div key={item.id || i} className="rounded-lg bg-gray-900/60 border border-gray-800 p-2">
+                                <div className="flex items-center justify-between mb-1">
+                                    <p className="text-xs text-gray-300 truncate flex-1 mr-2">{item.label}</p>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                        {item.subStep && (
+                                            <span className="text-xs text-gray-500">{item.subStep}</span>
+                                        )}
+                                        {itemEta && (
+                                            <span className="text-xs text-cyan-500/70">~{itemEta}</span>
+                                        )}
+                                        <span className="text-xs font-medium text-purple-400 tabular-nums w-10 text-right">
+                                            {item.pct}%
+                                        </span>
+                                    </div>
+                                </div>
+                                <div className="w-full h-1 rounded-full bg-gray-800 overflow-hidden">
+                                    <div
+                                        className="h-full rounded-full bg-purple-500 transition-all duration-500"
+                                        style={{ width: `${item.pct}%` }}
+                                    />
+                                </div>
+                                {elapsedStr && (
+                                    <p className="text-xs text-gray-600 mt-0.5 text-right">{elapsedStr}</p>
+                                )}
+                            </div>
+                        );
+                    })}
+                </div>
+            )}
+
+            {/* Current video fallback (when active, no downloads, no activeItems) */}
+            {data.currentVideo && !isCompleted && downloads.length === 0 && !(data.activeItems?.length) && (
                 <div className="rounded-lg bg-gray-900/60 border border-gray-800 p-2.5">
                     <div className="flex items-center gap-2 mb-1">
                         <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />

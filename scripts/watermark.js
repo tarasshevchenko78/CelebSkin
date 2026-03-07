@@ -30,7 +30,7 @@ import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, completeStep } from './lib/progress.js';
+import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -153,15 +153,18 @@ async function processVideo(video, config) {
         // Download original video
         const inputPath = join(workDir, 'original.mp4');
         logger.info(`  Downloading video...`);
-    // Download progress will be shown on next writeProgress cycle
+        setActiveItem(videoId, { label: video.display_title || videoId, subStep: 'Downloading', pct: 0 });
+
         const downloaded = await downloadVideo(videoUrl, inputPath);
         if (!downloaded) {
+            removeActiveItem(videoId);
             return { status: 'error', reason: 'download_failed' };
         }
 
         // Get file size
         const fileInfo = await stat(inputPath);
         logger.info(`  Original: ${(fileInfo.size / 1024 / 1024).toFixed(1)}MB`);
+        setActiveItem(videoId, { label: video.display_title || videoId, subStep: 'Watermarking', pct: 40 });
 
         // Apply watermark
         const outputPath = join(workDir, 'watermarked.mp4');
@@ -172,6 +175,7 @@ async function processVideo(video, config) {
         // Get output file size
         const outInfo = await stat(outputPath);
         logger.info(`  Watermarked: ${(outInfo.size / 1024 / 1024).toFixed(1)}MB`);
+        setActiveItem(videoId, { label: video.display_title || videoId, subStep: 'Saving to DB', pct: 95 });
 
         // Update DB — store local path (will be updated by upload-to-cdn.js)
         const watermarkedLocalPath = `tmp/${videoId}/watermarked.mp4`;
@@ -201,6 +205,7 @@ async function processVideo(video, config) {
             ]
         );
 
+        removeActiveItem(videoId);
         return {
             status: 'ok',
             originalSize: fileInfo.size,
@@ -208,6 +213,7 @@ async function processVideo(video, config) {
             workDir,
         };
     } catch (err) {
+        removeActiveItem(videoId);
         // Update status to failed
         await query(
             `INSERT INTO processing_log (video_id, step, status, metadata)
@@ -250,7 +256,8 @@ async function main() {
         : `status IN ('enriched', 'auto_recognized') AND video_url_watermarked IS NULL`;
 
     const { rows: videos } = await query(
-        `SELECT id, video_url, video_url_watermarked, status
+        `SELECT id, video_url, video_url_watermarked, status,
+                COALESCE(title->>'en', id::text) as display_title
          FROM videos
          WHERE ${statusFilter} AND video_url IS NOT NULL
          ORDER BY created_at ASC

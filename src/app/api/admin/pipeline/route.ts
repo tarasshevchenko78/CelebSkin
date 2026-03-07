@@ -202,11 +202,15 @@ export async function POST(request: NextRequest) {
 
         // Build CLI args
         const args: string[] = [];
-        if (options?.limit) args.push(`--limit=${options.limit}`);
+        // Test mode forces limit=3, overriding user's limit field
+        if (options?.test) {
+            args.push('--limit=3');
+            args.push('--test');
+        } else if (options?.limit) {
+            args.push(`--limit=${options.limit}`);
+        }
         if (options?.model) args.push(`--model=${options.model}`);
         if (options?.force) args.push('--force');
-        if (options?.test) args.push('--test');
-        if (action === 'full-pipeline' && options?.test) args.push('--test');
         if (action === 'publish') args.push('--auto');
         if (options?.categories && options.categories.length > 0) {
             args.push(`--categories=${options.categories.join(',')}`);
@@ -244,9 +248,53 @@ export async function POST(request: NextRequest) {
     }
 }
 
-// DELETE — stop all pipeline processes on Contabo
-export async function DELETE() {
+// DELETE — stop pipeline processes on Contabo
+// Body: { mode: 'drain' } — graceful: stop scraping, finish in-progress videos
+// Body: empty / { mode: 'kill' } — hard stop all processes
+export async function DELETE(request: NextRequest) {
     try {
+        let mode = 'kill';
+        try {
+            const body = await request.json();
+            if (body?.mode === 'drain') mode = 'drain';
+        } catch {
+            // No body = hard stop
+        }
+
+        if (mode === 'drain') {
+            // Drain mode: send SIGUSR1 to run-pipeline.js to stop scraping
+            // but let downstream workers finish processing in-flight videos
+            await pool.query(
+                `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
+                ['admin:drain', 'started', JSON.stringify({ drainedAt: new Date().toISOString() })]
+            );
+
+            let signaled = false;
+            try {
+                // Send SIGUSR1 to run-pipeline.js AND kill scrape process
+                await execAsync(
+                    `ssh ${SSH_OPTS} ${CONTABO_HOST} "pkill -USR1 -f 'node.*run-pipeline' 2>/dev/null; pkill -f 'node.*scrape-boobsradar' 2>/dev/null; echo done"`,
+                    { timeout: 15000, env: { ...process.env, HOME: '/root' } }
+                );
+                signaled = true;
+            } catch {
+                // May fail if no process matches
+            }
+
+            await pool.query(
+                `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
+                ['admin:drain', 'completed', JSON.stringify({ signaled, drainedAt: new Date().toISOString() })]
+            );
+
+            return NextResponse.json({
+                success: true,
+                message: signaled
+                    ? 'Drain mode activated: scraping stopped, finishing in-progress videos'
+                    : 'No running pipeline process found',
+            });
+        }
+
+        // Hard stop — kill all
         await pool.query(
             `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
             ['admin:stop-all', 'started', JSON.stringify({ stoppedAt: new Date().toISOString() })]

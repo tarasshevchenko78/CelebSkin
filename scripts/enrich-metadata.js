@@ -48,6 +48,15 @@ const pool = new Pool({
     password: process.env.DB_PASSWORD || "",
 });
 
+// Processing log helper (uses local pool, not shared lib/db.js)
+async function dbLog(videoId, step, status, message = null, metadata = null) {
+    await pool.query(
+        `INSERT INTO processing_log (video_id, step, status, message, metadata)
+         VALUES ($1, $2, $3, $4, $5::jsonb)`,
+        [videoId, step, status, message, metadata ? JSON.stringify(metadata) : null]
+    );
+}
+
 // Parse CLI args
 const args = process.argv.slice(2);
 const LIMIT = parseInt(args.find(a => a.startsWith('--limit='))?.split('=')[1] || '50');
@@ -243,6 +252,9 @@ export async function enrichCelebrity(celebrity) {
 
     if (!searchResult.results || searchResult.results.length === 0) {
         console.log(`  TMDB: no person results for "${celebrity.name}"`);
+        await dbLog(null, 'tmdb-enrich-celebrity', 'not_found', `TMDB: no results for "${celebrity.name}"`, {
+            celebrity_id: celebrity.id, name: celebrity.name,
+        });
         return;
     }
 
@@ -299,6 +311,10 @@ export async function enrichCelebrity(celebrity) {
     );
 
     console.log(`  Enriched celebrity: "${celebrity.name}" (tmdb_id=${tmdbId})`);
+    await dbLog(null, 'tmdb-enrich-celebrity', 'completed', `Enriched: "${celebrity.name}"`, {
+        celebrity_id: celebrity.id, name: celebrity.name, tmdb_id: tmdbId,
+        has_photo: !!photoUrl, has_bio: !!bio.en, birth_date: birthDate,
+    });
 
     // NOTE: We do NOT fetch filmography here.
     // Movies are only linked when they appear in video titles processed by AI.
@@ -357,6 +373,7 @@ async function main() {
 
         if (!movieTitle) {
             console.log(`[${video.id.slice(0, 8)}] No movie title in AI response, skipping`);
+            await dbLog(video.id, 'tmdb-enrich', 'skipped', 'No movie title in AI response');
             continue;
         }
 
@@ -376,6 +393,9 @@ async function main() {
                 );
                 moviesLinked++;
                 _completed.push({ id: video.id, title: video.original_title, status: 'ok', ms: Date.now() - _start });
+                await dbLog(video.id, 'tmdb-enrich', 'completed', `Movie linked: "${movie.title || movieTitle}"`, {
+                    movie_id: movie.id, tmdb_id: movie.tmdb_id, poster: !!movie.poster_url,
+                });
 
                 // Update scenes_count
                 await pool.query(
@@ -403,10 +423,15 @@ async function main() {
                 }
             }
 
+            if (!movie) {
+                await dbLog(video.id, 'tmdb-enrich', 'warning', `Movie not found on TMDB: "${movieTitle}"`, { movieTitle, year: movieYear });
+            }
+
             await sleep(300); // TMDB rate limit: ~40 req/10s
         } catch (err) {
             console.error(`  ERROR processing movie "${movieTitle}": ${err.message}`);
             _errors.push({ id: video.id, title: video.original_title, error: err.message });
+            await dbLog(video.id, 'tmdb-enrich', 'error', `Movie enrichment failed: ${err.message}`, { movieTitle, year: movieYear });
         }
     }
 
@@ -431,6 +456,9 @@ async function main() {
             await sleep(300);
         } catch (err) {
             console.error(`  ERROR enriching "${celeb.name}": ${err.message}`);
+            await dbLog(null, 'tmdb-enrich-celebrity', 'error', `Celebrity enrichment failed: "${celeb.name}": ${err.message}`, {
+                celebrity_id: celeb.id, name: celeb.name,
+            });
         }
     }
 

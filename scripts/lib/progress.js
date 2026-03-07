@@ -17,6 +17,63 @@ const PROGRESS_TMP = PROGRESS_FILE + ".tmp";
 let _lastStep = null;
 const _stepStartTimes = {};
 
+// Per-video active items tracking (for concurrent progress bars)
+const _activeItems = new Map();
+
+/**
+ * Flush activeItems to progress.json (targeted write, no full overwrite).
+ */
+function _flushActiveItems() {
+    if (!_lastStep) return;
+    const existing = readProgressFile();
+    if (existing.steps?.[_lastStep]) {
+        const items = Array.from(_activeItems.values());
+        existing.steps[_lastStep].activeItems = items.length > 0 ? items : undefined;
+        existing.steps[_lastStep].updatedAt = new Date().toISOString();
+        writeProgressFile(existing);
+    }
+}
+
+/**
+ * Set/update an active item being processed (shows as individual progress bar in UI).
+ * Auto-flushes to progress.json so frontend sees updates immediately.
+ * @param {string} id - unique key (usually video ID)
+ * @param {{ label: string, subStep: string, pct: number }} data
+ */
+export function setActiveItem(id, data) {
+    _activeItems.set(id, {
+        id,
+        label: data.label || id,
+        subStep: data.subStep || '',
+        pct: data.pct ?? 0,
+        startedAt: _activeItems.get(id)?.startedAt || Date.now(),
+    });
+    _flushActiveItems();
+}
+
+/**
+ * Remove an active item (when finished processing).
+ * @param {string} id
+ */
+export function removeActiveItem(id) {
+    _activeItems.delete(id);
+    _flushActiveItems();
+}
+
+/**
+ * Get all active items as array for progress.json.
+ */
+export function getActiveItems() {
+    return Array.from(_activeItems.values());
+}
+
+/**
+ * Clear all active items (called on step complete).
+ */
+export function clearActiveItems() {
+    _activeItems.clear();
+}
+
 export function readProgressFile() {
     try {
         return JSON.parse(readFileSync(PROGRESS_FILE, "utf8"));
@@ -89,11 +146,15 @@ export function writeProgress(data) {
         _stepStartTimes[_lastStep] = new Date().toISOString();
     }
 
+    // Auto-attach activeItems if any exist
+    const items = getActiveItems();
+
     existing.steps[_lastStep] = {
         ...data,
         status: "active",
         startedAt: _stepStartTimes[_lastStep],
         updatedAt: new Date().toISOString(),
+        ...(items.length > 0 ? { activeItems: items } : {}),
     };
 
     writeProgressFile(existing);
@@ -125,6 +186,8 @@ export function completeStep(finalData = {}) {
             }
             delete existing.steps[_lastStep].currentVideo;
             delete existing.steps[_lastStep].downloads;
+            delete existing.steps[_lastStep].activeItems;
+            clearActiveItems();
             writeProgressFile(existing);
         }
         _lastStep = null;

@@ -22,7 +22,7 @@ import { fileURLToPath } from 'url';
 import slugify from 'slugify';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, completeStep } from './lib/progress.js';
+import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
 
 const LANGS = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
 const SITE_URL = process.env.SITE_URL || 'https://celeb.skin';
@@ -155,7 +155,7 @@ async function linkMovieScenes(videoId) {
 // Pre-Publish Validation
 // ============================================
 
-const CDN_PATTERNS = ['b-cdn.net', 'cdn.celeb.skin'];
+const CDN_PATTERNS = ['b-cdn.net'];
 
 function isCdnUrl(url) {
     if (!url) return false;
@@ -284,20 +284,26 @@ async function main() {
     logger.info('='.repeat(60));
 
     // Determine which videos to publish
+    // STRICT: Only publish videos that completed the full pipeline:
+    //   watermarked + CDN URLs for both video and thumbnail
     let statusFilter;
     if (autoMode) {
-        // Auto-publish: only high-confidence videos with all media ready
         statusFilter = `
-            status IN ('enriched', 'auto_recognized', 'watermarked')
+            status = 'watermarked'
             AND ai_confidence >= 0.8
             AND video_url IS NOT NULL
+            AND video_url LIKE '%b-cdn.net%'
             AND thumbnail_url IS NOT NULL
+            AND thumbnail_url LIKE '%b-cdn.net%'
         `;
     } else {
-        // Manual: publish all enriched/watermarked/auto_recognized
+        // Manual: watermarked or needs_review, but still require CDN URLs
         statusFilter = `
-            status IN ('enriched', 'auto_recognized', 'watermarked', 'needs_review')
+            status IN ('watermarked', 'needs_review')
             AND video_url IS NOT NULL
+            AND video_url LIKE '%b-cdn.net%'
+            AND thumbnail_url IS NOT NULL
+            AND thumbnail_url LIKE '%b-cdn.net%'
         `;
     }
 
@@ -329,6 +335,7 @@ async function main() {
         try {
             const _start = Date.now();
             const vTitle = video.display_title || video.id;
+            setActiveItem(video.id, { label: vTitle, subStep: 'Validating', pct: 0 });
             writeProgress({
                 step: 'publish', stepLabel: 'Publishing Videos',
                 videosTotal: videos.length, videosDone: published+skipped+failed+blocked,
@@ -343,6 +350,7 @@ async function main() {
 
             if (!validation.valid) {
                 blocked++;
+                removeActiveItem(video.id);
                 _blocked.push({ id: video.id, title: vTitle, errors: validation.errors });
                 logger.error(`  ✗ BLOCKED: ${vTitle}`);
                 for (const err of validation.errors) {
@@ -367,17 +375,21 @@ async function main() {
                 }
             }
 
+            setActiveItem(video.id, { label: vTitle, subStep: 'Publishing', pct: 50 });
             const result = await publishVideo(video, dryRun);
 
             if (result.status === 'ok') {
                 published++;
+                removeActiveItem(video.id);
                 _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
                 logger.info(`  [${published}] "${result.title || 'untitled'}" → /video/${result.slug}${result.scenesLinked ? ` (${result.scenesLinked} movie scenes)` : ''}`);
             } else {
                 skipped++;
+                removeActiveItem(video.id);
             }
         } catch (err) {
             failed++;
+            removeActiveItem(video.id);
             _errors.push({ id: video.id, title: video.display_title || video.id, error: err.message });
             logger.error(`  ✗ Error publishing ${video.id}: ${err.message}`);
         }

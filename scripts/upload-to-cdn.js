@@ -27,9 +27,9 @@ import { fileURLToPath } from 'url';
 import { dirname, join, extname } from 'path';
 import { readFile, rm, stat, access } from 'fs/promises';
 import axios from 'axios';
-import { query } from './lib/db.js';
+import { query, log as dbLog } from './lib/db.js';
 import logger from './lib/logger.js';
-import { writeProgress, completeStep } from './lib/progress.js';
+import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = join(__dirname, 'tmp');
@@ -37,7 +37,7 @@ const TMP_DIR = join(__dirname, 'tmp');
 const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE || 'celebskin-media';
 const BUNNY_STORAGE_KEY = process.env.BUNNY_STORAGE_KEY;
 const BUNNY_STORAGE_HOST = process.env.BUNNY_STORAGE_HOST || 'storage.bunnycdn.com';
-const CDN_URL = process.env.BUNNY_CDN_URL || 'https://cdn.celeb.skin';
+const CDN_URL = process.env.BUNNY_CDN_URL || 'https://celebskin-cdn.b-cdn.net';
 
 // MIME type mapping
 const MIME_TYPES = {
@@ -102,7 +102,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
         && video.video_url_watermarked.includes('b-cdn.net')
         && video.video_url
         && !video.video_url.includes('b-cdn.net')
-        && !video.video_url.includes('cdn.celeb.skin')) {
+        && !video.video_url.includes('b-cdn.net')) {
         logger.info(`  Fixing video_url → CDN watermarked URL`);
         await query(
             `UPDATE videos SET video_url = $2, updated_at = NOW() WHERE id = $1`,
@@ -116,10 +116,12 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
         return { status: 'skip', reason: 'no_work_dir' };
     }
 
+    const vTitle = video.display_title || videoId;
     const uploadedUrls = {};
     let uploadCount = 0;
 
     // 1. Upload watermarked video
+    setActiveItem(videoId, { label: vTitle, subStep: 'Uploading video', pct: 0 });
     const watermarkedPath = join(workDir, 'watermarked.mp4');
     if (await fileExists(watermarkedPath)) {
         try {
@@ -149,6 +151,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     }
 
     // 3. Upload screenshots
+    setActiveItem(videoId, { label: vTitle, subStep: 'Uploading screenshots', pct: 50 });
     const screenshotUrls = [];
     for (let i = 1; i <= 10; i++) {
         const thumbName = `thumb_${String(i).padStart(3, '0')}.jpg`;
@@ -170,6 +173,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     }
 
     // 4. Upload sprite
+    setActiveItem(videoId, { label: vTitle, subStep: 'Uploading sprite + GIF', pct: 80 });
     const spritePath = join(workDir, 'sprite.jpg');
     if (await fileExists(spritePath)) {
         try {
@@ -196,9 +200,12 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     }
 
     if (uploadCount === 0) {
+        removeActiveItem(videoId);
+        await dbLog(videoId, 'cdn_upload', 'skipped', 'No files to upload');
         return { status: 'skip', reason: 'no_files_to_upload' };
     }
 
+    setActiveItem(videoId, { label: vTitle, subStep: 'Saving to DB', pct: 95 });
     // Update DB with CDN URLs
     const updates = [];
     const values = [videoId];
@@ -259,6 +266,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
         }
     }
 
+    removeActiveItem(videoId);
     return { status: 'ok', uploadCount, urls: uploadedUrls };
 }
 
@@ -308,8 +316,14 @@ async function uploadCelebrityPhotos(force = false, limit = 50) {
 
             uploaded++;
             logger.info(`  [${uploaded}] ${celeb.name} → ${cdnUrl}`);
+            await dbLog(null, 'cdn_upload_photo', 'completed', `Celebrity photo uploaded: ${celeb.name}`, {
+                celebrity_id: celeb.id, cdn_url: cdnUrl,
+            });
         } catch (err) {
             logger.warn(`  Failed for ${celeb.name}: ${err.message}`);
+            await dbLog(null, 'cdn_upload_photo', 'error', `Celebrity photo upload failed: ${celeb.name}: ${err.message}`, {
+                celebrity_id: celeb.id, photo_url: celeb.photo_url,
+            });
         }
     }
 
@@ -396,8 +410,14 @@ async function uploadMoviePosters(force = false, limit = 50) {
 
             uploaded++;
             logger.info(`  [${uploaded}] ${movie.title} → ${cdnUrl}`);
+            await dbLog(null, 'cdn_upload_poster', 'completed', `Movie poster uploaded: ${movie.title}`, {
+                movie_id: movie.id, cdn_url: cdnUrl,
+            });
         } catch (err) {
             logger.warn(`  Failed for ${movie.title}: ${err.message}`);
+            await dbLog(null, 'cdn_upload_poster', 'error', `Movie poster upload failed: ${movie.title}: ${err.message}`, {
+                movie_id: movie.id, poster_url: movie.poster_url,
+            });
         }
     }
 
@@ -451,11 +471,11 @@ async function main() {
                 -- Published videos that still have non-CDN video URLs (missed by earlier pipeline runs)
                 OR (v.status = 'published' AND v.video_url IS NOT NULL
                     AND v.video_url NOT LIKE '%b-cdn.net%'
-                    AND v.video_url NOT LIKE '%cdn.celeb.skin%'
+                    AND v.video_url NOT LIKE '%b-cdn.net%'
                     AND v.video_url_watermarked IS NOT NULL
                     AND v.video_url_watermarked LIKE '%b-cdn.net%')
              )
-             AND v.status IN ('watermarked', 'enriched', 'auto_recognized', 'needs_review', 'published')
+             AND v.status IN ('watermarked', 'published')
              ORDER BY v.created_at ASC
              LIMIT $1`,
             [limit]

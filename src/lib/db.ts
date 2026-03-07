@@ -62,7 +62,24 @@ export async function getVideoBySlug(slug: string, locale: string): Promise<Vide
        LIMIT 1`,
             [slug]
         );
-        if (fallback.rows.length === 0) return null;
+        if (fallback.rows.length === 0) {
+            // Fallback 2: extract short UUID from end of slug (e.g. "...-6b89de15")
+            const shortId = slug.match(/([0-9a-f]{8})$/)?.[1];
+            if (shortId) {
+                const idFallback = await pool.query(
+                    `SELECT v.*
+                     FROM videos v
+                     WHERE v.id::text LIKE $1
+                       AND v.status = 'published'
+                     LIMIT 1`,
+                    [shortId + '%']
+                );
+                if (idFallback.rows.length > 0) {
+                    return enrichVideoWithRelations(idFallback.rows[0]);
+                }
+            }
+            return null;
+        }
         return enrichVideoWithRelations(fallback.rows[0]);
     }
 
@@ -340,10 +357,11 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
 
     const raw = rawResult.rows[0] || null;
 
-    // Fallback: if no CDN video URL, use raw source video_file_url or embed_code
-    const videoUrl = video.video_url || video.video_url_watermarked
-        ? video.video_url
-        : raw?.video_file_url || null;
+    // Fallback chain: CDN watermarked → CDN original → raw source
+    const videoUrl = video.video_url
+        || video.video_url_watermarked
+        || raw?.video_file_url
+        || null;
     const videoUrlWatermarked = video.video_url_watermarked || null;
 
     return {

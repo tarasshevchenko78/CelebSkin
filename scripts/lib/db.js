@@ -236,8 +236,8 @@ export async function linkMovieCelebrity(movieId, celebrityId, role = null) {
 export async function log(videoId, step, status, message, metadata = {}) {
   await query(
     `INSERT INTO processing_log (video_id, step, status, message, metadata)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [videoId, step, status, message, metadata]
+     VALUES ($1, $2, $3, $4, $5::jsonb)`,
+    [videoId, step, status, message, typeof metadata === 'string' ? metadata : JSON.stringify(metadata)]
   );
 }
 

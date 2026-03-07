@@ -194,7 +194,7 @@ async function logPipelineStep(stepName, status, details) {
 
 const CONVEYOR_DEFAULTS = {
     pollInterval: 10000,    // 10 sec between polls
-    maxIdlePolls: 3,        // 3 consecutive empty polls → step done
+    maxIdlePolls: 6,        // 6 consecutive empty polls → check if done
     staggerDelay: 3000,     // 3 sec between launching workers
     batchLimit: 3,          // videos per run (normal)
     testBatchLimit: 1,      // videos per run (test mode)
@@ -204,8 +204,30 @@ function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
+/**
+ * Check if there are videos still flowing through the pipeline.
+ * Prevents workers from marking themselves "done" prematurely.
+ */
+async function hasInFlightVideos() {
+    try {
+        const { rows } = await query(`
+            SELECT
+                (SELECT COUNT(*) FROM raw_videos WHERE status = 'pending') AS raw_pending,
+                (SELECT COUNT(*) FROM videos
+                 WHERE status NOT IN ('published', 'rejected', 'needs_review')
+                ) AS videos_wip
+        `);
+        const rawPending = parseInt(rows[0].raw_pending) || 0;
+        const videosWip = parseInt(rows[0].videos_wip) || 0;
+        return { inFlight: rawPending > 0 || videosWip > 0, rawPending, videosWip };
+    } catch {
+        return { inFlight: false, rawPending: 0, videosWip: 0 };
+    }
+}
+
 // Graceful shutdown
 let shuttingDown = false;
+let draining = false;  // drain mode: stop scrape, finish the rest
 process.on('SIGINT', () => {
     logger.info('\n[conveyor] SIGINT received — shutting down gracefully...');
     shuttingDown = true;
@@ -213,6 +235,10 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
     logger.info('\n[conveyor] SIGTERM received — shutting down gracefully...');
     shuttingDown = true;
+});
+process.on('SIGUSR1', () => {
+    logger.info('\n[conveyor] SIGUSR1 received — drain mode: stop scraping, finish in-progress videos...');
+    draining = true;
 });
 
 /**
@@ -344,24 +370,48 @@ async function runStepWorker(step, stepState, allStepStates, extraArgs, testMode
             const allDepsDone = deps.every(depName => allStepStates[depName]?.completed);
 
             if (allDepsDone || deps.length === 0) {
-                // Upstream is done and we found nothing — we're done
-                logger.info(`[conveyor] ${step.name} — no more work, marking done (${state.totalProcessed} total processed)`);
+                // Upstream is done — but check DB for in-flight videos before quitting
+                const { inFlight, rawPending, videosWip } = await hasInFlightVideos();
+                if (inFlight) {
+                    // Videos still flowing through pipeline — keep polling
+                    state.consecutiveIdle = 0;
+                    logger.info(`[conveyor] ${step.name} — deps done but ${rawPending} raw pending + ${videosWip} videos WIP in DB, continuing to poll`);
+                } else {
+                    // Nothing in flight — we're truly done
+                    logger.info(`[conveyor] ${step.name} — no more work, marking done (${state.totalProcessed} total processed)`);
+                    state.phase = 'completed';
+                    state.completed = true;
+
+                    markStepDone(step.name, {
+                        videosDone: state.totalProcessed,
+                        videosTotal: state.totalProcessed,
+                        elapsedMs: Date.now() - stepStart,
+                    });
+
+                    return buildWorkerResult(step, state, stepStart);
+                }
+            } else {
+                // Upstream still running — reset idle counter and keep polling
+                // (upstream may produce more work)
+                state.consecutiveIdle = 0;
+                logger.info(`[conveyor] ${step.name} — idle but upstream still running, continuing to poll`);
+            }
+        }
+
+        // In drain mode: if no in-flight videos remain, stop this worker
+        if (draining && state.consecutiveIdle >= 2) {
+            const { inFlight } = await hasInFlightVideos();
+            if (!inFlight) {
+                logger.info(`[conveyor] ${step.name} — drain mode: pipeline empty, stopping worker`);
                 state.phase = 'completed';
                 state.completed = true;
-
                 markStepDone(step.name, {
                     videosDone: state.totalProcessed,
                     videosTotal: state.totalProcessed,
                     elapsedMs: Date.now() - stepStart,
                 });
-
                 return buildWorkerResult(step, state, stepStart);
             }
-
-            // Upstream still running — reset idle counter and keep polling
-            // (upstream may produce more work)
-            state.consecutiveIdle = 0;
-            logger.info(`[conveyor] ${step.name} — idle but upstream still running, continuing to poll`);
         }
 
         // Wait before next poll
@@ -594,7 +644,7 @@ async function runFinalValidation() {
             FROM videos WHERE status = 'published'
             AND video_url IS NOT NULL
             AND video_url NOT LIKE '%b-cdn.net%'
-            AND video_url NOT LIKE '%cdn.celeb.skin%'
+            AND 1=1  -- cdn.celeb.skin removed, only check b-cdn.net
         `);
         if (rows.length > 0) {
             critical++;
@@ -615,7 +665,7 @@ async function runFinalValidation() {
             SELECT id, COALESCE(title->>'en', id::text) as title, thumbnail_url
             FROM videos WHERE status = 'published'
             AND (thumbnail_url IS NULL
-                 OR (thumbnail_url NOT LIKE '%b-cdn.net%' AND thumbnail_url NOT LIKE '%cdn.celeb.skin%'))
+                 OR thumbnail_url NOT LIKE '%b-cdn.net%')
         `);
         if (rows.length > 0) {
             critical++;

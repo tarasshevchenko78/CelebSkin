@@ -30,7 +30,7 @@ import {
   query,
 } from "./lib/db.js";
 import logger from "./lib/logger.js";
-import { writeProgress, clearProgress } from "./lib/progress.js";
+import { writeProgress, clearProgress, completeStep, setActiveItem, removeActiveItem } from "./lib/progress.js";
 import { smartRecognize } from "./lib/visual-recognizer.js";
 import { extractBestFrame, extractKeyFrames, cleanupFrames } from "./lib/frame-extractor.js";
 import axios from "axios";
@@ -368,6 +368,7 @@ for (let i = 0; i < pending.length; i += CONCURRENCY) {
     await Promise.all(batch.map(async (raw) => {
   try {
     const _start = Date.now();
+    setActiveItem(raw.id, { label: raw.raw_title || raw.id, subStep: 'Gemini API', pct: 0 });
     writeProgress({
         step: 'ai-process', stepLabel: 'AI Processing (Gemini)',
         videosTotal: pending.length, videosDone: processed + failed,
@@ -377,11 +378,14 @@ for (let i = 0; i < pending.length; i += CONCURRENCY) {
         elapsedMs: Date.now() - startedAt,
     });
     await processVideo(raw);
+    setActiveItem(raw.id, { label: raw.raw_title || raw.id, subStep: 'Saving to DB', pct: 90 });
     processed++;
+    removeActiveItem(raw.id);
     _completed.push({ id: raw.id, title: raw.raw_title, status: 'ok', ms: Date.now() - _start });
     // Rate limit: ~2 sec between API calls
     await new Promise(r => setTimeout(r, 2000));
   } catch (err) {
+    removeActiveItem(raw.id);
     logger.error(`Failed: ${raw.raw_title}`, { error: err.message });
     await markRawVideoFailed(raw.id, err.message);
     failed++;
