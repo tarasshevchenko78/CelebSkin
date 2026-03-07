@@ -33,7 +33,7 @@ import { pipeline } from 'stream/promises';
 import axios from 'axios';
 import BoobsRadarAdapter from './adapters/boobsradar-adapter.js';
 import logger from './lib/logger.js';
-import { insertRawVideo, query } from './lib/db.js';
+import { insertRawVideo, query, log as dbLog } from './lib/db.js';
 import { writeProgress, clearProgress } from './lib/progress.js';
 
 // Ensure source 'boobsradar' exists in DB; cache the ID
@@ -509,9 +509,17 @@ async function main() {
               });
               if (dbId) {
                 logger.info(`${tag} В БД: ${shortTitle}`);
+                await dbLog(null, 'scrape', 'completed', `Scraped: ${shortTitle}`, {
+                    raw_video_id: dbId, source_video_id: videoSlug,
+                    has_video: !!metadata.local_video, has_preview: !!metadata.local_preview,
+                    category: catSlug, file_url: metadata.video_file_url || null,
+                });
               }
             } catch (dbErr) {
               logger.warn(`${tag} БД: ошибка — ${dbErr.message}`);
+              await dbLog(null, 'scrape', 'error', `DB insert failed: ${shortTitle}: ${dbErr.message}`, {
+                  source_video_id: videoSlug, category: catSlug,
+              }).catch(() => {});
             }
 
             // Прогресс
@@ -521,6 +529,9 @@ async function main() {
           } catch (err) {
             logger.error(`${tag} Ошибка: ${err.message}`);
             progress.stats.totalFailed++;
+            await dbLog(null, 'scrape', 'error', `Scrape failed: ${shortTitle}: ${err.message}`, {
+                source_video_id: videoSlug, category: catSlug,
+            }).catch(() => {});
           }
         }));
 
