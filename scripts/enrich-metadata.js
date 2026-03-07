@@ -57,11 +57,19 @@ const FORCE = args.includes('--force');
 // TMDB API helper
 // ============================================
 function tmdbFetch(path) {
-    const sep = path.includes('?') ? '&' : '?';
-    const url = `${TMDB_BASE}${path}${sep}api_key=${TMDB_API_KEY}`;
+    const url = `${TMDB_BASE}${path}`;
+    const parsedUrl = new URL(url);
+    const options = {
+        hostname: parsedUrl.hostname,
+        path: parsedUrl.pathname + parsedUrl.search,
+        headers: {
+            'Authorization': `Bearer ${TMDB_API_KEY}`,
+            'Accept': 'application/json',
+        },
+    };
 
     return new Promise((resolve, reject) => {
-        https.get(url, (res) => {
+        https.get(options, (res) => {
             let data = '';
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
@@ -91,7 +99,7 @@ function slugify(text) {
 // ============================================
 // Movie enrichment — search TMDB for specific movie title
 // ============================================
-async function findOrCreateMovie(movieTitle, year) {
+export async function findOrCreateMovie(movieTitle, year) {
     if (!movieTitle || movieTitle.trim().length < 2) return null;
 
     const cleanTitle = movieTitle.trim();
@@ -223,7 +231,7 @@ async function enrichMovieFromTmdb(tmdbResult, type, existingMovie) {
 // ============================================
 // Celebrity enrichment — TMDB profile only, NO filmography
 // ============================================
-async function enrichCelebrity(celebrity) {
+export async function enrichCelebrity(celebrity) {
     if (celebrity.tmdb_id && !FORCE) {
         console.log(`  Celebrity already enriched: "${celebrity.name}" (tmdb_id=${celebrity.tmdb_id})`);
         return;
@@ -405,11 +413,12 @@ async function main() {
     // Step 2: Enrich celebrities without TMDB data
     console.log('\n--- Step 2: Enrich celebrities (profile only, no filmography) ---');
 
+    // NOTE: Don't filter by videos_count > 0 — in conveyor mode,
+    // counts aren't updated until publish step, so new celebrities would be skipped
     const celebsResult = await pool.query(`
         SELECT * FROM celebrities
         WHERE ${FORCE ? 'TRUE' : 'tmdb_id IS NULL'}
-          AND videos_count > 0
-        ORDER BY videos_count DESC
+        ORDER BY created_at DESC
         LIMIT $1
     `, [LIMIT]);
 
@@ -452,7 +461,10 @@ async function main() {
     console.log('Done.\n');
 }
 
-main().catch(err => {
-    console.error('Fatal error:', err);
-    process.exit(1);
-});
+const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
+if (_isMain) {
+    main().catch(err => {
+        console.error('Fatal error:', err);
+        process.exit(1);
+    });
+}
