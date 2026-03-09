@@ -111,9 +111,14 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
         return { status: 'ok', uploadCount: 0, urls: { video_url: video.video_url_watermarked }, fixOnly: true };
     }
 
-    // Check if workDir exists
+    // Check if workDir exists — if missing, reset to enriched for re-watermark
     if (!await fileExists(workDir)) {
-        return { status: 'skip', reason: 'no_work_dir' };
+        logger.warn(`  [${videoId}] Work dir missing — resetting to enriched for re-watermark`);
+        await query(
+            `UPDATE videos SET status = 'enriched', video_url_watermarked = NULL, updated_at = NOW() WHERE id = $1`,
+            [videoId]
+        );
+        return { status: 'reset', reason: 'no_work_dir — reset to enriched for re-processing' };
     }
 
     const vTitle = video.display_title || videoId;

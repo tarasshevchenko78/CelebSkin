@@ -165,6 +165,7 @@ function isCdnUrl(url) {
 export function validateVideoForPublish(video) {
     const warnings = [];
     const errors = [];
+    const needsReview = []; // Issues that send video to moderation instead of blocking
 
     // CRITICAL: Video must have CDN URL (either watermarked or original on CDN)
     const hasWatermarkedCdn = isCdnUrl(video.video_url_watermarked);
@@ -179,6 +180,22 @@ export function validateVideoForPublish(video) {
         errors.push(`NO_CDN_THUMBNAIL: thumbnail_url=${(video.thumbnail_url || 'null').substring(0, 60)}`);
     }
 
+    // MODERATION: Missing movie poster → needs_review
+    if (!video.movie_poster_url && video.movie_title) {
+        needsReview.push(`NO_MOVIE_POSTER: movie "${video.movie_title}" has no poster`);
+    }
+
+    // MODERATION: Celebrity(s) without photo → needs_review
+    const celebsNoPhoto = parseInt(video.celebs_no_photo) || 0;
+    if (celebsNoPhoto > 0) {
+        needsReview.push(`CELEBS_NO_PHOTO: ${celebsNoPhoto} celebrity(s) have no photo`);
+    }
+
+    // MODERATION: No celebrities linked → needs_review
+    if (video.celebrity_count === 0 || video.celebrity_count === undefined) {
+        needsReview.push('NO_CELEBRITIES: no celebrities linked to this video');
+    }
+
     // WARNING: Missing sprite/preview (not critical but bad UX)
     if (!video.sprite_url) {
         warnings.push('NO_SPRITE: sprite sheet missing');
@@ -187,12 +204,7 @@ export function validateVideoForPublish(video) {
         warnings.push('NO_PREVIEW_GIF: preview animation missing');
     }
 
-    // WARNING: No celebrities linked
-    if (video.celebrity_count === 0 || video.celebrity_count === undefined) {
-        warnings.push('NO_CELEBRITIES: no celebrities linked to this video');
-    }
-
-    return { valid: errors.length === 0, errors, warnings };
+    return { valid: errors.length === 0, needsReview, errors, warnings };
 }
 
 // ============================================
@@ -311,7 +323,16 @@ async function main() {
         `SELECT v.id, v.title, v.slug, v.raw_video_id, v.video_url, v.video_url_watermarked,
                 v.thumbnail_url, v.sprite_url, v.preview_gif_url, v.ai_confidence, v.status,
                 COALESCE(v.title->>'en', v.id::text) as display_title,
-                (SELECT COUNT(*) FROM video_celebrities vc WHERE vc.video_id = v.id) as celebrity_count
+                (SELECT COUNT(*) FROM video_celebrities vc WHERE vc.video_id = v.id) as celebrity_count,
+                (SELECT COUNT(*) FROM video_celebrities vc
+                 JOIN celebrities c ON c.id = vc.celebrity_id
+                 WHERE vc.video_id = v.id AND (c.photo_url IS NULL OR c.photo_url = '')) as celebs_no_photo,
+                (SELECT m.poster_url FROM movie_scenes ms
+                 JOIN movies m ON m.id = ms.movie_id
+                 WHERE ms.video_id = v.id LIMIT 1) as movie_poster_url,
+                (SELECT m.title FROM movie_scenes ms
+                 JOIN movies m ON m.id = ms.movie_id
+                 WHERE ms.video_id = v.id LIMIT 1) as movie_title
          FROM videos v
          WHERE ${statusFilter}
          ORDER BY ai_confidence DESC NULLS LAST, created_at ASC
@@ -347,6 +368,27 @@ async function main() {
 
             // Pre-publish validation
             const validation = validateVideoForPublish(video);
+
+            // MODERATION: incomplete data → set needs_review for manual fix
+            if (validation.needsReview && validation.needsReview.length > 0 && validation.valid) {
+                blocked++;
+                removeActiveItem(video.id);
+                _blocked.push({ id: video.id, title: vTitle, errors: validation.needsReview });
+                logger.warn(`  → MODERATION: ${vTitle}`);
+                for (const issue of validation.needsReview) {
+                    logger.warn(`    🔍 ${issue}`);
+                }
+                // Set status to needs_review
+                await query(
+                    `UPDATE videos SET status = 'needs_review', updated_at = NOW() WHERE id = $1`,
+                    [video.id]
+                );
+                await query(
+                    `INSERT INTO processing_log (video_id, step, status, metadata) VALUES ($1, 'publish_moderation', 'needs_review', $2::jsonb)`,
+                    [video.id, JSON.stringify({ issues: validation.needsReview, warnings: validation.warnings })]
+                );
+                continue;
+            }
 
             if (!validation.valid) {
                 blocked++;

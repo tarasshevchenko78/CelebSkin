@@ -13,12 +13,12 @@
  *   7. Publish → status=published, multilingual slugs (publish-to-site.js)
  *
  * Modes:
- *   Conveyor (default) — all steps run concurrently as polling workers
- *   Sequential (--sequential) — classic mode, steps run one after another
+ *   Scheduler (default) — DB-driven loop, spawns steps when work available, max 3 videos/step
+ *   Sequential (--sequential) — fallback mode, steps run one after another
  *
  * Usage:
- *   node run-pipeline.js                    # conveyor mode (default)
- *   node run-pipeline.js --sequential       # classic sequential mode
+ *   node run-pipeline.js                    # scheduler mode (default)
+ *   node run-pipeline.js --sequential       # sequential mode (strict order, one step at a time)
  *   node run-pipeline.js --test             # test mode (limit=1 per step)
  *   node run-pipeline.js --step=2           # start from specific step
  *   node run-pipeline.js --only=scrape      # run only one step
@@ -30,15 +30,17 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
+import { writeFileSync, unlinkSync, accessSync } from 'fs';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
 import {
     writePipelineProgress, clearAllProgress, initSteps,
     markStepDone, writeStepStatus, readProgressFile, readStepResult,
+    writeVideoJourneys,
 } from './lib/progress.js';
 
 const execFileAsync = promisify(execFile);
@@ -189,56 +191,28 @@ async function logPipelineStep(stepName, status, details) {
 }
 
 // ============================================
-// Conveyor Belt Mode
+// Scheduler Mode (replaces conveyor)
 // ============================================
 
-const CONVEYOR_DEFAULTS = {
-    pollInterval: 10000,    // 10 sec between polls
-    maxIdlePolls: 6,        // 6 consecutive empty polls → check if done
-    staggerDelay: 3000,     // 3 sec between launching workers
-    batchLimit: 3,          // videos per run (normal)
-    testBatchLimit: 1,      // videos per run (test mode)
-};
+const PID_FILE = join(__dirname, 'logs', 'pipeline.pid');
+const CHILDREN_PID_FILE = join(__dirname, 'logs', 'children.pid');
+const STOP_FILE = join(__dirname, 'logs', '.stop');
+const SCHEDULER_INTERVAL = 5000;  // 5 sec between checks
+const MAX_PER_STEP = 3;           // max videos per step
 
 function sleep(ms) {
     return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Check if there are videos still flowing through the pipeline.
- * Prevents workers from marking themselves "done" prematurely.
- */
-async function hasInFlightVideos() {
-    try {
-        const { rows } = await query(`
-            SELECT
-                (SELECT COUNT(*) FROM raw_videos WHERE status = 'pending') AS raw_pending,
-                (SELECT COUNT(*) FROM videos
-                 WHERE status NOT IN ('published', 'rejected', 'needs_review')
-                ) AS videos_wip
-        `);
-        const rawPending = parseInt(rows[0].raw_pending) || 0;
-        const videosWip = parseInt(rows[0].videos_wip) || 0;
-        return { inFlight: rawPending > 0 || videosWip > 0, rawPending, videosWip };
-    } catch {
-        return { inFlight: false, rawPending: 0, videosWip: 0 };
-    }
-}
-
 // Graceful shutdown
 let shuttingDown = false;
-let draining = false;  // drain mode: stop scrape, finish the rest
 process.on('SIGINT', () => {
-    logger.info('\n[conveyor] SIGINT received — shutting down gracefully...');
+    logger.info('\n[scheduler] SIGINT received — shutting down gracefully...');
     shuttingDown = true;
 });
 process.on('SIGTERM', () => {
-    logger.info('\n[conveyor] SIGTERM received — shutting down gracefully...');
+    logger.info('\n[scheduler] SIGTERM received — shutting down gracefully...');
     shuttingDown = true;
-});
-process.on('SIGUSR1', () => {
-    logger.info('\n[conveyor] SIGUSR1 received — drain mode: stop scraping, finish in-progress videos...');
-    draining = true;
 });
 
 /**
@@ -281,261 +255,310 @@ function parseItemCount(stdout) {
  */
 function readStepVideosDone(stepName) {
     const progress = readProgressFile();
-    return progress.steps?.[stepName]?.videosDone || 0;
+    return parseInt(progress.steps?.[stepName]?.videosDone) || 0;
 }
 
-/**
- * Run a single step as a conveyor worker — polls for work in a loop.
- */
-async function runStepWorker(step, stepState, allStepStates, extraArgs, testMode, config) {
-    const state = stepState;
-    const stepStart = Date.now();
+// ─────────────────────────────────────────────────
+// Stop mechanism — PID files + .stop sentinel file
+// ─────────────────────────────────────────────────
 
-    // Initial stagger delay to avoid all steps hitting DB at once
-    if (config.staggerIndex > 0) {
-        state.phase = 'waiting';
-        writeStepStatus(step.name, 'waiting', {
-            stepLabel: step.label,
-        });
-        await sleep(config.staggerIndex * config.staggerDelay);
+function shouldStop() {
+    if (shuttingDown) return true;
+    try { accessSync(STOP_FILE); return true; } catch { return false; }
+}
+
+function writePidFile(pid) {
+    try { writeFileSync(PID_FILE, String(pid)); } catch {}
+}
+
+function writeChildPids(runningChildren) {
+    const pids = [...runningChildren.values()].map(c => c.pid).filter(Boolean).join('\n');
+    try { writeFileSync(CHILDREN_PID_FILE, pids); } catch {}
+}
+
+function cleanupPidFiles() {
+    for (const f of [PID_FILE, CHILDREN_PID_FILE, STOP_FILE]) {
+        try { unlinkSync(f); } catch {}
+    }
+}
+
+async function waitForChildren(runningChildren, timeoutMs) {
+    const start = Date.now();
+    while (runningChildren.size > 0 && Date.now() - start < timeoutMs) {
+        for (const [name, child] of runningChildren) {
+            if (child.proc.exitCode !== null) runningChildren.delete(name);
+        }
+        if (runningChildren.size > 0) await sleep(1000);
+    }
+    for (const [name, child] of runningChildren) {
+        try { child.proc.kill('SIGTERM'); } catch {}
+        logger.warn(`[scheduler] Force killed ${name} (PID ${child.pid})`);
+        runningChildren.delete(name);
+    }
+}
+
+// ─────────────────────────────────────────────────
+// Scheduler — DB-driven work availability
+// ─────────────────────────────────────────────────
+
+async function cleanupStuckVideos() {
+    try {
+        const { rowCount } = await query(`
+            UPDATE videos SET status='needs_review', updated_at=NOW()
+            WHERE status NOT IN ('published','rejected','needs_review')
+              AND (video_url IS NULL OR video_url = '')
+              AND updated_at < NOW() - INTERVAL '5 minutes'
+        `);
+        if (rowCount > 0) logger.info(`[scheduler] Moved ${rowCount} video(s) without video_url to needs_review`);
+    } catch {}
+}
+
+async function getWorkAvailability() {
+    try {
+        const { rows } = await query(`
+            SELECT
+                (SELECT COUNT(*) FROM raw_videos WHERE status='pending') AS ai_ready,
+                (SELECT COUNT(*) FROM videos WHERE status IN ('enriched','auto_recognized')
+                 AND video_url IS NOT NULL AND video_url != ''
+                 AND (video_url_watermarked IS NULL OR video_url_watermarked = '')) AS watermark_ready,
+                (SELECT COUNT(*) FROM videos WHERE status='watermarked'
+                 AND (thumbnail_url IS NULL OR thumbnail_url NOT LIKE '%b-cdn.net%')) AS thumbnail_ready,
+                (SELECT COUNT(*) FROM videos WHERE status='watermarked'
+                 AND (video_url_watermarked LIKE 'tmp/%' OR thumbnail_url LIKE 'tmp/%')) AS cdn_ready,
+                (SELECT COUNT(*) FROM videos WHERE status='watermarked'
+                 AND video_url_watermarked LIKE '%b-cdn.net%'
+                 AND thumbnail_url LIKE '%b-cdn.net%') AS publish_ready
+        `);
+        const r = rows[0];
+        return {
+            'scrape': 0, // scrape is always triggered once at pipeline start, not by DB state
+            'ai-process': parseInt(r.ai_ready) || 0,
+            'visual-recognize': 0,
+            'tmdb-enrich': 0,
+            'watermark': parseInt(r.watermark_ready) || 0,
+            'thumbnails': parseInt(r.thumbnail_ready) || 0,
+            'cdn-upload': parseInt(r.cdn_ready) || 0,
+            'publish': parseInt(r.publish_ready) || 0,
+        };
+    } catch (err) {
+        logger.error(`[scheduler] getWorkAvailability failed: ${err.message}`);
+        return {};
+    }
+}
+
+// TMDB enrich: triggered ONCE after each ai-process completion
+let _enrichTriggered = false; // set to true when ai-process finishes, reset after tmdb-enrich runs
+async function checkEnrichNeeded() {
+    if (!_enrichTriggered) return 0;
+    try {
+        const { rows } = await query(`
+            SELECT COUNT(DISTINCT c.id) AS cnt
+            FROM celebrities c
+            JOIN video_celebrities vc ON vc.celebrity_id = c.id
+            JOIN videos v ON v.id = vc.video_id
+            WHERE c.tmdb_id IS NULL
+              AND v.status IN ('enriched','auto_recognized')
+        `);
+        return parseInt(rows[0].cnt) || 0;
+    } catch { return 0; }
+}
+
+function spawnStepProcess(step, args) {
+    const scriptPath = join(__dirname, step.script);
+    return spawn('node', [scriptPath, ...step.args, ...args], {
+        cwd: __dirname,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env },
+    });
+}
+
+function mapStatusToStep(video) {
+    switch (video.status) {
+        case 'new': return 'ai-process';
+        case 'enriched': case 'auto_recognized':
+            return (video.video_url_watermarked && video.video_url_watermarked !== '') ? 'thumbnails' : 'watermark';
+        case 'watermarked':
+            if (video.video_url_watermarked?.startsWith('tmp/') || video.thumbnail_url?.startsWith('tmp/')) return 'cdn-upload';
+            return 'publish';
+        default: return video.status;
+    }
+}
+
+async function buildVideoJourneys() {
+    try {
+        const { rows } = await query(`
+            SELECT v.id, v.title->>'en' AS title, v.status, v.updated_at,
+                   v.video_url_watermarked, v.thumbnail_url
+            FROM videos
+            WHERE status NOT IN ('published', 'rejected', 'needs_review')
+            ORDER BY created_at DESC LIMIT 20
+        `);
+        return rows.map(v => ({
+            id: v.id,
+            title: v.title || v.id.slice(0, 8),
+            status: v.status,
+            currentStep: mapStatusToStep(v),
+            updatedAt: v.updated_at,
+        }));
+    } catch { return []; }
+}
+
+// ─────────────────────────────────────────────────
+// runScheduler — main scheduler loop
+// ─────────────────────────────────────────────────
+
+async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
+    const maxPerStep = testMode ? 1 : MAX_PER_STEP;
+    const runningChildren = new Map();
+    const stepStats = {};
+
+    for (const step of stepsToRun) {
+        stepStats[step.name] = { totalProcessed: 0, runs: 0, errors: [], lastDuration: 0 };
     }
 
-    // Dependencies are checked at idle termination (not at startup).
-    // Workers start polling immediately — scripts query DB for available work.
-    // This enables true conveyor: downstream starts as soon as upstream produces items.
-    const deps = step.deps || [];
+    writePidFile(process.pid);
+    logger.info(`\n🎯 SCHEDULER MODE — max ${maxPerStep} videos/step, check every ${SCHEDULER_INTERVAL / 1000}s`);
+    logger.info(`PID: ${process.pid}`);
 
-    // Build args for conveyor mode (small batch limit)
-    const batchLimit = testMode ? config.testBatchLimit : config.batchLimit;
-    const conveyorArgs = extraArgs.filter(a => !a.startsWith('--limit='));
-    conveyorArgs.push(`--limit=${batchLimit}`);
+    let consecutiveEmpty = 0;
 
-    // Polling loop
-    while (!shuttingDown) {
-        state.phase = 'running';
-        state.lastRunAt = Date.now();
-        state.totalRuns++;
+    while (!shouldStop()) {
+        // 1. Collect finished children
+        for (const [stepName, child] of runningChildren) {
+            if (child.proc.exitCode !== null) {
+                const elapsed = Date.now() - child.startedAt;
+                const stats = stepStats[stepName];
+                stats.runs++;
+                stats.lastDuration = elapsed;
 
-        const result = await runStep(step, conveyorArgs, false); // testMode handled via batchLimit
+                const processed = parseItemCount(child.stdout) || readStepVideosDone(stepName);
+                if (processed > stats.totalProcessed) stats.totalProcessed = processed;
 
-        // Determine how many items were processed
-        let itemsProcessed = 0;
-        if (result.success) {
-            // Read from progress.json (script writes videosDone via completeStep)
-            const videosDone = readStepVideosDone(step.name);
-            // Also parse stdout as fallback
-            const stdoutCount = parseItemCount(result.stdout);
-            itemsProcessed = Math.max(videosDone, stdoutCount);
-        }
+                if (child.proc.exitCode !== 0) {
+                    const errMsg = child.stderr.slice(-300).trim() || `exit code ${child.proc.exitCode}`;
+                    stats.errors.push({ run: stats.runs, error: errMsg });
+                    logger.warn(`[scheduler] ${stepName} failed (exit ${child.proc.exitCode}): ${errMsg.slice(0, 100)}`);
+                } else {
+                    logger.info(`[scheduler] ${stepName} done in ${(elapsed / 1000).toFixed(1)}s (processed: ${processed})`);
+                    // Trigger TMDB enrich after ai-process completes
+                    if (stepName === 'ai-process') _enrichTriggered = true;
+                    // Reset trigger after tmdb-enrich completes (don't re-run until next ai-process)
+                    if (stepName === 'tmdb-enrich') _enrichTriggered = false;
+                }
 
-        if (!result.success) {
-            state.errors.push({ run: state.totalRuns, error: result.error?.substring(0, 200) });
-            state.consecutiveIdle++;
-            logger.warn(`[conveyor] ${step.name} run #${state.totalRuns} failed: ${result.error?.substring(0, 100)}`);
-
-            if (step.required && state.errors.length >= 3) {
-                logger.error(`[conveyor] Required step ${step.name} failed ${state.errors.length} times — stopping worker`);
-                state.phase = 'failed';
-                state.completed = true;
-                return buildWorkerResult(step, state, stepStart);
+                markStepDone(stepName, {
+                    videosDone: stats.totalProcessed,
+                    videosTotal: stats.totalProcessed,
+                    elapsedMs: elapsed,
+                });
+                runningChildren.delete(stepName);
+                await logPipelineStep(stepName, child.proc.exitCode === 0 ? 'completed' : 'failed', {
+                    duration: (elapsed / 1000).toFixed(1), processed,
+                }).catch(() => {});
             }
-        } else if (itemsProcessed === 0) {
-            state.consecutiveIdle++;
-            logger.info(`[conveyor] ${step.name} run #${state.totalRuns} — 0 items (idle ${state.consecutiveIdle}/${config.maxIdlePolls})`);
-        } else {
-            state.totalProcessed += itemsProcessed;
-            state.consecutiveIdle = 0;
-            logger.info(`[conveyor] ${step.name} run #${state.totalRuns} — processed ${itemsProcessed} items (total: ${state.totalProcessed})`);
         }
 
-        // Update pipeline progress
-        const activeWorkers = Object.entries(allStepStates)
-            .filter(([, s]) => s.phase === 'running')
-            .map(([name]) => name);
-        const completedWorkers = Object.values(allStepStates).filter(s => s.completed).length;
+        // 2. CONVEYOR BELT: all steps run in parallel, each processes up to 3 videos
+        // Each step only picks up videos that FINISHED the previous step
+        // Videos flow: scrape → ai → tmdb → watermark → thumbnails → cdn → publish
+
+        await cleanupStuckVideos();
+        const work = await getWorkAvailability();
+
+        // Scrape runs once at the start
+        if (stepStats['scrape'] && stepStats['scrape'].runs === 0 && !runningChildren.has('scrape')) {
+            work['scrape'] = 1;
+        }
+
+        // tmdb-enrich: only runs once after ai-process finishes, then waits for next ai-process
+        if (_enrichTriggered && !runningChildren.has('tmdb-enrich')) {
+            const enrichNeeded = await checkEnrichNeeded();
+            if (enrichNeeded > 0) {
+                work['tmdb-enrich'] = enrichNeeded;
+            } else {
+                _enrichTriggered = false; // no celebrities to enrich — skip
+            }
+        }
+
+        // 3. Spawn ALL steps that have work and aren't already running
+        for (const step of stepsToRun) {
+            if (runningChildren.has(step.name)) continue;
+            const available = work[step.name] || 0;
+            if (available <= 0) continue;
+
+            const stepArgs = [`--limit=${maxPerStep}`, ...extraArgs];
+            if (testMode && !stepArgs.includes('--test')) stepArgs.push('--test');
+
+            const proc = spawnStepProcess(step, stepArgs);
+            const child = { proc, pid: proc.pid, startedAt: Date.now(), stdout: '', stderr: '' };
+            proc.stdout.on('data', (d) => { child.stdout += d.toString(); });
+            proc.stderr.on('data', (d) => { child.stderr += d.toString(); });
+            proc.on('error', (err) => { child.stderr += err.message; });
+
+            runningChildren.set(step.name, child);
+            writeStepStatus(step.name, 'active', { stepLabel: step.label });
+            logger.info(`[scheduler] ▶ ${step.name} (PID ${proc.pid}) — ${available} videos ready`);
+        }
+
+        // 4. Write child PIDs
+        writeChildPids(runningChildren);
+
+        // 5. Per-video journey + progress
+        const videos = await buildVideoJourneys();
+        writeVideoJourneys(videos);
+
+        const activeNames = [...runningChildren.keys()];
+        const completedCount = stepsToRun.filter(s =>
+            stepStats[s.name].runs > 0 && !runningChildren.has(s.name)
+        ).length;
 
         writePipelineProgress({
-            totalSteps: Object.keys(allStepStates).length,
-            completedSteps: completedWorkers,
-            currentStep: 'conveyor',
-            currentLabel: `Active: ${activeWorkers.join(', ') || 'polling...'}`,
-            elapsedMs: Date.now() - config.pipelineStart,
+            totalSteps: stepsToRun.length,
+            completedSteps: completedCount,
+            currentStep: 'scheduler',
+            currentLabel: activeNames.length > 0 ? `Running: ${activeNames.join(', ')}` : 'Checking...',
+            elapsedMs: Date.now() - pipelineStart,
             status: 'running',
-            mode: 'conveyor',
+            mode: 'scheduler',
         });
 
-        // Check if this worker should stop
-        if (state.consecutiveIdle >= config.maxIdlePolls) {
-            // Are all upstream deps done?
-            const allDepsDone = deps.every(depName => allStepStates[depName]?.completed);
-
-            if (allDepsDone || deps.length === 0) {
-                // Upstream is done — but check DB for in-flight videos before quitting
-                const { inFlight, rawPending, videosWip } = await hasInFlightVideos();
-                if (inFlight) {
-                    // Videos still flowing through pipeline — keep polling
-                    state.consecutiveIdle = 0;
-                    logger.info(`[conveyor] ${step.name} — deps done but ${rawPending} raw pending + ${videosWip} videos WIP in DB, continuing to poll`);
-                } else {
-                    // Nothing in flight — we're truly done
-                    logger.info(`[conveyor] ${step.name} — no more work, marking done (${state.totalProcessed} total processed)`);
-                    state.phase = 'completed';
-                    state.completed = true;
-
-                    markStepDone(step.name, {
-                        videosDone: state.totalProcessed,
-                        videosTotal: state.totalProcessed,
-                        elapsedMs: Date.now() - stepStart,
-                    });
-
-                    return buildWorkerResult(step, state, stepStart);
-                }
-            } else {
-                // Upstream still running — reset idle counter and keep polling
-                // (upstream may produce more work)
-                state.consecutiveIdle = 0;
-                logger.info(`[conveyor] ${step.name} — idle but upstream still running, continuing to poll`);
+        // 6. Check done
+        const totalWork = Object.values(work).reduce((s, v) => s + (v || 0), 0);
+        if (runningChildren.size === 0 && totalWork === 0) {
+            consecutiveEmpty++;
+            if (consecutiveEmpty >= 3) {
+                logger.info('[scheduler] No work remaining — pipeline complete');
+                break;
             }
-        }
-
-        // In drain mode: if no in-flight videos remain, stop this worker
-        if (draining && state.consecutiveIdle >= 2) {
-            const { inFlight } = await hasInFlightVideos();
-            if (!inFlight) {
-                logger.info(`[conveyor] ${step.name} — drain mode: pipeline empty, stopping worker`);
-                state.phase = 'completed';
-                state.completed = true;
-                markStepDone(step.name, {
-                    videosDone: state.totalProcessed,
-                    videosTotal: state.totalProcessed,
-                    elapsedMs: Date.now() - stepStart,
-                });
-                return buildWorkerResult(step, state, stepStart);
-            }
-        }
-
-        // Wait before next poll
-        state.phase = 'idle';
-        writeStepStatus(step.name, 'idle', {
-            stepLabel: step.label,
-            videosDone: state.totalProcessed,
-            videosTotal: state.totalProcessed,
-            conveyorRun: state.totalRuns,
-        });
-        await sleep(config.pollInterval);
-    }
-
-    // Graceful shutdown
-    state.phase = 'stopped';
-    state.completed = true;
-    return buildWorkerResult(step, state, stepStart);
-}
-
-function buildWorkerResult(step, state, stepStart) {
-    // Read step errors from progress.json (written by the script itself)
-    const stepResult = readStepResult(step.name);
-    const videoErrors = stepResult?.errorCount || 0;
-    const videoErrorDetails = stepResult?.errors || [];
-
-    return {
-        step: step.name,
-        success: state.phase !== 'failed',
-        duration: ((Date.now() - stepStart) / 1000).toFixed(1),
-        processed: state.totalProcessed,
-        runs: state.totalRuns,
-        errors: state.errors.length,
-        videoErrors,              // per-video errors within the step
-        videoErrorDetails,        // error details [{id, title, error}]
-    };
-}
-
-/**
- * Run a one-shot step as a conveyor worker — runs once, concurrently with polling workers.
- * This lets downstream workers pick up items as they're produced (e.g. scrape inserts videos one-by-one).
- */
-async function runOnceWorker(step, stepState, allStepStates, extraArgs, testMode, config) {
-    const state = stepState;
-    const stepStart = Date.now();
-
-    // Small stagger to not hit DB at same time as other workers
-    if (config.staggerIndex > 0) {
-        await sleep(config.staggerIndex * config.staggerDelay);
-    }
-
-    state.phase = 'running';
-    writeStepStatus(step.name, 'active', { stepLabel: step.label });
-
-    const result = await runStep(step, extraArgs, testMode);
-
-    state.totalRuns = 1;
-    state.totalProcessed = parseItemCount(result.stdout) || readStepVideosDone(step.name);
-    state.phase = result.success ? 'completed' : 'failed';
-    state.completed = true;
-
-    markStepDone(step.name, {
-        videosDone: state.totalProcessed,
-        videosTotal: state.totalProcessed,
-        elapsedMs: Date.now() - stepStart,
-    });
-
-    return buildWorkerResult(step, state, stepStart);
-}
-
-/**
- * Run pipeline in conveyor belt mode — all steps run concurrently.
- * One-shot steps (scrape) run once but IN PARALLEL with polling workers,
- * so downstream workers pick up items as they're produced.
- */
-async function runConveyor(stepsToRun, extraArgs, testMode, pipelineStart) {
-    logger.info('\n🔄 CONVEYOR MODE — all steps run concurrently');
-    logger.info(`Poll interval: ${CONVEYOR_DEFAULTS.pollInterval / 1000}s, Max idle: ${CONVEYOR_DEFAULTS.maxIdlePolls}, Batch: ${testMode ? CONVEYOR_DEFAULTS.testBatchLimit : CONVEYOR_DEFAULTS.batchLimit}`);
-
-    // Initialize state for ALL steps (both one-shot and polling)
-    const allStepStates = {};
-    for (const step of stepsToRun) {
-        allStepStates[step.name] = {
-            phase: 'pending',
-            consecutiveIdle: 0,
-            totalRuns: 0,
-            totalProcessed: 0,
-            lastRunAt: null,
-            errors: [],
-            completed: false,
-        };
-    }
-
-    // Launch ALL workers concurrently — one-shot and polling side by side
-    const config = {
-        pollInterval: CONVEYOR_DEFAULTS.pollInterval,
-        maxIdlePolls: CONVEYOR_DEFAULTS.maxIdlePolls,
-        staggerDelay: CONVEYOR_DEFAULTS.staggerDelay,
-        batchLimit: CONVEYOR_DEFAULTS.batchLimit,
-        testBatchLimit: CONVEYOR_DEFAULTS.testBatchLimit,
-        pipelineStart,
-    };
-
-    logger.info(`\n[conveyor] Launching ${stepsToRun.length} concurrent workers: ${stepsToRun.map(s => s.name).join(', ')}`);
-
-    let pollingIndex = 0;
-    const workerPromises = stepsToRun.map((step) => {
-        if (step.runOnce) {
-            // One-shot worker: runs once but concurrently with everything else
-            return runOnceWorker(step, allStepStates[step.name], allStepStates, extraArgs, testMode, {
-                ...config,
-                staggerIndex: 0,  // one-shot starts immediately (no stagger)
-            });
         } else {
-            // Polling worker: loops until idle
-            const idx = pollingIndex++;
-            return runStepWorker(step, allStepStates[step.name], allStepStates, extraArgs, testMode, {
-                ...config,
-                staggerIndex: idx,
-            });
+            consecutiveEmpty = 0;
         }
-    });
 
-    const results = await Promise.all(workerPromises);
-    return results;
+        await sleep(SCHEDULER_INTERVAL);
+    }
+
+    // Wait for running children
+    if (runningChildren.size > 0) {
+        logger.info(`[scheduler] Stopping — waiting for ${runningChildren.size} step(s)...`);
+        await waitForChildren(runningChildren, 60000);
+    }
+
+    cleanupPidFiles();
+
+    return stepsToRun.map(step => {
+        const stats = stepStats[step.name];
+        const stepResult = readStepResult(step.name);
+        return {
+            step: step.name,
+            success: stats.errors.length === 0,
+            duration: ((stats.lastDuration || 0) / 1000).toFixed(1),
+            processed: stats.totalProcessed,
+            runs: stats.runs,
+            errors: stats.errors.length,
+            videoErrors: stepResult?.errorCount || 0,
+            videoErrorDetails: stepResult?.errors || [],
+        };
+    });
 }
 
 // ============================================
@@ -547,6 +570,10 @@ async function runSequential(stepsToRun, extraArgs, testMode, pipelineStart) {
     const results = [];
 
     for (let i = 0; i < stepsToRun.length; i++) {
+        if (shouldStop()) {
+            logger.info('[sequential] Stop signal — aborting');
+            break;
+        }
         const step = stepsToRun[i];
 
         writePipelineProgress({
@@ -558,7 +585,8 @@ async function runSequential(stepsToRun, extraArgs, testMode, pipelineStart) {
         });
 
         const result = await runStep(step, extraArgs, testMode);
-        results.push({ step: step.name, ...result, processed: 0, runs: 1, errors: result.success ? 0 : 1 });
+        const stepProcessed = parseItemCount(result.stdout) || parseInt(readStepVideosDone(step.name)) || 0;
+        results.push({ step: step.name, ...result, processed: stepProcessed, runs: 1, errors: result.success ? 0 : 1 });
 
         // Mark step done in progress
         markStepDone(step.name, {
@@ -787,13 +815,12 @@ async function main() {
     const startStep = args.step || 1;
     const onlyStep = args.only;
     const skipSteps = new Set(args.skip || []);
-    const isConveyor2 = args.conveyor2;
-    const isSequential = args.sequential || !!onlyStep;
+    const isSequential = args.sequential;
 
     logger.info('═'.repeat(60));
     logger.info('  CelebSkin — Full Automation Pipeline');
     logger.info('═'.repeat(60));
-    logger.info(`Mode: ${isConveyor2 ? 'CONVEYOR2 (per-file)' : isSequential ? 'SEQUENTIAL' : 'CONVEYOR'} ${testMode ? '(TEST)' : '(PRODUCTION)'}`);
+    logger.info(`Mode: ${isSequential ? 'SEQUENTIAL' : 'SCHEDULER'} ${testMode ? '(TEST)' : '(PRODUCTION)'}`);
     logger.info(`Time: ${new Date().toISOString()}`);
 
     // Show initial stats
@@ -832,23 +859,15 @@ async function main() {
         currentStep: stepsToRun[0]?.name || '',
         currentLabel: stepsToRun[0]?.label || '',
         elapsedMs: 0,
-        mode: isSequential ? 'sequential' : 'conveyor',
+        mode: isSequential ? 'sequential' : 'scheduler',
     });
 
     // Run pipeline
     let results;
-    if (isConveyor2) {
-        const { runConveyor: runConveyor2 } = await import('./conveyor.js');
-        results = await runConveyor2({
-            limit: args.limit,
-            skipScrape: skipSteps.has('scrape'),
-            skipSteps: args.skip || [],
-            pipelineStart,
-        });
-    } else if (isSequential) {
+    if (isSequential) {
         results = await runSequential(stepsToRun, extraArgs, testMode, pipelineStart);
     } else {
-        results = await runConveyor(stepsToRun, extraArgs, testMode, pipelineStart);
+        results = await runScheduler(stepsToRun, extraArgs, testMode, pipelineStart);
     }
 
     // ============================================
@@ -884,7 +903,7 @@ async function main() {
                       'Pipeline Complete (with warnings)',
         elapsedMs: Date.now() - pipelineStart,
         status: finalStatus,
-        mode: isSequential ? 'sequential' : 'conveyor',
+        mode: isSequential ? 'sequential' : 'scheduler',
         stepTimings: results.map(r => ({
             step: r.step,
             success: r.success,
@@ -907,7 +926,7 @@ async function main() {
     logger.info('PIPELINE SUMMARY');
     logger.info('═'.repeat(60));
     logger.info(`Total time: ${totalDuration}s`);
-    logger.info(`Mode: ${isSequential ? 'sequential' : 'conveyor'}`);
+    logger.info(`Mode: ${isSequential ? 'sequential' : 'scheduler'}`);
     logger.info(`Status: ${finalStatus.toUpperCase()}`);
     logger.info(`Steps: ${successful} succeeded, ${failed} failed`);
     if (totalVideoErrors > 0) {
@@ -983,11 +1002,10 @@ async function main() {
 }
 
 function parseArgs() {
-    const args = { test: false, step: null, only: null, skip: [], limit: null, autoPublish: false, sequential: false, conveyor2: false };
+    const args = { test: false, step: null, only: null, skip: [], limit: null, autoPublish: false, sequential: false };
     for (const arg of process.argv.slice(2)) {
         if (arg === '--test') args.test = true;
         if (arg === '--sequential') args.sequential = true;
-        if (arg === '--conveyor2') args.conveyor2 = true;
         if (arg === '--auto-publish') args.autoPublish = true;
         if (arg.startsWith('--step=')) args.step = parseInt(arg.split('=')[1]);
         if (arg.startsWith('--only=')) args.only = arg.split('=')[1];

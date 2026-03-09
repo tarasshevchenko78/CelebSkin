@@ -128,23 +128,63 @@ export async function findOrCreateMovie(movieTitle, year) {
         return existing.rows[0];
     }
 
-    // Search TMDB
-    const searchQuery = encodeURIComponent(cleanTitle);
-    const yearParam = year ? `&year=${year}` : '';
-    const searchResult = await tmdbFetch(`/search/movie?query=${searchQuery}${yearParam}&language=en-US`);
-
-    if (!searchResult.results || searchResult.results.length === 0) {
-        // Try TV shows too
-        const tvResult = await tmdbFetch(`/search/tv?query=${searchQuery}&language=en-US`);
-        if (!tvResult.results || tvResult.results.length === 0) {
-            console.log(`  TMDB: no results for "${cleanTitle}"`);
-            return null;
-        }
-        // Use first TV result
-        return await enrichMovieFromTmdb(tvResult.results[0], 'tv', existing.rows[0] || null);
+    // Multi-strategy TMDB search to maximize match rate
+    const tmdbResult = await searchTmdbMovie(cleanTitle, year);
+    if (tmdbResult) {
+        return await enrichMovieFromTmdb(tmdbResult.result, tmdbResult.type, existing.rows[0] || null);
     }
 
-    return await enrichMovieFromTmdb(searchResult.results[0], 'movie', existing.rows[0] || null);
+    console.log(`  TMDB: no results for "${cleanTitle}" after all strategies`);
+    return null;
+}
+
+/**
+ * Search TMDB with multiple fallback strategies:
+ * 1. Movie search with year
+ * 2. Movie search without year
+ * 3. Movie search with year ±1 (release year can differ from production year)
+ * 4. Movie search without diacritics (Feketerigó → Feketerigo)
+ * 5. TV show search
+ * Returns { result, type } or null
+ */
+async function searchTmdbMovie(title, year) {
+    const query = encodeURIComponent(title);
+
+    // Strategy 1: exact search with year
+    if (year) {
+        const r = await tmdbFetch(`/search/movie?query=${query}&year=${year}&language=en-US`);
+        if (r.results?.length > 0) return { result: r.results[0], type: 'movie' };
+    }
+
+    // Strategy 2: search without year
+    const r2 = await tmdbFetch(`/search/movie?query=${query}&language=en-US`);
+    if (r2.results?.length > 0) return { result: r2.results[0], type: 'movie' };
+
+    // Strategy 3: search with year ±1 (production vs release year)
+    if (year) {
+        for (const offset of [1, -1]) {
+            const r = await tmdbFetch(`/search/movie?query=${query}&year=${parseInt(year) + offset}&language=en-US`);
+            if (r.results?.length > 0) {
+                console.log(`  TMDB: found "${title}" with year ${parseInt(year) + offset} (original: ${year})`);
+                return { result: r.results[0], type: 'movie' };
+            }
+        }
+    }
+
+    // Strategy 4: strip diacritics and retry (Feketerigó → Feketerigo, Château → Chateau)
+    const stripped = title.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    if (stripped !== title) {
+        console.log(`  TMDB: retrying without diacritics: "${stripped}"`);
+        const queryStripped = encodeURIComponent(stripped);
+        const r = await tmdbFetch(`/search/movie?query=${queryStripped}&language=en-US`);
+        if (r.results?.length > 0) return { result: r.results[0], type: 'movie' };
+    }
+
+    // Strategy 5: TV show search
+    const tvR = await tmdbFetch(`/search/tv?query=${query}&language=en-US`);
+    if (tvR.results?.length > 0) return { result: tvR.results[0], type: 'tv' };
+
+    return null;
 }
 
 async function enrichMovieFromTmdb(tmdbResult, type, existingMovie) {
@@ -462,11 +502,65 @@ async function main() {
         }
     }
 
+    // Step 3: Re-enrich movies with tmdb_id but missing poster
+    console.log('\n--- Step 3: Re-enrich movies with tmdb_id but no poster ---');
+    let moviesReEnriched = 0;
+    const moviesNoPoster = await pool.query(`
+        SELECT * FROM movies
+        WHERE tmdb_id IS NOT NULL AND (poster_url IS NULL OR poster_url = '')
+        LIMIT 50
+    `);
+    console.log(`Found ${moviesNoPoster.rows.length} movies with tmdb_id but no poster`);
+    for (const movie of moviesNoPoster.rows) {
+        try {
+            const details = await tmdbFetch(`/movie/${movie.tmdb_id}?language=en-US`);
+            if (details.poster_path) {
+                const posterUrl = `${TMDB_IMG_BASE}/w500${details.poster_path}`;
+                await pool.query(`UPDATE movies SET poster_url = $2, updated_at = NOW() WHERE id = $1 AND (poster_url IS NULL OR poster_url = '')`, [movie.id, posterUrl]);
+                console.log(`  Updated poster for "${movie.title}": ${posterUrl}`);
+                moviesReEnriched++;
+            } else {
+                console.log(`  "${movie.title}" (tmdb=${movie.tmdb_id}) — still no poster on TMDB`);
+            }
+            await sleep(300);
+        } catch (err) {
+            console.error(`  ERROR re-enriching movie "${movie.title}": ${err.message}`);
+        }
+    }
+
+    // Step 4: Re-check celebrities with tmdb_id but no photo
+    console.log('\n--- Step 4: Re-check celebrities with tmdb_id but no photo ---');
+    let celebsReEnriched = 0;
+    const celebsNoPhoto = await pool.query(`
+        SELECT * FROM celebrities
+        WHERE tmdb_id IS NOT NULL AND (photo_url IS NULL OR photo_url = '')
+        LIMIT 50
+    `);
+    console.log(`Found ${celebsNoPhoto.rows.length} celebrities with tmdb_id but no photo`);
+    for (const celeb of celebsNoPhoto.rows) {
+        try {
+            const details = await tmdbFetch(`/person/${celeb.tmdb_id}?language=en-US`);
+            if (details.profile_path) {
+                const photoUrl = `${TMDB_IMG_BASE}/w500${details.profile_path}`;
+                await pool.query(`UPDATE celebrities SET photo_url = $2, updated_at = NOW() WHERE id = $1 AND (photo_url IS NULL OR photo_url = '')`, [celeb.id, photoUrl]);
+                console.log(`  Updated photo for "${celeb.name}": ${photoUrl}`);
+                celebsReEnriched++;
+            } else {
+                console.log(`  "${celeb.name}" (tmdb=${celeb.tmdb_id}) — still no photo on TMDB`);
+            }
+            await sleep(300);
+        } catch (err) {
+            console.error(`  ERROR re-checking celebrity "${celeb.name}": ${err.message}`);
+        }
+    }
+
     // Summary
     clearProgress();
     console.log('\n=== Enrichment Complete ===');
     console.log(`Movies linked: ${moviesLinked}`);
     console.log(`Celebrities enriched: ${celebsEnriched}`);
+    console.log(`Movies posters re-enriched: ${moviesReEnriched}`);
+    console.log(`Celebrity photos re-enriched: ${celebsReEnriched}`);
 
     // Log to processing_log
     await pool.query(

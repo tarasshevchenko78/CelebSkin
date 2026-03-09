@@ -97,11 +97,33 @@ export async function GET() {
             `),
         ]);
 
-        // Count celebrities & movies
-        const [celebResult, movieResult, tagResult] = await Promise.all([
+        // Count celebrities & movies + pipeline flow counts + in-progress videos
+        const [celebResult, movieResult, tagResult, flowResult, inProgressResult] = await Promise.all([
             pool.query(`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE tmdb_id IS NOT NULL) AS enriched FROM celebrities`),
             pool.query(`SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE tmdb_id IS NOT NULL) AS enriched FROM movies`),
             pool.query(`SELECT COUNT(*) AS total FROM tags`),
+            pool.query(`
+                SELECT
+                    (SELECT COUNT(*) FROM raw_videos WHERE status='pending') AS scrape,
+                    (SELECT COUNT(*) FROM raw_videos WHERE status='pending') AS ai_process,
+                    (SELECT COUNT(*) FROM videos WHERE status IN ('enriched','auto_recognized')
+                     AND video_url IS NOT NULL
+                     AND (video_url_watermarked IS NULL OR video_url_watermarked = '')) AS watermark,
+                    (SELECT COUNT(*) FROM videos WHERE status='watermarked'
+                     AND (thumbnail_url IS NULL OR thumbnail_url NOT LIKE '%b-cdn.net%')) AS thumbnails,
+                    (SELECT COUNT(*) FROM videos WHERE video_url_watermarked LIKE 'tmp/%%'
+                     OR thumbnail_url LIKE 'tmp/%%') AS cdn_upload,
+                    (SELECT COUNT(*) FROM videos WHERE status='watermarked'
+                     AND video_url_watermarked LIKE '%%b-cdn.net%%'
+                     AND thumbnail_url LIKE '%%b-cdn.net%%') AS publish
+            `),
+            pool.query(`
+                SELECT id, title->>'en' as title, status, updated_at,
+                       video_url_watermarked, thumbnail_url
+                FROM videos
+                WHERE status NOT IN ('published', 'rejected', 'needs_review')
+                ORDER BY updated_at DESC LIMIT 20
+            `),
         ]);
 
         // Get currently running steps with elapsed time
@@ -110,7 +132,8 @@ export async function GET() {
                    EXTRACT(EPOCH FROM (NOW() - created_at))::int AS elapsed_seconds
             FROM processing_log
             WHERE status = 'started'
-              AND created_at > NOW() - INTERVAL '6 hours'
+              AND step NOT LIKE 'admin:%'
+              AND created_at > NOW() - INTERVAL '1 hour'
               AND NOT EXISTS (
                   SELECT 1 FROM processing_log pl2
                   WHERE pl2.step = processing_log.step
@@ -171,6 +194,8 @@ export async function GET() {
             videoProgress,
             progress: progressResult.rows,
             categories,
+            flowCounts: flowResult.rows[0],
+            inProgressVideos: inProgressResult.rows,
             actions: Object.entries(PIPELINE_ACTIONS).map(([key, val]) => ({
                 id: key,
                 label: val.label,
@@ -249,8 +274,8 @@ export async function POST(request: NextRequest) {
 }
 
 // DELETE — stop pipeline processes on Contabo
-// Body: { mode: 'drain' } — graceful: stop scraping, finish in-progress videos
-// Body: empty / { mode: 'kill' } — hard stop all processes
+// Body: { mode: 'drain' } — graceful: create .stop file, scheduler stops spawning new work
+// Body: empty / { mode: 'kill' } — hard stop: kill by PID + pkill safety net
 export async function DELETE(request: NextRequest) {
     try {
         let mode = 'kill';
@@ -261,55 +286,70 @@ export async function DELETE(request: NextRequest) {
             // No body = hard stop
         }
 
+        const SCRIPTS_DIR = '/opt/celebskin/scripts';
+        const PID_FILE = `${SCRIPTS_DIR}/logs/pipeline.pid`;
+        const CHILDREN_FILE = `${SCRIPTS_DIR}/logs/children.pid`;
+        const STOP_FILE = `${SCRIPTS_DIR}/logs/.stop`;
+
         if (mode === 'drain') {
-            // Drain mode: send SIGUSR1 to run-pipeline.js to stop scraping
-            // but let downstream workers finish processing in-flight videos
+            // Drain: create .stop sentinel → scheduler stops spawning new steps
             await pool.query(
                 `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
                 ['admin:drain', 'started', JSON.stringify({ drainedAt: new Date().toISOString() })]
             );
 
-            let signaled = false;
+            let success = false;
             try {
-                // Send SIGUSR1 to run-pipeline.js AND kill scrape process
                 await execAsync(
-                    `ssh ${SSH_OPTS} ${CONTABO_HOST} "pkill -USR1 -f 'node.*run-pipeline' 2>/dev/null; pkill -f 'node.*scrape-boobsradar' 2>/dev/null; echo done"`,
+                    `ssh ${SSH_OPTS} ${CONTABO_HOST} "touch ${STOP_FILE}; echo done"`,
                     { timeout: 15000, env: { ...process.env, HOME: '/root' } }
                 );
-                signaled = true;
+                success = true;
             } catch {
-                // May fail if no process matches
+                // SSH might fail
             }
 
             await pool.query(
                 `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
-                ['admin:drain', 'completed', JSON.stringify({ signaled, drainedAt: new Date().toISOString() })]
+                ['admin:drain', 'completed', JSON.stringify({ success, drainedAt: new Date().toISOString() })]
             );
 
             return NextResponse.json({
                 success: true,
-                message: signaled
-                    ? 'Drain mode activated: scraping stopped, finishing in-progress videos'
-                    : 'No running pipeline process found',
+                message: success
+                    ? 'Drain mode: scheduler will stop after current steps finish'
+                    : 'Failed to signal drain mode',
             });
         }
 
-        // Hard stop — kill all
+        // Hard stop — kill by PID files + pkill safety net
         await pool.query(
             `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
             ['admin:stop-all', 'started', JSON.stringify({ stoppedAt: new Date().toISOString() })]
         );
 
-        let killed = 0;
+        let killed = false;
         try {
-            const { stdout } = await execAsync(
-                `ssh ${SSH_OPTS} ${CONTABO_HOST} "pkill -f 'node.*(scrape|process-with-ai|visual-recognize|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' 2>/dev/null; echo \\$?"`,
+            const killCmd = [
+                // Kill orchestrator by PID
+                `if [ -f ${PID_FILE} ]; then kill $(cat ${PID_FILE}) 2>/dev/null; fi`,
+                // Kill child processes by PID
+                `if [ -f ${CHILDREN_FILE} ]; then while read pid; do kill $pid 2>/dev/null; done < ${CHILDREN_FILE}; fi`,
+                // Safety net: pkill any remaining
+                `pkill -f 'node.*(scrape|process-with-ai|visual-recognize|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' 2>/dev/null`,
+                // Cleanup PID files
+                `rm -f ${PID_FILE} ${CHILDREN_FILE} ${STOP_FILE}`,
+                'echo done',
+            ].join('; ');
+
+            await execAsync(
+                `ssh ${SSH_OPTS} ${CONTABO_HOST} "${killCmd}"`,
                 { timeout: 15000, env: { ...process.env, HOME: '/root' } }
             );
-            const exitCode = parseInt(stdout.trim());
-            killed = exitCode === 0 ? 1 : 0;
+            killed = true;
         } catch {
-            // pkill exit code 1 means no processes matched — still success
+            // pkill exit code 1 means no processes — still success
+            killed = true;
         }
 
         await pool.query(
@@ -319,7 +359,7 @@ export async function DELETE(request: NextRequest) {
 
         return NextResponse.json({
             success: true,
-            message: killed > 0 ? 'Pipeline processes stopped' : 'No running processes found',
+            message: 'All pipeline processes stopped',
         });
     } catch (error) {
         console.error('[Pipeline API] Error stopping:', error);

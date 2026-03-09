@@ -276,6 +276,16 @@ export function readStepResult(stepName) {
 }
 
 /**
+ * Write per-video journey data to progress.json.
+ * @param {Array} videos - [{ id, title, status, currentStep, updatedAt }]
+ */
+export function writeVideoJourneys(videos) {
+    const existing = readProgressFile();
+    existing.videos = videos;
+    writeProgressFile(existing);
+}
+
+/**
  * Delete the progress file entirely.
  */
 export function clearAllProgress() {

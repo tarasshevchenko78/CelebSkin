@@ -400,7 +400,7 @@ async function main() {
             `SELECT 'raw' as src, id, status FROM raw_videos
              WHERE source_video_id = $1 OR source_url = $2
              UNION ALL
-             SELECT 'video' as src, id::text, status FROM videos
+             SELECT 'video' as src, id, status FROM videos
              WHERE original_title ILIKE $3
              LIMIT 1`,
             [videoSlug, videoItem.url, `%${videoItem.title.substring(0, 40)}%`]
@@ -497,6 +497,13 @@ async function main() {
               } catch (err) {
                 logger.warn(`${tag} Превью: ошибка — ${err.message}`);
               }
+            }
+
+            // Пропускаем если на странице нет ссылки на видео
+            if (!metadata.video_file_url) {
+              logger.warn(`${tag} Пропуск: нет video_file_url на странице`);
+              progress.stats.totalSkipped++;
+              return;
             }
 
             // Видео

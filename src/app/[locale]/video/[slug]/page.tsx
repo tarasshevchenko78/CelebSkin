@@ -4,14 +4,9 @@ import { getLocalizedField } from '@/lib/i18n';
 import { getVideoBySlug, getRelatedVideos } from '@/lib/db';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
+import VideoActions from '@/components/VideoActions';
 
 export const dynamic = 'force-dynamic';
-
-function formatViews(n: number): string {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
-    return n.toString();
-}
 
 export async function generateMetadata({
     params,
@@ -99,25 +94,14 @@ export default async function VideoDetailPage({
             <div className="mt-4">
                 <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">{title}</h1>
 
-                <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-                    {video.duration_formatted && (
-                        <span className="text-brand-secondary">{video.duration_formatted}</span>
-                    )}
-                    {video.quality && (
-                        <span className="bg-brand-accent text-white text-xs font-bold px-2 py-0.5 rounded">{video.quality}</span>
-                    )}
-                    <span className="text-brand-secondary">{formatViews(video.views_count)} views</span>
-                    <div className="flex items-center gap-2 ml-auto">
-                        <button className="flex items-center gap-1 text-brand-secondary hover:text-green-400 transition-colors">
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>
-                            <span className="text-xs">{formatViews(video.likes_count)}</span>
-                        </button>
-                        <button className="flex items-center gap-1 text-brand-secondary hover:text-red-400 transition-colors">
-                            <svg className="w-4 h-4 rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.06L7 20m7-10V5a2 2 0 00-2-2h-.095c-.5 0-.905.405-.905.905 0 .714-.211 1.412-.608 2.006L7 11v9m7-10h-2M7 20H5a2 2 0 01-2-2v-6a2 2 0 012-2h2.5" /></svg>
-                            <span className="text-xs">{video.dislikes_count}</span>
-                        </button>
-                    </div>
-                </div>
+                <VideoActions
+                    videoId={video.id}
+                    initialViews={video.views_count}
+                    initialLikes={video.likes_count}
+                    initialDislikes={video.dislikes_count}
+                    durationFormatted={video.duration_formatted || undefined}
+                    quality={video.quality || undefined}
+                />
             </div>
 
             <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">

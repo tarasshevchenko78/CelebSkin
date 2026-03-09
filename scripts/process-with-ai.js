@@ -236,7 +236,14 @@ async function processVideo(rawVideo) {
     }
   }
 
-  // 3. Determine status based on confidence
+  // 3. Validate: video MUST have a video_url, otherwise skip
+  if (!rawVideo.video_file_url) {
+    logger.warn(`No video_file_url for raw_video ${rawVideo.id} — marking as failed`);
+    await markRawVideoFailed(rawVideo.id, 'No video file URL found on source page');
+    return null;
+  }
+
+  // 4. Determine status based on confidence
   let videoStatus;
   if (ai.confidence >= 0.8) {
     videoStatus = "enriched";
@@ -248,7 +255,7 @@ async function processVideo(rawVideo) {
     videoStatus = "needs_review";
   }
 
-  // 4. Insert video into DB
+  // 5. Insert video into DB
   const videoId = await insertVideo({
     raw_video_id: rawVideo.id,
     title: JSON.stringify(ai.title || {}),
@@ -260,7 +267,7 @@ async function processVideo(rawVideo) {
     quality: ai.quality || null,
     duration_seconds: rawVideo.duration_seconds,
     duration_formatted: ai.duration_formatted || null,
-    video_url: rawVideo.video_file_url || null,
+    video_url: rawVideo.video_file_url,
     thumbnail_url: rawVideo.thumbnail_url || null,
     ai_model: GEMINI_MODEL,
     ai_confidence: ai.confidence || 0,
@@ -377,10 +384,15 @@ for (let i = 0; i < pending.length; i += CONCURRENCY) {
         errors: _errors.slice(-10),
         elapsedMs: Date.now() - startedAt,
     });
-    await processVideo(raw);
-    setActiveItem(raw.id, { label: raw.raw_title || raw.id, subStep: 'Saving to DB', pct: 90 });
-    processed++;
+    const result = await processVideo(raw);
     removeActiveItem(raw.id);
+    if (result === null) {
+      // Video skipped (no video_url) — already marked failed in processVideo
+      failed++;
+      _errors.push({ id: raw.id, title: raw.raw_title, error: 'No video file URL' });
+      continue;
+    }
+    processed++;
     _completed.push({ id: raw.id, title: raw.raw_title, status: 'ok', ms: Date.now() - _start });
     // Rate limit: ~2 sec between API calls
     await new Promise(r => setTimeout(r, 2000));

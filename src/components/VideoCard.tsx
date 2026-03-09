@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import type { Video } from '@/lib/types';
 import { getLocalizedField, getLocalizedSlug } from '@/lib/i18n';
 
@@ -18,9 +18,36 @@ interface VideoCardProps {
 
 export default function VideoCard({ video, locale, size = 'md' }: VideoCardProps) {
     const [imgError, setImgError] = useState(false);
+    const [hoverIndex, setHoverIndex] = useState(-1); // -1 = show thumbnail
+    const intervalRef = useRef<NodeJS.Timeout | null>(null);
     const title = getLocalizedField(video.title, locale);
     const slug = getLocalizedSlug(video.slug, locale);
     const celebrity = video.celebrities?.[0];
+    const screenshots = video.screenshots || [];
+    const hasPreview = screenshots.length > 1;
+
+    const startPreview = useCallback(() => {
+        if (!hasPreview) return;
+        let idx = 0;
+        setHoverIndex(0);
+        intervalRef.current = setInterval(() => {
+            idx = (idx + 1) % screenshots.length;
+            setHoverIndex(idx);
+        }, 800);
+    }, [hasPreview, screenshots.length]);
+
+    const stopPreview = useCallback(() => {
+        if (intervalRef.current) {
+            clearInterval(intervalRef.current);
+            intervalRef.current = null;
+        }
+        setHoverIndex(-1);
+    }, []);
+
+    // Current image to show
+    const currentSrc = hoverIndex >= 0 && screenshots[hoverIndex]
+        ? screenshots[hoverIndex]
+        : video.thumbnail_url;
 
     const sizeClasses = {
         sm: 'text-xs',
@@ -32,16 +59,18 @@ export default function VideoCard({ video, locale, size = 'md' }: VideoCardProps
         <a
             href={`/${locale}/video/${slug}`}
             className="group block rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.02]"
+            onMouseEnter={startPreview}
+            onMouseLeave={stopPreview}
         >
-            {/* Thumbnail */}
+            {/* Thumbnail / Preview */}
             <div className="relative aspect-video bg-brand-card overflow-hidden rounded-lg">
-                {video.thumbnail_url && !imgError ? (
+                {currentSrc && !imgError ? (
                     <img
-                        src={video.thumbnail_url}
+                        src={currentSrc}
                         alt={title}
                         loading="lazy"
-                        onError={() => setImgError(true)}
-                        className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
+                        onError={() => hoverIndex < 0 && setImgError(true)}
+                        className="w-full h-full object-cover transition-all duration-200 group-hover:brightness-110"
                     />
                 ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-brand-card to-brand-hover">
@@ -49,6 +78,20 @@ export default function VideoCard({ video, locale, size = 'md' }: VideoCardProps
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
+                    </div>
+                )}
+
+                {/* Screenshot progress dots */}
+                {hasPreview && hoverIndex >= 0 && (
+                    <div className="absolute bottom-6 left-0 right-0 flex justify-center gap-1 pointer-events-none">
+                        {screenshots.map((_, i) => (
+                            <div
+                                key={i}
+                                className={`w-1.5 h-1.5 rounded-full transition-all ${
+                                    i === hoverIndex ? 'bg-brand-accent scale-125' : 'bg-white/50'
+                                }`}
+                            />
+                        ))}
                     </div>
                 )}
 
