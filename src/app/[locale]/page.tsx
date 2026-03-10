@@ -1,37 +1,60 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
-import { getLocalizedField, getLocalizedSlug } from '@/lib/i18n';
-import { getLatestVideos, getTrendingCelebrities, getMovies, getAllTags } from '@/lib/db';
+import { type SupportedLocale } from '@/lib/i18n';
+import { getLocalizedField } from '@/lib/i18n';
+import { buildAlternates } from '@/lib/seo';
+import { getLatestVideos, getTrendingCelebrities, getMovies, getAllTags, getFeaturedCollections } from '@/lib/db';
 import { logger } from '@/lib/logger';
-import type { Video, Celebrity, Movie, Tag } from '@/lib/types';
+import type { Video, Celebrity, Movie, Tag, Collection } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 import CelebrityCard from '@/components/CelebrityCard';
+import MobileSearch from '@/components/MobileSearch';
 
-const heroText: Record<string, { heading: string; sub: string }> = {
-    en: { heading: 'Celebrity Nude Scenes from Movies & TV Shows', sub: 'Discover the most iconic scenes featuring your favorite stars' },
-    ru: { heading: 'Откровенные сцены знаменитостей из фильмов и сериалов', sub: 'Самые яркие сцены с участием ваших любимых звёзд' },
-    de: { heading: 'Nacktszenen von Prominenten aus Filmen & Serien', sub: 'Entdecken Sie die ikonischsten Szenen Ihrer Lieblingsstars' },
-    fr: { heading: 'Scènes nues de célébrités dans les films et séries', sub: 'Découvrez les scènes les plus iconiques de vos stars préférées' },
-    es: { heading: 'Escenas de desnudos de celebridades en películas y series', sub: 'Descubre las escenas más icónicas de tus estrellas favoritas' },
-    pt: { heading: 'Cenas de nudez de celebridades em filmes e séries', sub: 'Descubra as cenas mais icônicas das suas estrelas favoritas' },
-    it: { heading: 'Scene di nudo di celebrità da film e serie TV', sub: 'Scopri le scene più iconiche delle tue star preferite' },
-    pl: { heading: 'Nagie sceny celebrytów z filmów i seriali', sub: 'Odkryj najbardziej kultowe sceny z udziałem Twoich ulubionych gwiazd' },
-    nl: { heading: 'Naaktscènes van beroemdheden uit films en series', sub: 'Ontdek de meest iconische scènes van je favoriete sterren' },
-    tr: { heading: 'Film ve dizilerden ünlülerin çıplak sahneleri', sub: 'En sevdiğiniz yıldızların en ikonik sahnelerini keşfedin' },
+// ============================================
+// SEO heading (minimal, replaces big hero)
+// ============================================
+
+const seoHeading: Record<string, string> = {
+    en: 'Celebrity Nude Scenes from Movies & TV Shows',
+    ru: 'Откровенные сцены знаменитостей из фильмов и сериалов',
+    de: 'Nacktszenen von Prominenten aus Filmen & Serien',
+    fr: 'Scènes nues de célébrités dans les films et séries',
+    es: 'Escenas de desnudos de celebridades en películas y series',
+    pt: 'Cenas de nudez de celebridades em filmes e séries',
+    it: 'Scene di nudo di celebrità da film e serie TV',
+    pl: 'Nagie sceny celebrytów z filmów i seriali',
+    nl: 'Naaktscènes van beroemdheden uit films en series',
+    tr: 'Film ve dizilerden ünlülerin çıplak sahneleri',
 };
 
-const sectionTitles: Record<string, { trending: string; latest: string; movies: string; viewAll: string; newScenes: string; tags: string }> = {
-    en: { trending: 'Trending Celebrities', latest: 'Latest Videos', movies: 'Popular Movies', viewAll: 'View All', newScenes: 'New Scenes', tags: 'Browse by Tag' },
-    ru: { trending: 'Популярные знаменитости', latest: 'Новые видео', movies: 'Популярные фильмы', viewAll: 'Смотреть все', newScenes: 'Новые сцены', tags: 'По тегам' },
-    de: { trending: 'Beliebte Prominente', latest: 'Neueste Videos', movies: 'Beliebte Filme', viewAll: 'Alle anzeigen', newScenes: 'Neue Szenen', tags: 'Nach Tag durchsuchen' },
-    fr: { trending: 'Célébrités tendances', latest: 'Dernières vidéos', movies: 'Films populaires', viewAll: 'Voir tout', newScenes: 'Nouvelles scènes', tags: 'Parcourir par tag' },
-    es: { trending: 'Celebridades en tendencia', latest: 'Últimos videos', movies: 'Películas populares', viewAll: 'Ver todo', newScenes: 'Nuevas escenas', tags: 'Buscar por etiqueta' },
-    pt: { trending: 'Celebridades em alta', latest: 'Últimos vídeos', movies: 'Filmes populares', viewAll: 'Ver tudo', newScenes: 'Novas cenas', tags: 'Navegar por tag' },
-    it: { trending: 'Celebrità di tendenza', latest: 'Ultimi video', movies: 'Film popolari', viewAll: 'Vedi tutto', newScenes: 'Nuove scene', tags: 'Sfoglia per tag' },
-    pl: { trending: 'Popularne gwiazdy', latest: 'Najnowsze filmy', movies: 'Popularne filmy', viewAll: 'Zobacz wszystko', newScenes: 'Nowe sceny', tags: 'Przeglądaj po tagu' },
-    nl: { trending: 'Trending beroemdheden', latest: 'Nieuwste video\'s', movies: 'Populaire films', viewAll: 'Alles bekijken', newScenes: 'Nieuwe scènes', tags: 'Zoek op tag' },
-    tr: { trending: 'Trend Ünlüler', latest: 'Son Videolar', movies: 'Popüler Filmler', viewAll: 'Tümünü Gör', newScenes: 'Yeni Sahneler', tags: 'Etikete göre ara' },
+// ============================================
+// Section titles (localized)
+// ============================================
+
+const sectionTitles: Record<string, {
+    trending: string; latest: string; movies: string; viewAll: string;
+    newScenes: string; tags: string; searchPlaceholder: string;
+}> = {
+    en: { trending: 'Trending Celebrities', latest: 'Latest Videos', movies: 'Popular Movies', viewAll: 'View All', newScenes: 'New Scenes', tags: 'Browse by Tag', searchPlaceholder: 'Search celebrities, movies...' },
+    ru: { trending: 'Популярные знаменитости', latest: 'Новые видео', movies: 'Популярные фильмы', viewAll: 'Смотреть все', newScenes: 'Новые сцены', tags: 'По тегам', searchPlaceholder: 'Поиск знаменитостей, фильмов...' },
+    de: { trending: 'Beliebte Prominente', latest: 'Neueste Videos', movies: 'Beliebte Filme', viewAll: 'Alle anzeigen', newScenes: 'Neue Szenen', tags: 'Nach Tag durchsuchen', searchPlaceholder: 'Prominente, Filme suchen...' },
+    fr: { trending: 'Célébrités tendances', latest: 'Dernières vidéos', movies: 'Films populaires', viewAll: 'Voir tout', newScenes: 'Nouvelles scènes', tags: 'Parcourir par tag', searchPlaceholder: 'Rechercher célébrités, films...' },
+    es: { trending: 'Celebridades en tendencia', latest: 'Últimos videos', movies: 'Películas populares', viewAll: 'Ver todo', newScenes: 'Nuevas escenas', tags: 'Buscar por etiqueta', searchPlaceholder: 'Buscar celebridades, películas...' },
+    pt: { trending: 'Celebridades em alta', latest: 'Últimos vídeos', movies: 'Filmes populares', viewAll: 'Ver tudo', newScenes: 'Novas cenas', tags: 'Navegar por tag', searchPlaceholder: 'Pesquisar celebridades, filmes...' },
+    it: { trending: 'Celebrità di tendenza', latest: 'Ultimi video', movies: 'Film popolari', viewAll: 'Vedi tutto', newScenes: 'Nuove scene', tags: 'Sfoglia per tag', searchPlaceholder: 'Cerca celebrità, film...' },
+    pl: { trending: 'Popularne gwiazdy', latest: 'Najnowsze filmy', movies: 'Popularne filmy', viewAll: 'Zobacz wszystko', newScenes: 'Nowe sceny', tags: 'Przeglądaj po tagu', searchPlaceholder: 'Szukaj gwiazd, filmów...' },
+    nl: { trending: 'Trending beroemdheden', latest: 'Nieuwste video\'s', movies: 'Populaire films', viewAll: 'Alles bekijken', newScenes: 'Nieuwe scènes', tags: 'Zoek op tag', searchPlaceholder: 'Zoek beroemdheden, films...' },
+    tr: { trending: 'Trend Ünlüler', latest: 'Son Videolar', movies: 'Popüler Filmler', viewAll: 'Tümünü Gör', newScenes: 'Yeni Sahneler', tags: 'Etikete göre ara', searchPlaceholder: 'Ünlü, film ara...' },
 };
+
+const collectionsLabel: Record<string, string> = {
+    en: 'Collections', ru: 'Коллекции', de: 'Sammlungen', fr: 'Collections',
+    es: 'Colecciones', pt: 'Coleções', it: 'Collezioni',
+    pl: 'Kolekcje', nl: 'Collecties', tr: 'Koleksiyonlar',
+};
+
+// ============================================
+// Page metadata
+// ============================================
 
 const pageMeta: Record<string, { title: string; description: string }> = {
     en: { title: 'CelebSkin — Home', description: 'Discover celebrity nude scenes from movies and TV shows' },
@@ -53,30 +76,56 @@ export async function generateMetadata({ params }: { params: { locale: string } 
     return {
         title: meta.title,
         description: meta.description,
-        alternates: {
-            languages: Object.fromEntries(
-                SUPPORTED_LOCALES.map((loc) => [loc, `/${loc}`])
-            ),
-        },
+        alternates: buildAlternates(locale),
     };
 }
 
+// ============================================
+// Section header helper
+// ============================================
+
+function SectionHeader({ title, viewAllHref, viewAllLabel }: {
+    title: string;
+    viewAllHref?: string;
+    viewAllLabel?: string;
+}) {
+    return (
+        <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-white">{title}</h2>
+            {viewAllHref && viewAllLabel && (
+                <a
+                    href={viewAllHref}
+                    className="text-sm text-red-400 hover:text-red-300 transition-colors"
+                >
+                    {viewAllLabel} →
+                </a>
+            )}
+        </div>
+    );
+}
+
+// ============================================
+// Page component
+// ============================================
+
 export default async function HomePage({ params }: { params: { locale: string } }) {
     const locale = params.locale;
-    const hero = heroText[locale] || heroText.en;
+    const heading = seoHeading[locale] || seoHeading.en;
     const sections = sectionTitles[locale] || sectionTitles.en;
 
     let latestVideos: Video[] = [];
     let trendingCelebs: Celebrity[] = [];
     let popularMovies: Movie[] = [];
     let tags: Tag[] = [];
+    let featuredCollections: Collection[] = [];
 
     try {
-        [latestVideos, trendingCelebs, popularMovies, tags] = await Promise.all([
+        [latestVideos, trendingCelebs, popularMovies, tags, featuredCollections] = await Promise.all([
             getLatestVideos(16),
-            getTrendingCelebrities(10),
-            getMovies(1, 8, 'scenes_count').then(r => r.data),
+            getTrendingCelebrities(12),
+            getMovies(1, 12, 'scenes_count').then(r => r.data),
             getAllTags(25),
+            getFeaturedCollections(4),
         ]);
     } catch (error) {
         logger.error('Home page DB query failed', { page: 'home', error: error instanceof Error ? error.message : String(error) });
@@ -85,97 +134,120 @@ export default async function HomePage({ params }: { params: { locale: string } 
     const featuredVideos = latestVideos.slice(0, 4);
     const gridVideos = latestVideos.slice(4);
 
+    // Quick tags for mobile search chips (first 8)
+    const quickTags = tags.slice(0, 8).map((tag) => ({
+        name: getLocalizedField(tag.name_localized, locale) || tag.name,
+        slug: tag.slug,
+    }));
+
     return (
         <div>
-            {/* Hero Section — compact */}
-            <section className="relative overflow-hidden">
-                <div className="absolute inset-0 bg-gradient-to-b from-brand-accent/5 via-transparent to-transparent" />
-                <div className="relative mx-auto max-w-7xl px-4 py-10 sm:py-12 text-center">
-                    <h1 className="text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight text-white">
-                        {hero.heading}
-                    </h1>
-                    <p className="mt-3 text-base sm:text-lg text-brand-secondary max-w-2xl mx-auto">
-                        {hero.sub}
-                    </p>
-                    <div className="mt-6 flex flex-wrap justify-center gap-3">
-                        <a
-                            href={`/${locale}/video`}
-                            className="inline-flex items-center gap-2 rounded-lg bg-brand-accent px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-accent-hover transition-colors duration-200 shadow-lg shadow-brand-accent/20"
-                        >
-                            <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24">
-                                <path d="M8 5v14l11-7z" />
-                            </svg>
-                            {sections.latest}
-                        </a>
-                        <a
-                            href={`/${locale}/celebrity`}
-                            className="inline-flex items-center gap-2 rounded-lg border border-brand-border bg-brand-card px-6 py-2.5 text-sm font-semibold text-brand-text hover:bg-brand-hover transition-colors duration-200"
-                        >
-                            {sections.trending}
-                        </a>
-                    </div>
-                </div>
-            </section>
+            {/* SEO heading — minimal, hidden on mobile (mobile search replaces it) */}
+            <div className="mx-auto max-w-7xl px-4 pt-6 md:pt-8">
+                <h1 className="hidden md:block text-lg font-semibold text-gray-400">
+                    {heading}
+                </h1>
+            </div>
 
-            {/* New Scenes — 4 large featured cards */}
+            {/* Mobile search + quick tag chips */}
+            <div className="mx-auto max-w-7xl px-4 pt-3">
+                <MobileSearch
+                    locale={locale}
+                    placeholder={sections.searchPlaceholder}
+                    quickTags={quickTags}
+                />
+            </div>
+
+            {/* ── New Scenes — 4 featured cards ── */}
             {featuredVideos.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-8">
-                    <div className="flex items-center justify-between mb-5">
-                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.newScenes}</h2>
-                        <a
-                            href={`/${locale}/video`}
-                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                        >
-                            {sections.viewAll} →
-                        </a>
+                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                    <SectionHeader
+                        title={sections.newScenes}
+                        viewAllHref={`/${locale}/video`}
+                        viewAllLabel={sections.viewAll}
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {featuredVideos.map((video) => (
+                            <VideoCard key={video.id} video={video} locale={locale} size="featured" />
+                        ))}
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                        {featuredVideos.map((video) => {
-                            const title = getLocalizedField(video.title, locale);
-                            const slug = getLocalizedSlug(video.slug, locale);
-                            const celebrity = video.celebrities?.[0];
+                </section>
+            )}
+
+            {/* ── Latest Videos — responsive grid ── */}
+            {gridVideos.length > 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                    <SectionHeader
+                        title={sections.latest}
+                        viewAllHref={`/${locale}/video`}
+                        viewAllLabel={sections.viewAll}
+                    />
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                        {gridVideos.map((video) => (
+                            <VideoCard key={video.id} video={video} locale={locale} />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* ── Browse by Tag — horizontal scroll on mobile, wrapping on desktop ── */}
+            {tags.length > 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                    <h2 className="text-lg font-semibold text-white mb-4">{sections.tags}</h2>
+                    <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap md:overflow-visible">
+                        {tags.map((tag) => (
+                            <a
+                                key={tag.id}
+                                href={`/${locale}/tag/${tag.slug}`}
+                                className="shrink-0 md:shrink px-3.5 py-1.5 rounded-full bg-gray-800/50 border border-gray-700 text-sm text-gray-300 hover:border-red-600 hover:text-red-400 hover:bg-red-600/10 transition-colors"
+                            >
+                                {getLocalizedField(tag.name_localized, locale) || tag.name}
+                            </a>
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* ── Featured Collections — curated playlists ── */}
+            {featuredCollections.length > 0 && (
+                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                    <SectionHeader
+                        title={collectionsLabel[locale] || collectionsLabel.en}
+                        viewAllHref={`/${locale}/collection`}
+                        viewAllLabel={sections.viewAll}
+                    />
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        {featuredCollections.map((col) => {
+                            const colTitle = getLocalizedField(col.title, locale) || col.slug;
                             return (
                                 <a
-                                    key={video.id}
-                                    href={`/${locale}/video/${slug}`}
-                                    className="group relative aspect-video rounded-xl overflow-hidden bg-brand-card"
+                                    key={col.id}
+                                    href={`/${locale}/collection/${col.slug}`}
+                                    className="group relative rounded-xl overflow-hidden bg-gray-800/30 border border-gray-800 hover:border-gray-600 transition-all duration-300"
                                 >
-                                    {video.thumbnail_url ? (
-                                        <img
-                                            src={video.thumbnail_url}
-                                            alt={title}
-                                            loading="lazy"
-                                            className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                                        />
-                                    ) : (
-                                        <div className="w-full h-full bg-gradient-to-br from-brand-card to-brand-hover" />
-                                    )}
-                                    {/* Bottom gradient overlay */}
-                                    <div className="absolute inset-x-0 bottom-0 h-1/2 bg-gradient-to-t from-black/80 via-black/40 to-transparent" />
-                                    {/* Celebrity badge */}
-                                    {celebrity && (
-                                        <span className="absolute top-2 left-2 bg-black/60 backdrop-blur-sm text-white text-xs px-2 py-0.5 rounded-full">
-                                            {celebrity.name}
-                                        </span>
-                                    )}
-                                    {/* Duration badge */}
-                                    {video.duration_formatted && (
-                                        <span className="absolute top-2 right-2 bg-black/60 backdrop-blur-sm text-white text-xs px-2 py-0.5 rounded">
-                                            {video.duration_formatted}
-                                        </span>
-                                    )}
-                                    {/* Title overlay */}
-                                    <div className="absolute bottom-3 left-3 right-3">
-                                        <h3 className="text-white font-semibold text-sm sm:text-base line-clamp-2 drop-shadow-lg">
-                                            {title}
-                                        </h3>
-                                    </div>
-                                    {/* Play icon on hover */}
-                                    <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                                        <div className="w-12 h-12 rounded-full bg-brand-accent/90 flex items-center justify-center shadow-lg">
-                                            <svg className="w-6 h-6 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                                                <path d="M8 5v14l11-7z" />
-                                            </svg>
+                                    <div className="aspect-[16/9] relative overflow-hidden">
+                                        {col.cover_url ? (
+                                            <img
+                                                src={col.cover_url}
+                                                alt={colTitle}
+                                                loading="lazy"
+                                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                            />
+                                        ) : (
+                                            <div className="w-full h-full bg-gradient-to-br from-red-900/30 to-gray-800 flex items-center justify-center">
+                                                <svg className="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                                </svg>
+                                            </div>
+                                        )}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                                        <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                                            <h3 className="text-sm font-semibold text-white line-clamp-1 group-hover:text-red-400 transition-colors">
+                                                {colTitle}
+                                            </h3>
+                                            {col.videos_count > 0 && (
+                                                <span className="text-[11px] text-gray-400">{col.videos_count} scenes</span>
+                                            )}
                                         </div>
                                     </div>
                                 </a>
@@ -185,57 +257,15 @@ export default async function HomePage({ params }: { params: { locale: string } 
                 </section>
             )}
 
-            {/* Latest Videos — responsive grid */}
-            {gridVideos.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-8">
-                    <div className="flex items-center justify-between mb-5">
-                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.latest}</h2>
-                        <a
-                            href={`/${locale}/video`}
-                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                        >
-                            {sections.viewAll} →
-                        </a>
-                    </div>
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                        {gridVideos.map((video) => (
-                            <VideoCard key={video.id} video={video} locale={locale} />
-                        ))}
-                    </div>
-                </section>
-            )}
-
-            {/* Browse by Tag — horizontal scroll */}
-            {tags.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-8">
-                    <h2 className="text-xl sm:text-2xl font-bold text-white mb-5">{sections.tags}</h2>
-                    <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
-                        {tags.map((tag) => (
-                            <a
-                                key={tag.id}
-                                href={`/${locale}/tag/${tag.slug}`}
-                                className="shrink-0 px-4 py-2 rounded-full bg-brand-card border border-brand-border text-sm text-brand-text hover:border-brand-accent hover:bg-brand-accent/10 transition-colors duration-200"
-                            >
-                                {getLocalizedField(tag.name_localized, locale) || tag.name}
-                            </a>
-                        ))}
-                    </div>
-                </section>
-            )}
-
-            {/* Trending Celebrities — horizontal scroll */}
+            {/* ── Trending Celebrities — mobile scroll, desktop grid ── */}
             {trendingCelebs.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-8">
-                    <div className="flex items-center justify-between mb-5">
-                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.trending}</h2>
-                        <a
-                            href={`/${locale}/celebrity`}
-                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                        >
-                            {sections.viewAll} →
-                        </a>
-                    </div>
-                    <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-hide -mx-4 px-4 sm:mx-0 sm:px-0">
+                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                    <SectionHeader
+                        title={sections.trending}
+                        viewAllHref={`/${locale}/celebrity`}
+                        viewAllLabel={sections.viewAll}
+                    />
+                    <div className="flex gap-4 overflow-x-auto md:grid md:grid-cols-4 lg:grid-cols-6 md:overflow-visible md:gap-6 scrollbar-hide pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:justify-items-center">
                         {trendingCelebs.map((celeb) => (
                             <CelebrityCard key={celeb.id} celebrity={celeb} locale={locale} />
                         ))}
@@ -243,28 +273,24 @@ export default async function HomePage({ params }: { params: { locale: string } 
                 </section>
             )}
 
-            {/* Popular Movies */}
+            {/* ── Popular Movies — compact grid with hover overlay ── */}
             {popularMovies.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-8 pb-16">
-                    <div className="flex items-center justify-between mb-5">
-                        <h2 className="text-xl sm:text-2xl font-bold text-white">{sections.movies}</h2>
-                        <a
-                            href={`/${locale}/movie`}
-                            className="text-sm text-brand-accent hover:text-brand-accent-hover transition-colors"
-                        >
-                            {sections.viewAll} →
-                        </a>
-                    </div>
-                    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                    <SectionHeader
+                        title={sections.movies}
+                        viewAllHref={`/${locale}/movie`}
+                        viewAllLabel={sections.viewAll}
+                    />
+                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
                         {popularMovies.map((movie) => {
                             const movieTitle = getLocalizedField(movie.title_localized, locale) || movie.title;
                             return (
                                 <a
                                     key={movie.id}
                                     href={`/${locale}/movie/${movie.slug}`}
-                                    className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.02]"
+                                    className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.03]"
                                 >
-                                    <div className="relative aspect-[2/3] bg-brand-card rounded-lg overflow-hidden">
+                                    <div className="relative aspect-[2/3] bg-[#111113] rounded-lg overflow-hidden">
                                         {movie.poster_url ? (
                                             <img
                                                 src={movie.poster_url}
@@ -273,29 +299,30 @@ export default async function HomePage({ params }: { params: { locale: string } 
                                                 className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
                                             />
                                         ) : (
-                                            <div className="w-full h-full bg-gradient-to-br from-brand-card via-brand-hover to-brand-card flex flex-col items-center justify-center p-3">
-                                                <svg className="w-8 h-8 text-brand-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <div className="w-full h-full bg-gradient-to-br from-[#111113] to-[#1a1a1e] flex flex-col items-center justify-center p-2">
+                                                <svg className="w-6 h-6 text-gray-600 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
                                                 </svg>
-                                                <span className="text-xs text-brand-muted text-center leading-tight">{movieTitle}</span>
+                                                <span className="text-[10px] text-gray-600 text-center leading-tight line-clamp-2">{movieTitle}</span>
                                             </div>
                                         )}
+
+                                        {/* Hover gradient overlay */}
+                                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+
                                         {movie.year && (
-                                            <span className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                            <span className="absolute top-1 left-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
                                                 {movie.year}
                                             </span>
                                         )}
-                                        <span className="absolute bottom-1.5 right-1.5 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                            {movie.scenes_count} scenes
+                                        <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                            {movie.scenes_count}
                                         </span>
                                     </div>
-                                    <div className="mt-2 px-0.5">
-                                        <h3 className="text-sm font-medium text-brand-text line-clamp-1 group-hover:text-white transition-colors">
+                                    <div className="mt-1.5 px-0.5">
+                                        <h3 className="text-xs font-medium text-gray-300 line-clamp-1 group-hover:text-white transition-colors">
                                             {movieTitle}
                                         </h3>
-                                        {movie.director && (
-                                            <p className="text-xs text-brand-secondary mt-0.5">{movie.director}</p>
-                                        )}
                                     </div>
                                 </a>
                             );
@@ -307,7 +334,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
             {/* Empty state when no data */}
             {latestVideos.length === 0 && trendingCelebs.length === 0 && (
                 <section className="mx-auto max-w-7xl px-4 py-16 text-center">
-                    <p className="text-brand-secondary text-lg">Content is being prepared. Check back soon!</p>
+                    <p className="text-gray-500 text-lg">Content is being prepared. Check back soon!</p>
                 </section>
             )}
         </div>

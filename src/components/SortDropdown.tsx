@@ -1,0 +1,79 @@
+'use client';
+
+import { useState, useRef, useEffect, useCallback } from 'react';
+
+interface SortDropdownProps {
+    options: Array<{ label: string; value: string }>;
+    selected: string;
+    onChange: (value: string) => void;
+}
+
+export default function SortDropdown({ options, selected, onChange }: SortDropdownProps) {
+    const [open, setOpen] = useState(false);
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    const selectedLabel = options.find((o) => o.value === selected)?.label || 'Sort';
+
+    // Close on click outside
+    const handleClickOutside = useCallback((e: MouseEvent) => {
+        if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+            setOpen(false);
+        }
+    }, []);
+
+    // Close on Escape
+    const handleKeyDown = useCallback((e: KeyboardEvent) => {
+        if (e.key === 'Escape') setOpen(false);
+    }, []);
+
+    useEffect(() => {
+        if (open) {
+            document.addEventListener('mousedown', handleClickOutside);
+            document.addEventListener('keydown', handleKeyDown);
+        }
+        return () => {
+            document.removeEventListener('mousedown', handleClickOutside);
+            document.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [open, handleClickOutside, handleKeyDown]);
+
+    function handleSelect(value: string) {
+        onChange(value);
+        setOpen(false);
+    }
+
+    return (
+        <div ref={containerRef} className="relative">
+            <button
+                onClick={() => setOpen(!open)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 text-sm text-gray-300 border border-gray-700 hover:border-gray-500 transition-colors whitespace-nowrap"
+            >
+                {selectedLabel}
+                <svg
+                    className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`}
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                >
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+            </button>
+
+            {open && (
+                <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 min-w-[150px] py-1">
+                    {options.map((option) => (
+                        <button
+                            key={option.value}
+                            onClick={() => handleSelect(option.value)}
+                            className={`block w-full text-left px-3 py-2 text-sm transition-colors hover:bg-gray-700 ${
+                                option.value === selected ? 'text-red-400' : 'text-gray-300'
+                            }`}
+                        >
+                            {option.label}
+                        </button>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}

@@ -37,6 +37,7 @@ export interface Video {
     video_url_watermarked: string | null;
     thumbnail_url: string | null;
     preview_gif_url: string | null;
+    preview_url: string | null;
     screenshots: string[];
     sprite_url: string | null;
     sprite_data: Record<string, unknown> | null;
@@ -131,8 +132,11 @@ export interface Collection {
     description: LocalizedField;
     cover_url: string | null;
     is_auto: boolean;
+    featured: boolean;
     sort_order: number;
+    videos_count: number;
     created_at: string;
+    updated_at: string;
 }
 
 export interface BlogPost {

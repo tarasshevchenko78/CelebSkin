@@ -7,10 +7,10 @@ const navLinks = [
     { key: 'videos', href: '/video', labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Videos', pt: 'Vídeos', it: 'Video', pl: 'Filmy', nl: "Video's", tr: 'Videolar' } },
     { key: 'celebrities', href: '/celebrity', labels: { en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités', es: 'Celebridades', pt: 'Celebridades', it: 'Celebrità', pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler' } },
     { key: 'movies', href: '/movie', labels: { en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films', es: 'Películas', pt: 'Filmes', it: 'Film', pl: 'Filmy', nl: 'Films', tr: 'Filmler' } },
+    { key: 'collections', href: '/collection', labels: { en: 'Collections', ru: 'Коллекции', de: 'Sammlungen', fr: 'Collections', es: 'Colecciones', pt: 'Coleções', it: 'Collezioni', pl: 'Kolekcje', nl: 'Collecties', tr: 'Koleksiyonlar' } },
 ];
 
 export default function Header({ locale }: { locale: string }) {
-    const [mobileOpen, setMobileOpen] = useState(false);
     const [langOpen, setLangOpen] = useState(false);
 
     return (
@@ -74,65 +74,47 @@ export default function Header({ locale }: { locale: string }) {
                     </div>
                 </div>
 
-                {/* Mobile Hamburger */}
-                <button
-                    className="md:hidden text-brand-secondary hover:text-brand-text p-1"
-                    onClick={() => setMobileOpen(!mobileOpen)}
-                    aria-label="Menu"
-                >
-                    {mobileOpen ? (
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                {/* Mobile: search icon + language toggle (nav links moved to BottomNav) */}
+                <div className="flex md:hidden items-center gap-3">
+                    <a
+                        href={`/${locale}/search`}
+                        className="text-brand-secondary hover:text-brand-text transition-colors p-1"
+                        aria-label="Search"
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
-                    ) : (
-                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-                        </svg>
-                    )}
-                </button>
-            </nav>
-
-            {/* Mobile Menu */}
-            {mobileOpen && (
-                <div className="md:hidden border-t border-brand-border bg-brand-card">
-                    <div className="px-4 py-3 space-y-1">
-                        {navLinks.map((link) => (
-                            <a
-                                key={link.key}
-                                href={`/${locale}${link.href}`}
-                                className="block py-2 text-sm text-brand-secondary hover:text-brand-text transition-colors"
-                                onClick={() => setMobileOpen(false)}
-                            >
-                                {(link.labels as Record<string, string>)[locale] || link.labels.en}
-                            </a>
-                        ))}
-                        <a
-                            href={`/${locale}/search`}
-                            className="block py-2 text-sm text-brand-secondary hover:text-brand-text transition-colors"
-                            onClick={() => setMobileOpen(false)}
+                    </a>
+                    <div className="relative">
+                        <button
+                            onClick={() => setLangOpen(!langOpen)}
+                            className="flex items-center gap-1 text-sm text-brand-secondary hover:text-brand-text transition-colors p-1"
                         >
-                            Search
-                        </a>
-                        <div className="pt-2 border-t border-brand-border">
-                            <p className="text-xs text-brand-muted mb-2">Language</p>
-                            <div className="flex flex-wrap gap-2">
+                            {(locale as string).toUpperCase()}
+                            <svg className={`w-3 h-3 transition-transform ${langOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                        </button>
+                        {langOpen && (
+                            <div className="absolute right-0 top-8 w-40 rounded-lg border border-brand-border bg-brand-card shadow-xl py-1 z-50">
                                 {SUPPORTED_LOCALES.map((loc) => (
                                     <a
                                         key={loc}
                                         href={`/${loc}`}
-                                        className={`text-xs px-2 py-1 rounded transition-colors ${loc === locale
-                                                ? 'bg-brand-accent text-white'
-                                                : 'bg-brand-hover text-brand-secondary hover:text-brand-text'
+                                        className={`block px-3 py-1.5 text-sm transition-colors ${loc === locale
+                                                ? 'text-brand-accent bg-brand-hover'
+                                                : 'text-brand-secondary hover:text-brand-text hover:bg-brand-hover'
                                             }`}
+                                        onClick={() => setLangOpen(false)}
                                     >
-                                        {loc.toUpperCase()}
+                                        {LOCALE_NAMES[loc]}
                                     </a>
                                 ))}
                             </div>
-                        </div>
+                        )}
                     </div>
                 </div>
-            )}
+            </nav>
         </header>
     );
 }

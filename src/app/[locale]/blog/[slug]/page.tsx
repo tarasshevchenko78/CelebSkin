@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES, getLocalizedField } from '@/lib/i18n';
+import { getLocalizedField } from '@/lib/i18n';
+import { buildAlternates } from '@/lib/seo';
 import { getBlogPostBySlug } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
@@ -17,7 +18,7 @@ export async function generateMetadata({ params }: { params: { locale: string; s
     return {
         title: `${title} — CelebSkin`,
         description,
-        alternates: { languages: Object.fromEntries(SUPPORTED_LOCALES.map((l) => [l, `/${l}/blog/${params.slug}`])) },
+        alternates: buildAlternates(params.locale, `/blog/${params.slug}`),
     };
 }
 

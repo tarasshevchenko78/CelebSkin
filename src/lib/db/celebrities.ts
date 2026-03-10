@@ -1,6 +1,6 @@
 import { pool } from './pool';
 import { cached } from '../cache';
-import type { Celebrity, PaginatedResult } from '../types';
+import type { Celebrity, Tag, PaginatedResult } from '../types';
 
 // ============================================
 // Celebrities
@@ -70,6 +70,50 @@ export async function getTrendingCelebrities(limit: number = 10): Promise<Celebr
          ORDER BY total_views DESC, videos_count DESC
          LIMIT $1`,
             [limit]
+        );
+        return result.rows;
+    }, 300);
+}
+
+// Celebrities that appear in the same movies as the given celebrity
+export async function getSimilarCelebrities(
+    celebrityId: number,
+    limit: number = 12
+): Promise<Celebrity[]> {
+    return cached(`similar_celebs:${celebrityId}:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT DISTINCT c.* FROM celebrities c
+             JOIN movie_celebrities mc ON mc.celebrity_id = c.id
+             WHERE mc.movie_id IN (
+                 SELECT movie_id FROM movie_celebrities WHERE celebrity_id = $1
+             )
+             AND c.id != $1
+             AND c.videos_count > 0
+             ORDER BY c.total_views DESC
+             LIMIT $2`,
+            [celebrityId, limit]
+        );
+        return result.rows;
+    }, 300);
+}
+
+// Most common tags across all videos for a celebrity
+export async function getTagsForCelebrity(
+    celebrityId: number,
+    limit: number = 20
+): Promise<Tag[]> {
+    return cached(`celeb_tags:${celebrityId}:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT t.*, COUNT(*)::int as tag_count FROM tags t
+             JOIN video_tags vt ON vt.tag_id = t.id
+             JOIN video_celebrities vc ON vc.video_id = vt.video_id
+             JOIN videos v ON v.id = vt.video_id
+             WHERE vc.celebrity_id = $1
+               AND v.status = 'published'
+             GROUP BY t.id
+             ORDER BY tag_count DESC
+             LIMIT $2`,
+            [celebrityId, limit]
         );
         return result.rows;
     }, 300);

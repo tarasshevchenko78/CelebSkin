@@ -55,22 +55,45 @@ export async function getVideoBySlug(slug: string, locale: string): Promise<Vide
 export async function getVideos(
     page: number = 1,
     limit: number = 24,
-    orderBy: string = 'published_at'
+    orderBy: string = 'published_at',
+    tagSlug?: string
 ): Promise<PaginatedResult<Video>> {
-    const allowedOrder = ['published_at', 'views_count', 'created_at'];
+    const allowedOrder = ['published_at', 'views_count', 'created_at', 'duration_seconds', 'likes_count'];
     const order = allowedOrder.includes(orderBy) ? orderBy : 'published_at';
+    const cacheKey = `videos:${page}:${limit}:${order}:${tagSlug || 'all'}`;
 
-    return cached(`videos:${page}:${limit}:${order}`, async () => {
+    return cached(cacheKey, async () => {
         const offset = (page - 1) * limit;
+        const params: (string | number)[] = [limit, offset];
+
+        let tagJoin = '';
+        let dataTagWhere = '';
+        let countTagWhere = '';
+        if (tagSlug) {
+            tagJoin = `JOIN video_tags vt ON vt.video_id = v.id
+                        JOIN tags t ON t.id = vt.tag_id`;
+            dataTagWhere = `AND t.slug = $3`;
+            countTagWhere = `AND t.slug = $1`;
+            params.push(tagSlug);
+        }
+
+        const dataQuery = `
+            SELECT v.* FROM videos v
+            ${tagJoin}
+            WHERE v.status = 'published' ${dataTagWhere}
+            ORDER BY v.${order} DESC NULLS LAST
+            LIMIT $1 OFFSET $2`;
+
+        const countQuery = `
+            SELECT COUNT(*) FROM videos v
+            ${tagJoin}
+            WHERE v.status = 'published' ${countTagWhere}`;
+
+        const countParams = tagSlug ? [tagSlug] : [];
+
         const [dataResult, countResult] = await Promise.all([
-            pool.query(
-                `SELECT * FROM videos
-           WHERE status = 'published'
-           ORDER BY ${order} DESC
-           LIMIT $1 OFFSET $2`,
-                [limit, offset]
-            ),
-            pool.query(`SELECT COUNT(*) FROM videos WHERE status = 'published'`),
+            pool.query(dataQuery, params),
+            pool.query(countQuery, countParams),
         ]);
 
         const total = parseInt(countResult.rows[0].count);
@@ -298,6 +321,44 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
     }
 
     return collected;
+}
+
+// Get other videos by the same celebrity (excluding current video)
+export async function getOtherVideosByCelebrity(
+    celebrityId: number,
+    excludeVideoId: string,
+    limit: number = 4
+): Promise<Video[]> {
+    const result = await pool.query(
+        `SELECT v.* FROM videos v
+         JOIN video_celebrities vc ON vc.video_id = v.id
+         WHERE vc.celebrity_id = $1
+           AND v.id != $2
+           AND v.status = 'published'
+         ORDER BY v.views_count DESC
+         LIMIT $3`,
+        [celebrityId, excludeVideoId, limit]
+    );
+    return result.rows;
+}
+
+// Get other videos from the same movie (excluding current video)
+export async function getOtherVideosByMovie(
+    movieId: number,
+    excludeVideoId: string,
+    limit: number = 4
+): Promise<Video[]> {
+    const result = await pool.query(
+        `SELECT v.* FROM videos v
+         JOIN movie_scenes ms ON ms.video_id = v.id
+         WHERE ms.movie_id = $1
+           AND v.id != $2
+           AND v.status = 'published'
+         ORDER BY v.views_count DESC
+         LIMIT $3`,
+        [movieId, excludeVideoId, limit]
+    );
+    return result.rows;
 }
 
 // ============================================

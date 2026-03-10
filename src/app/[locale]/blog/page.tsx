@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES, type SupportedLocale, getLocalizedField } from '@/lib/i18n';
+import { type SupportedLocale, getLocalizedField } from '@/lib/i18n';
+import { buildAlternates } from '@/lib/seo';
 import { getBlogPosts } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import type { BlogPost, PaginatedResult } from '@/lib/types';
@@ -14,7 +15,7 @@ export async function generateMetadata({ params }: { params: { locale: string } 
     const locale = params.locale as SupportedLocale;
     return {
         title: `${titles[locale] || titles.en} — CelebSkin`,
-        alternates: { languages: Object.fromEntries(SUPPORTED_LOCALES.map((l) => [l, `/${l}/blog`])) },
+        alternates: buildAlternates(locale, '/blog'),
     };
 }
 

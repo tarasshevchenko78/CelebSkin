@@ -45,6 +45,7 @@ function getStaticEntries(): MetadataRoute.Sitemap {
     { path: '/celebrity', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/movie', changeFrequency: 'weekly', priority: 0.8 },
     { path: '/blog', changeFrequency: 'weekly', priority: 0.7 },
+    { path: '/collection', changeFrequency: 'weekly', priority: 0.7 },
   ];
 
   return staticPages.flatMap((page) =>
@@ -56,7 +57,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticEntries = getStaticEntries();
 
   try {
-    const [videosResult, celebritiesResult, moviesResult, blogResult] = await Promise.all([
+    const [videosResult, celebritiesResult, moviesResult, blogResult, collectionsResult, tagsResult] = await Promise.all([
       pool.query<VideoSlugRow>(
         `SELECT slug, updated_at FROM videos WHERE status = 'published' ORDER BY published_at DESC LIMIT 10000`
       ),
@@ -68,6 +69,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ),
       pool.query<SimpleSlugRow>(
         `SELECT slug, published_at AS updated_at FROM blog_posts WHERE is_published = true ORDER BY published_at DESC LIMIT 1000`
+      ),
+      pool.query<SimpleSlugRow>(
+        `SELECT slug, updated_at FROM collections WHERE videos_count > 0 ORDER BY sort_order LIMIT 500`
+      ),
+      pool.query<SimpleSlugRow>(
+        `SELECT slug, NULL AS updated_at FROM tags LIMIT 1000`
       ),
     ]);
 
@@ -122,12 +129,36 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         }))
     );
 
+    const collectionEntries: MetadataRoute.Sitemap = collectionsResult.rows.flatMap(
+      (collection) =>
+        LOCALES.map((locale) => ({
+          url: `${SITE_URL}/${locale}/collection/${collection.slug}`,
+          lastModified: collection.updated_at
+            ? new Date(collection.updated_at)
+            : new Date(),
+          changeFrequency: 'weekly' as const,
+          priority: 0.6,
+        }))
+    );
+
+    const tagEntries: MetadataRoute.Sitemap = tagsResult.rows.flatMap(
+      (tag) =>
+        LOCALES.map((locale) => ({
+          url: `${SITE_URL}/${locale}/tag/${tag.slug}`,
+          lastModified: new Date(),
+          changeFrequency: 'weekly' as const,
+          priority: 0.5,
+        }))
+    );
+
     return [
       ...staticEntries,
       ...videoEntries,
       ...celebrityEntries,
       ...movieEntries,
       ...blogEntries,
+      ...collectionEntries,
+      ...tagEntries,
     ];
   } catch (error) {
     logger.error('Sitemap generation error', { error: error instanceof Error ? error.message : String(error) });

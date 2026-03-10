@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
+import { buildAlternates } from '@/lib/seo';
 import { getTagBySlug, getVideosByTag } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import VideoCard from '@/components/VideoCard';
@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: { params: { locale: string; s
     const tagName = tag ? getLocalizedField(tag.name_localized, params.locale) || tag.name : params.slug;
     return {
         title: `${tagName} — CelebSkin`,
-        alternates: { languages: Object.fromEntries(SUPPORTED_LOCALES.map((l) => [l, `/${l}/tag/${params.slug}`])) },
+        alternates: buildAlternates(params.locale, `/tag/${params.slug}`),
     };
 }
 

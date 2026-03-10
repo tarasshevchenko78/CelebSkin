@@ -1,8 +1,10 @@
 import type { Metadata } from 'next';
 import '../globals.css';
-import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
+import { type SupportedLocale } from '@/lib/i18n';
+import { buildAlternates } from '@/lib/seo';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import BottomNav from '@/components/BottomNav';
 import AgeGate from '@/components/AgeGate';
 import CookieConsent from '@/components/CookieConsent';
 
@@ -27,11 +29,7 @@ export async function generateMetadata({
 
     return {
         title: titles[locale] || titles.en,
-        alternates: {
-            languages: Object.fromEntries(
-                SUPPORTED_LOCALES.map((loc) => [loc, `/${loc}`])
-            ),
-        },
+        alternates: buildAlternates(locale),
     };
 }
 
@@ -57,8 +55,9 @@ export default function LocaleLayout({
             <body className="min-h-screen bg-brand-bg text-brand-text font-sans antialiased flex flex-col">
                 <AgeGate />
                 <Header locale={locale} />
-                <main className="flex-1">{children}</main>
+                <main className="flex-1 pb-16 md:pb-0">{children}</main>
                 <Footer locale={locale} />
+                <BottomNav />
                 <CookieConsent />
             </body>
         </html>

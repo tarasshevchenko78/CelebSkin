@@ -70,3 +70,25 @@ export async function getCelebritiesForMovie(movieId: number): Promise<Celebrity
     );
     return result.rows;
 }
+
+// Movies that share celebrities with the given movie
+export async function getSimilarMovies(
+    movieId: number,
+    limit: number = 6
+): Promise<Movie[]> {
+    return cached(`similar_movies:${movieId}:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT DISTINCT m.* FROM movies m
+             JOIN movie_celebrities mc ON mc.movie_id = m.id
+             WHERE mc.celebrity_id IN (
+                 SELECT celebrity_id FROM movie_celebrities WHERE movie_id = $1
+             )
+             AND m.id != $1
+             AND m.scenes_count > 0
+             ORDER BY m.total_views DESC
+             LIMIT $2`,
+            [movieId, limit]
+        );
+        return result.rows;
+    }, 300);
+}

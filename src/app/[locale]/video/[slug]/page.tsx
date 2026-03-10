@@ -1,13 +1,19 @@
 import type { Metadata } from 'next';
-import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
-import { getVideoBySlug, getRelatedVideos } from '@/lib/db';
+import { buildAlternates } from '@/lib/seo';
+import { getVideoBySlug, getRelatedVideos, getOtherVideosByCelebrity, getOtherVideosByMovie } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
-import VideoActions from '@/components/VideoActions';
+import VideoDetailActions from '@/components/VideoDetailActions';
 import ScreenshotGallery from '@/components/ScreenshotGallery';
+import ExpandableText from '@/components/ExpandableText';
 import JsonLd from '@/components/JsonLd';
+import type { Video } from '@/lib/types';
+
+// ============================================
+// Metadata (unchanged)
+// ============================================
 
 export async function generateMetadata({
     params,
@@ -28,19 +34,23 @@ export async function generateMetadata({
     return {
         title: `${title} — CelebSkin`,
         description,
-        alternates: {
-            languages: Object.fromEntries(
-                SUPPORTED_LOCALES.map((loc) => [loc, `/${loc}/video/${params.slug}`])
-            ),
-        },
+        alternates: buildAlternates(params.locale, `/video/${params.slug}`),
     };
 }
+
+// ============================================
+// Helpers
+// ============================================
 
 function formatDurationISO(seconds: number): string {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `PT${m}M${s}S`;
 }
+
+// ============================================
+// Page
+// ============================================
 
 export default async function VideoDetailPage({
     params,
@@ -60,21 +70,42 @@ export default async function VideoDetailPage({
         return (
             <div className="mx-auto max-w-7xl px-4 py-20 text-center">
                 <h1 className="text-2xl font-bold text-white mb-4">Video not found</h1>
-                <a href={`/${locale}/video`} className="text-brand-accent hover:underline">← Back to videos</a>
+                <a href={`/${locale}/video`} className="text-red-400 hover:underline">← Back to videos</a>
             </div>
         );
     }
 
     const title = getLocalizedField(video.title, locale);
     const review = getLocalizedField(video.review, locale);
+    const celebrity = video.celebrities?.[0];
+    const movieTitle = video.movie
+        ? (getLocalizedField(video.movie.title_localized, locale) || video.movie.title)
+        : null;
 
-    let similar: import('@/lib/types').Video[] = [];
+    // Fetch related content in parallel
+    let similar: Video[] = [];
+    let moreByCeleb: Video[] = [];
+    let moreByMovie: Video[] = [];
+
     try {
-        similar = await getRelatedVideos(video.id, locale, 6);
+        [similar, moreByCeleb, moreByMovie] = await Promise.all([
+            getRelatedVideos(video.id, locale, 8),
+            celebrity
+                ? getOtherVideosByCelebrity(celebrity.id, video.id, 4)
+                : Promise.resolve([]),
+            video.movie
+                ? getOtherVideosByMovie(video.movie.id, video.id, 4)
+                : Promise.resolve([]),
+        ]);
     } catch (error) {
-        logger.error('Video detail related videos error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
+        logger.error('Video detail related content error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
+    // Filter similar to exclude videos already in "More from" sections
+    const moreIds = new Set([...moreByCeleb.map(v => v.id), ...moreByMovie.map(v => v.id)]);
+    const filteredSimilar = similar.filter(v => !moreIds.has(v.id));
+
+    // JSON-LD structured data (unchanged)
     const videoLd = title && video.thumbnail_url ? {
         '@context': 'https://schema.org',
         '@type': 'VideoObject',
@@ -88,152 +119,225 @@ export default async function VideoDetailPage({
     } : null;
 
     return (
-        <div className="mx-auto max-w-6xl px-4 py-6">
+        <div className="mx-auto max-w-6xl px-4 py-4 md:py-6">
             {videoLd && <JsonLd data={videoLd} />}
-            {/* Video Player — CDN video, or source embed, or placeholder */}
-            {(video.video_url_watermarked || video.video_url) ? (
-                <VideoPlayer
-                    src={video.video_url_watermarked || video.video_url}
-                    poster={video.thumbnail_url}
-                    title={title}
-                />
-            ) : video.embed_code ? (
-                <div
-                    className="aspect-video w-full rounded-xl overflow-hidden bg-black [&_iframe]:w-full [&_iframe]:h-full"
-                    dangerouslySetInnerHTML={{ __html: video.embed_code }}
-                />
-            ) : (
-                <VideoPlayer
-                    src={null}
-                    poster={video.thumbnail_url}
-                    title={title}
-                />
-            )}
 
-            {/* Screenshots Gallery */}
-            {video.screenshots && video.screenshots.length > 0 && (
-                <ScreenshotGallery screenshots={video.screenshots} />
-            )}
-
-            {/* Breadcrumbs + Title & Info */}
-            <div className="mt-4">
-                <nav aria-label="breadcrumb" className="mb-2">
-                    <ol className="flex items-center gap-1.5 text-sm flex-wrap">
-                        <li><a href={`/${locale}`} className="text-brand-secondary hover:text-brand-text transition-colors">Home</a></li>
-                        <li className="text-brand-muted">&gt;</li>
-                        {video.celebrities?.[0] && (
-                            <>
-                                <li>
-                                    <a href={`/${locale}/celebrity/${video.celebrities[0].slug}`}
-                                       className="text-brand-secondary hover:text-brand-text transition-colors">
-                                        {video.celebrities[0].name}
-                                    </a>
-                                </li>
-                                <li className="text-brand-muted">&gt;</li>
-                            </>
-                        )}
-                        <li className="text-brand-muted truncate max-w-[300px]">{title}</li>
-                    </ol>
-                </nav>
-                <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">{title}</h1>
-
-                <VideoActions
-                    videoId={video.id}
-                    initialViews={video.views_count}
-                    initialLikes={video.likes_count}
-                    initialDislikes={video.dislikes_count}
-                    durationFormatted={video.duration_formatted || undefined}
-                    quality={video.quality || undefined}
-                />
+            {/* ── 1. Video Player — edge-to-edge on mobile ── */}
+            <div className="-mx-4 md:mx-0 [&>div]:rounded-none md:[&>div]:rounded-xl">
+                {(video.video_url_watermarked || video.video_url) ? (
+                    <VideoPlayer
+                        src={video.video_url_watermarked || video.video_url}
+                        poster={video.thumbnail_url}
+                        title={title}
+                    />
+                ) : video.embed_code ? (
+                    <div
+                        className="aspect-video w-full overflow-hidden bg-black md:rounded-xl [&_iframe]:w-full [&_iframe]:h-full"
+                        dangerouslySetInnerHTML={{ __html: video.embed_code }}
+                    />
+                ) : (
+                    <VideoPlayer
+                        src={null}
+                        poster={video.thumbnail_url}
+                        title={title}
+                    />
+                )}
             </div>
 
-            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[1fr_320px]">
+            {/* ── 8. Breadcrumbs ── */}
+            <nav aria-label="breadcrumb" className="mt-3">
+                <ol className="flex items-center gap-1.5 text-sm flex-wrap">
+                    <li>
+                        <a href={`/${locale}`} className="text-gray-500 hover:text-gray-300 transition-colors">Home</a>
+                    </li>
+                    <li className="text-gray-600">/</li>
+                    <li>
+                        <a href={`/${locale}/video`} className="text-gray-500 hover:text-gray-300 transition-colors">Videos</a>
+                    </li>
+                    {celebrity && (
+                        <>
+                            <li className="text-gray-600">/</li>
+                            <li>
+                                <a href={`/${locale}/celebrity/${celebrity.slug}`}
+                                   className="text-gray-500 hover:text-gray-300 transition-colors">
+                                    {celebrity.name}
+                                </a>
+                            </li>
+                        </>
+                    )}
+                    <li className="text-gray-600">/</li>
+                    <li className="text-gray-600 truncate max-w-[200px] sm:max-w-[300px]">{title}</li>
+                </ol>
+            </nav>
+
+            {/* ── 11. Two-column layout ── */}
+            <div className="mt-3 lg:grid lg:grid-cols-[1fr_340px] lg:gap-8">
+
+                {/* ══════════════ Main Column ══════════════ */}
                 <div>
-                    {/* Celebrities */}
-                    {video.celebrities && video.celebrities.length > 0 && (
-                        <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Celebrities</h2>
-                            <div className="flex flex-wrap gap-3">
-                                {video.celebrities.map((celeb) => (
-                                    <a
-                                        key={celeb.id}
-                                        href={`/${locale}/celebrity/${celeb.slug}`}
-                                        className="flex items-center gap-2.5 rounded-lg bg-brand-card border border-brand-border px-3 py-2 hover:bg-brand-hover transition-colors"
-                                    >
-                                        {celeb.photo_url ? (
-                                            <img src={celeb.photo_url} alt={celeb.name} className="w-9 h-9 rounded-full object-cover shrink-0" />
-                                        ) : (
-                                            <div className="w-9 h-9 rounded-full bg-brand-hover flex items-center justify-center text-sm font-semibold text-brand-secondary shrink-0">
-                                                {celeb.name.split(' ').map(w => w[0]).join('').slice(0, 2)}
-                                            </div>
-                                        )}
-                                        <span className="text-sm text-brand-text">{celeb.name}</span>
-                                    </a>
-                                ))}
-                            </div>
-                        </section>
-                    )}
 
-                    {/* Movie */}
-                    {video.movie && (
-                        <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Movie</h2>
-                            <a
-                                href={`/${locale}/movie/${video.movie.slug}`}
-                                className="flex items-center gap-3 rounded-lg bg-brand-card border border-brand-border px-3 py-2 hover:bg-brand-hover transition-colors w-fit"
-                            >
-                                {video.movie.poster_url ? (
-                                    <img src={video.movie.poster_url} alt={getLocalizedField(video.movie.title_localized, locale) || video.movie.title} className="w-10 h-14 rounded object-cover shrink-0" />
-                                ) : (
-                                    <div className="w-10 h-14 rounded bg-brand-hover flex items-center justify-center text-xs text-brand-muted shrink-0">
-                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4" /></svg>
-                                    </div>
-                                )}
-                                <div>
-                                    <span className="text-sm text-brand-text block">{getLocalizedField(video.movie.title_localized, locale) || video.movie.title}</span>
-                                    {video.movie.year && <span className="text-xs text-brand-muted">{video.movie.year}</span>}
-                                </div>
-                            </a>
-                        </section>
-                    )}
+                    {/* ── 2. Title + Metadata + Actions ── */}
+                    <div>
+                        <h1 className="text-lg md:text-xl font-bold text-white leading-tight">{title}</h1>
 
-                    {/* Tags */}
+                        {/* Metadata row */}
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-400 mt-1.5">
+                            {/* Celebrity badges */}
+                            {video.celebrities && video.celebrities.map((celeb) => (
+                                <a
+                                    key={celeb.id}
+                                    href={`/${locale}/celebrity/${celeb.slug}`}
+                                    className="inline-flex items-center bg-gray-800 px-2 py-0.5 rounded text-xs text-gray-300 hover:text-red-400 transition-colors"
+                                >
+                                    {celeb.name}
+                                </a>
+                            ))}
+
+                            {/* Movie link */}
+                            {video.movie && (
+                                <a
+                                    href={`/${locale}/movie/${video.movie.slug}`}
+                                    className="hover:text-red-400 transition-colors"
+                                >
+                                    {movieTitle}
+                                </a>
+                            )}
+
+                            {/* Separator dot */}
+                            {video.movie && (video.movie.year || video.duration_formatted) && (
+                                <span className="text-gray-600">&middot;</span>
+                            )}
+
+                            {/* Year */}
+                            {video.movie?.year && (
+                                <span>{video.movie.year}</span>
+                            )}
+
+                            {/* Duration */}
+                            {video.duration_formatted && (
+                                <span>{video.duration_formatted}</span>
+                            )}
+
+                            {/* Quality badge */}
+                            {video.quality && (
+                                <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                                    {video.quality}
+                                </span>
+                            )}
+                        </div>
+
+                        {/* Action buttons: views, like/dislike, bookmark, share */}
+                        <VideoDetailActions
+                            videoId={video.id}
+                            initialViews={video.views_count}
+                            initialLikes={video.likes_count}
+                            initialDislikes={video.dislikes_count}
+                        />
+                    </div>
+
+                    {/* ── 3. Tags ── */}
                     {video.tags && video.tags.length > 0 && (
-                        <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Tags</h2>
-                            <div className="flex flex-wrap gap-2">
-                                {video.tags.map((tag) => (
-                                    <a
-                                        key={tag.id}
-                                        href={`/${locale}/tag/${tag.slug}`}
-                                        className="text-xs bg-brand-card border border-brand-border text-brand-secondary px-3 py-1.5 rounded-full hover:bg-brand-hover hover:text-brand-text transition-colors"
-                                    >
-                                        {getLocalizedField(tag.name_localized, locale) || tag.name}
-                                    </a>
-                                ))}
-                            </div>
-                        </section>
+                        <div className="flex flex-wrap gap-1.5 mt-5 pt-5 border-t border-gray-800/50">
+                            {video.tags.map((tag) => (
+                                <a
+                                    key={tag.id}
+                                    href={`/${locale}/tag/${tag.slug}`}
+                                    className="px-2 py-0.5 rounded-full text-xs bg-gray-800/50 text-gray-400 border border-gray-700 hover:border-red-600 hover:text-red-400 transition-colors"
+                                >
+                                    {getLocalizedField(tag.name_localized, locale) || tag.name}
+                                </a>
+                            ))}
+                        </div>
                     )}
 
-                    {/* Review */}
+                    {/* ── 4. Screenshots Gallery ── */}
+                    {video.screenshots && video.screenshots.length > 0 && (
+                        <div className="mt-5 pt-5 border-t border-gray-800/50">
+                            <ScreenshotGallery screenshots={video.screenshots} />
+                        </div>
+                    )}
+
+                    {/* ── 7. Description / Review ── */}
                     {review && (
-                        <section className="mb-6">
-                            <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Review</h2>
-                            <p className="text-sm text-brand-text/80 leading-relaxed">{review}</p>
-                        </section>
+                        <div className="mt-5 pt-5 border-t border-gray-800/50">
+                            <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">Review</h2>
+                            <ExpandableText text={review} />
+                        </div>
                     )}
                 </div>
 
-                {/* Sidebar — Similar Videos */}
-                <aside>
-                    <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Related Videos</h2>
-                    <div className="flex flex-col gap-3">
-                        {similar.map((v) => (
-                            <VideoCard key={v.id} video={v} locale={locale} size="sm" />
-                        ))}
-                    </div>
+                {/* ══════════════ Sidebar ══════════════ */}
+                <aside className="mt-8 lg:mt-0 space-y-6">
+
+                    {/* ── 5a. More from Celebrity ── */}
+                    {moreByCeleb.length > 0 && celebrity && (
+                        <section>
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className="text-sm font-semibold text-white truncate mr-2">
+                                    More from {celebrity.name}
+                                </h2>
+                                <a
+                                    href={`/${locale}/celebrity/${celebrity.slug}`}
+                                    className="text-xs text-red-400 hover:text-red-300 transition-colors shrink-0"
+                                >
+                                    View all →
+                                </a>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                {moreByCeleb.map((v) => (
+                                    <VideoCard key={v.id} video={v} locale={locale} />
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* ── 5b. More from Movie ── */}
+                    {moreByMovie.length > 0 && video.movie && (
+                        <section>
+                            <div className="flex items-center justify-between mb-3">
+                                <h2 className="text-sm font-semibold text-white truncate mr-2">
+                                    More from {movieTitle}
+                                </h2>
+                                <a
+                                    href={`/${locale}/movie/${video.movie.slug}`}
+                                    className="text-xs text-red-400 hover:text-red-300 transition-colors shrink-0"
+                                >
+                                    View all →
+                                </a>
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                                {moreByMovie.map((v) => (
+                                    <VideoCard key={v.id} video={v} locale={locale} />
+                                ))}
+                            </div>
+                        </section>
+                    )}
+
+                    {/* If no "More from" sections exist, show similar in sidebar instead */}
+                    {moreByCeleb.length === 0 && moreByMovie.length === 0 && filteredSimilar.length > 0 && (
+                        <section>
+                            <h2 className="text-sm font-semibold text-white mb-3">Similar Scenes</h2>
+                            <div className="grid grid-cols-2 gap-2">
+                                {filteredSimilar.slice(0, 6).map((v) => (
+                                    <VideoCard key={v.id} video={v} locale={locale} />
+                                ))}
+                            </div>
+                        </section>
+                    )}
                 </aside>
             </div>
+
+            {/* ── 6. Similar Scenes — full width below two-column ── */}
+            {(moreByCeleb.length > 0 || moreByMovie.length > 0) && filteredSimilar.length > 0 && (
+                <section className="mt-8 pt-6 border-t border-gray-800/50">
+                    <h2 className="text-lg font-semibold text-white mb-4">Similar Scenes</h2>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                        {filteredSimilar.map((v) => (
+                            <VideoCard key={v.id} video={v} locale={locale} />
+                        ))}
+                    </div>
+                </section>
+            )}
         </div>
     );
 }
