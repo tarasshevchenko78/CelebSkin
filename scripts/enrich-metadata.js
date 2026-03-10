@@ -25,27 +25,22 @@
 import pg from 'pg';
 const { Pool } = pg;
 import https from 'https';
-import dotenv from "dotenv";
-import { fileURLToPath } from "url";
-import path from "path";
+import { config } from "./lib/config.js";
 import { writeProgress, clearProgress } from "./lib/progress.js";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, ".env") });
 
 // ============================================
 // Config
 // ============================================
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const TMDB_API_KEY = config.ai.tmdbApiKey;
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p';
 
 const pool = new Pool({
-    host: process.env.DB_HOST || "185.224.82.214",
-    port: parseInt(process.env.DB_PORT || "5432"),
-    database: process.env.DB_NAME || "celebskin",
-    user: process.env.DB_USER || "celebskin",
-    password: process.env.DB_PASSWORD || "",
+    host: config.db.host,
+    port: config.db.port,
+    database: config.db.database,
+    user: config.db.user,
+    password: config.db.password,
 });
 
 // Processing log helper (uses local pool, not shared lib/db.js)

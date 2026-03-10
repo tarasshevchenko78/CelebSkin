@@ -2,16 +2,15 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
 import { getTagBySlug, getVideosByTag } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import VideoCard from '@/components/VideoCard';
-
-export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
     let tag;
     try {
         tag = await getTagBySlug(params.slug);
     } catch (error) {
-        console.error('[TagPage] metadata DB error:', error);
+        logger.error('Tag page metadata DB error', { page: 'tag/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const tagName = tag ? getLocalizedField(tag.name_localized, params.locale) || tag.name : params.slug;
     return {
@@ -29,7 +28,7 @@ export default async function TagPage({ params }: { params: { locale: string; sl
         tag = await getTagBySlug(params.slug);
         videosResult = await getVideosByTag(params.slug);
     } catch (error) {
-        console.error('[TagPage] DB error:', error);
+        logger.error('Tag page DB error', { page: 'tag/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const tagName = tag ? getLocalizedField(tag.name_localized, locale) || tag.name : params.slug;
     const videos = videosResult?.data || [];

@@ -1,10 +1,9 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
 import { getCelebrities } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Celebrity, PaginatedResult } from '@/lib/types';
 import CelebrityCard from '@/components/CelebrityCard';
-
-export const dynamic = 'force-dynamic';
 
 const titles: Record<string, string> = {
     en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités',
@@ -46,7 +45,7 @@ export default async function CelebritiesPage({
     try {
         result = await getCelebrities(page, perPage, orderBy, letter || undefined);
     } catch (error) {
-        console.error('[CelebritiesPage] DB error:', error);
+        logger.error('Celebrities page DB error', { page: 'celebrities', error: error instanceof Error ? error.message : String(error) });
     }
 
     const celebs = result.data;

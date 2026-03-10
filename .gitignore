@@ -45,3 +45,8 @@ site@*
 
 # pipeline logs
 scripts/logs/
+
+# database backups
+*.dump
+/backups/
+scripts/node_modules/

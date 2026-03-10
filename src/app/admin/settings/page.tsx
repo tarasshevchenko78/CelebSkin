@@ -1,29 +1,32 @@
+import { config } from '@/lib/config';
+
 export default function AdminSettingsPage() {
     const sections = [
         {
             title: 'Database',
             items: [
-                { label: 'Host', value: process.env.DB_HOST || '127.0.0.1', masked: false },
-                { label: 'Database', value: process.env.DB_NAME || 'celebskin', masked: false },
-                { label: 'User', value: process.env.DB_USER || 'celebskin', masked: false },
-                { label: 'Port', value: process.env.DB_PORT || '5432', masked: false },
+                { label: 'Host', value: config.db.host, masked: false },
+                { label: 'Database', value: config.db.name, masked: false },
+                { label: 'User', value: config.db.user, masked: false },
+                { label: 'Port', value: String(config.db.port), masked: false },
             ],
         },
         {
             title: 'External Services',
             items: [
-                { label: 'BunnyCDN API Key', value: process.env.BUNNY_API_KEY, masked: true },
-                { label: 'BunnyCDN Storage Zone', value: process.env.BUNNY_STORAGE_ZONE || 'Not set', masked: false },
-                { label: 'Gemini API Key', value: process.env.GEMINI_API_KEY, masked: true },
-                { label: 'TMDB API Key', value: process.env.TMDB_API_KEY, masked: true },
+                { label: 'BunnyCDN Storage Key', value: config.bunny.storageKey, masked: true },
+                { label: 'BunnyCDN Storage Zone', value: config.bunny.storageZone, masked: false },
+                { label: 'Gemini API Key', value: config.geminiApiKey, masked: true },
+                { label: 'TMDB API Key', value: config.tmdbApiKey, masked: true },
             ],
         },
         {
             title: 'Application',
             items: [
-                { label: 'Site URL', value: process.env.SITE_URL || 'https://celeb.skin', masked: false },
-                { label: 'Node Environment', value: process.env.NODE_ENV || 'development', masked: false },
-                { label: 'Admin Password', value: process.env.ADMIN_PASSWORD, masked: true },
+                { label: 'Site URL', value: config.siteUrl, masked: false },
+                { label: 'CDN URL', value: config.bunny.cdnUrl, masked: false },
+                { label: 'Node Environment', value: config.nodeEnv, masked: false },
+                { label: 'Admin Password', value: config.admin.password, masked: true },
             ],
         },
     ];
@@ -61,7 +64,7 @@ export default function AdminSettingsPage() {
                 <h2 className="text-lg font-semibold text-white mb-3">Environment Info</h2>
                 <p className="text-sm text-gray-400">
                     Settings are configured via environment variables on the server. To change these values,
-                    update the <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded text-xs">.env</code> file
+                    update the <code className="text-gray-300 bg-gray-800 px-1.5 py-0.5 rounded text-xs">.env.local</code> file
                     and restart the application.
                 </p>
             </div>

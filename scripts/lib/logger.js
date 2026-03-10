@@ -1,12 +1,11 @@
+import { join } from "path";
 import winston from "winston";
-import path from "path";
-import { fileURLToPath } from "url";
+import { config } from "./config.js";
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const logDir = path.join(__dirname, "..", "logs");
+const logDir = config.pipeline.logDir;
 
 const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || "info",
+  level: config.logLevel,
   format: winston.format.combine(
     winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
     winston.format.errors({ stack: true }),
@@ -17,8 +16,8 @@ const logger = winston.createLogger({
   ),
   transports: [
     new winston.transports.Console(),
-    new winston.transports.File({ filename: path.join(logDir, "error.log"), level: "error" }),
-    new winston.transports.File({ filename: path.join(logDir, "pipeline.log") }),
+    new winston.transports.File({ filename: join(logDir, "error.log"), level: "error" }),
+    new winston.transports.File({ filename: join(logDir, "pipeline.log") }),
   ],
 });
 

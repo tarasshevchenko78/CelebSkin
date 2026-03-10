@@ -11,15 +11,10 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { readFile } from 'fs/promises';
 import https from 'https';
-import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { config } from './config.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: join(__dirname, '..', '.env') });
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const TMDB_API_KEY = process.env.TMDB_API_KEY;
+const genAI = new GoogleGenerativeAI(config.ai.geminiApiKey);
+const TMDB_API_KEY = config.ai.tmdbApiKey;
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 
 // Rate limiter: max 10 Gemini requests per minute

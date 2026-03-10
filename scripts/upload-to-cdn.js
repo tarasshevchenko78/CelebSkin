@@ -20,63 +20,18 @@
  *   node upload-to-cdn.js --cleanup          # delete local files after upload
  */
 
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { fileURLToPath } from 'url';
-import { dirname, join, extname } from 'path';
-import { readFile, rm, stat, access } from 'fs/promises';
+import { dirname, join } from 'path';
+import { rm, stat, access } from 'fs/promises';
 import axios from 'axios';
+import { config } from './lib/config.js';
 import { query, log as dbLog } from './lib/db.js';
 import logger from './lib/logger.js';
 import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
+import { uploadFile, uploadBuffer, getVideoPath, getCelebrityPath, getMoviePath, isCdnUrl } from './lib/bunny.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TMP_DIR = join(__dirname, 'tmp');
-
-const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE || 'celebskin-media';
-const BUNNY_STORAGE_KEY = process.env.BUNNY_STORAGE_KEY;
-const BUNNY_STORAGE_HOST = process.env.BUNNY_STORAGE_HOST || 'storage.bunnycdn.com';
-const CDN_URL = process.env.BUNNY_CDN_URL || 'https://celebskin-cdn.b-cdn.net';
-
-// MIME type mapping
-const MIME_TYPES = {
-    '.mp4': 'video/mp4',
-    '.webm': 'video/webm',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.png': 'image/png',
-    '.webp': 'image/webp',
-    '.gif': 'image/gif',
-    '.json': 'application/json',
-};
-
-// ============================================
-// BunnyCDN Storage API
-// ============================================
-
-async function uploadToBunny(localPath, remotePath) {
-    const fileBuffer = await readFile(localPath);
-    const ext = extname(localPath).toLowerCase();
-    const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-
-    const url = `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${remotePath}`;
-
-    const response = await axios.put(url, fileBuffer, {
-        headers: {
-            'AccessKey': BUNNY_STORAGE_KEY,
-            'Content-Type': contentType,
-        },
-        maxContentLength: 500 * 1024 * 1024, // 500MB max
-        timeout: 600000, // 10 min
-    });
-
-    if (response.status !== 201 && response.status !== 200) {
-        throw new Error(`BunnyCDN upload failed: ${response.status} ${response.statusText}`);
-    }
-
-    return `${CDN_URL}/${remotePath}`;
-}
+const TMP_DIR = config.pipeline.tmpDir;
 
 async function fileExists(path) {
     try {
@@ -99,10 +54,9 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     // Just update video_url to the existing CDN watermarked URL
     if (video.status === 'published'
         && video.video_url_watermarked
-        && video.video_url_watermarked.includes('b-cdn.net')
+        && isCdnUrl(video.video_url_watermarked)
         && video.video_url
-        && !video.video_url.includes('b-cdn.net')
-        && !video.video_url.includes('b-cdn.net')) {
+        && !isCdnUrl(video.video_url)) {
         logger.info(`  Fixing video_url → CDN watermarked URL`);
         await query(
             `UPDATE videos SET video_url = $2, updated_at = NOW() WHERE id = $1`,
@@ -133,7 +87,9 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
             logger.info(`  Uploading watermarked video...`);
             const fileInfo = await stat(watermarkedPath);
             logger.info(`    Size: ${(fileInfo.size / 1024 / 1024).toFixed(1)}MB`);
-            const cdnUrl = await uploadToBunny(watermarkedPath, `videos/${videoId}/watermarked.mp4`);
+            const cdnUrl = await uploadFile(watermarkedPath, `${getVideoPath(videoId)}/watermarked.mp4`, {
+                videoId, step: 'cdn-upload-video',
+            });
             uploadedUrls.video_url_watermarked = cdnUrl;
             uploadCount++;
             logger.info(`    → ${cdnUrl}`);
@@ -147,7 +103,9 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     if (await fileExists(originalPath) && !uploadedUrls.video_url_watermarked) {
         try {
             logger.info(`  Uploading original video...`);
-            const cdnUrl = await uploadToBunny(originalPath, `videos/${videoId}/original.mp4`);
+            const cdnUrl = await uploadFile(originalPath, `${getVideoPath(videoId)}/original.mp4`, {
+                videoId, step: 'cdn-upload-original',
+            });
             uploadedUrls.video_url = cdnUrl;
             uploadCount++;
         } catch (err) {
@@ -163,7 +121,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
         const thumbPath = join(workDir, thumbName);
         if (await fileExists(thumbPath)) {
             try {
-                const cdnUrl = await uploadToBunny(thumbPath, `videos/${videoId}/${thumbName}`);
+                const cdnUrl = await uploadFile(thumbPath, `${getVideoPath(videoId)}/${thumbName}`);
                 screenshotUrls.push(cdnUrl);
                 uploadCount++;
             } catch (err) {
@@ -182,7 +140,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     const spritePath = join(workDir, 'sprite.jpg');
     if (await fileExists(spritePath)) {
         try {
-            const cdnUrl = await uploadToBunny(spritePath, `videos/${videoId}/sprite.jpg`);
+            const cdnUrl = await uploadFile(spritePath, `${getVideoPath(videoId)}/sprite.jpg`);
             uploadedUrls.sprite_url = cdnUrl;
             uploadCount++;
             logger.info(`  Sprite uploaded`);
@@ -195,7 +153,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     const gifPath = join(workDir, 'preview.gif');
     if (await fileExists(gifPath)) {
         try {
-            const cdnUrl = await uploadToBunny(gifPath, `videos/${videoId}/preview.gif`);
+            const cdnUrl = await uploadFile(gifPath, `${getVideoPath(videoId)}/preview.gif`);
             uploadedUrls.preview_gif_url = cdnUrl;
             uploadCount++;
             logger.info(`  Preview GIF uploaded`);
@@ -300,18 +258,8 @@ async function uploadCelebrityPhotos(force = false, limit = 50) {
             });
 
             // Upload to BunnyCDN
-            const remotePath = `celebrities/${celeb.slug}/photo.jpg`;
-            const url = `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${remotePath}`;
-
-            await axios.put(url, response.data, {
-                headers: {
-                    'AccessKey': BUNNY_STORAGE_KEY,
-                    'Content-Type': 'image/jpeg',
-                },
-                timeout: 30000,
-            });
-
-            const cdnUrl = `${CDN_URL}/${remotePath}`;
+            const remotePath = `${getCelebrityPath(celeb.slug)}/photo.jpg`;
+            const cdnUrl = await uploadBuffer(response.data, remotePath, 'image/jpeg');
 
             // Update DB
             await query(
@@ -349,20 +297,12 @@ async function uploadCelebrityPhotos(force = false, limit = 50) {
                 timeout: 30000,
             });
 
-            const remotePath = `celebrities/${photo.slug}/photo_${photo.id}.jpg`;
-            const url = `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${remotePath}`;
-
-            await axios.put(url, response.data, {
-                headers: {
-                    'AccessKey': BUNNY_STORAGE_KEY,
-                    'Content-Type': 'image/jpeg',
-                },
-                timeout: 30000,
-            });
+            const remotePath = `${getCelebrityPath(photo.slug)}/photo_${photo.id}.jpg`;
+            const cdnUrl = await uploadBuffer(response.data, remotePath, 'image/jpeg');
 
             await query(
                 `UPDATE celebrity_photos SET photo_local = $2 WHERE id = $1`,
-                [photo.id, `${CDN_URL}/${remotePath}`]
+                [photo.id, cdnUrl]
             );
             uploaded++;
         } catch (err) {
@@ -395,18 +335,8 @@ async function uploadMoviePosters(force = false, limit = 50) {
                 timeout: 30000,
             });
 
-            const remotePath = `movies/${movie.slug}/poster.jpg`;
-            const url = `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${remotePath}`;
-
-            await axios.put(url, response.data, {
-                headers: {
-                    'AccessKey': BUNNY_STORAGE_KEY,
-                    'Content-Type': 'image/jpeg',
-                },
-                timeout: 30000,
-            });
-
-            const cdnUrl = `${CDN_URL}/${remotePath}`;
+            const remotePath = `${getMoviePath(movie.slug)}/poster.jpg`;
+            const cdnUrl = await uploadBuffer(response.data, remotePath, 'image/jpeg');
 
             await query(
                 `UPDATE movies SET poster_local = $2 WHERE id = $1`,
@@ -434,7 +364,7 @@ async function uploadMoviePosters(force = false, limit = 50) {
 // ============================================
 
 async function main() {
-    if (!BUNNY_STORAGE_KEY) {
+    if (!config.bunny.storageKey) {
         logger.error('BUNNY_STORAGE_KEY not set. Add it to .env');
         process.exit(1);
     }
@@ -445,8 +375,8 @@ async function main() {
     logger.info('='.repeat(60));
     logger.info('CelebSkin — BunnyCDN Upload');
     logger.info('='.repeat(60));
-    logger.info(`Storage Zone: ${BUNNY_STORAGE_ZONE}`);
-    logger.info(`CDN URL: ${CDN_URL}`);
+    logger.info(`Storage Zone: ${config.bunny.storageZone}`);
+    logger.info(`CDN URL: ${config.bunny.cdnUrl}`);
 
     const CONCURRENCY = 3;
     const startedAt = Date.now();
@@ -475,7 +405,6 @@ async function main() {
                     AND (v.sprite_url IS NULL OR v.sprite_url NOT LIKE '%b-cdn%'))
                 -- Published videos that still have non-CDN video URLs (missed by earlier pipeline runs)
                 OR (v.status = 'published' AND v.video_url IS NOT NULL
-                    AND v.video_url NOT LIKE '%b-cdn.net%'
                     AND v.video_url NOT LIKE '%b-cdn.net%'
                     AND v.video_url_watermarked IS NOT NULL
                     AND v.video_url_watermarked LIKE '%b-cdn.net%')

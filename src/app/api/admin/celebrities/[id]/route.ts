@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -47,7 +48,7 @@ export async function GET(
             movies: moviesResult.rows,
         });
     } catch (error) {
-        console.error('[API AdminCelebrity GET] error:', error);
+        logger.error('Admin celebrity GET failed', { route: '/api/admin/celebrities/[id]', celebrityId: id, error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -102,7 +103,7 @@ export async function PUT(
 
         return NextResponse.json(result.rows[0]);
     } catch (error) {
-        console.error('[API AdminCelebrity PUT] error:', error);
+        logger.error('Admin celebrity PUT failed', { route: '/api/admin/celebrities/[id]', celebrityId: id, error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

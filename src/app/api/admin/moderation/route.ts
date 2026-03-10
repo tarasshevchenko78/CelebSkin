@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { invalidateAfterPublish } from '@/lib/cache';
+import { logger } from '@/lib/logger';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import slugify from 'slugify';
@@ -48,7 +50,7 @@ export async function GET(request: NextRequest) {
             limit,
         });
     } catch (error) {
-        console.error('[API AdminModeration] GET error:', error);
+        logger.error('Moderation GET failed', { route: '/api/admin/moderation', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -98,7 +100,7 @@ export async function POST(request: NextRequest) {
 
                 return NextResponse.json({ status: 'reanalyzing', videoId });
             } catch (err) {
-                console.error('[API AdminModeration] reanalyze error:', err);
+                logger.error('Moderation reanalyze failed', { route: '/api/admin/moderation', videoId, error: err instanceof Error ? err.message : String(err) });
                 return NextResponse.json({ error: 'Failed to start reanalysis' }, { status: 500 });
             }
         }
@@ -183,13 +185,15 @@ export async function POST(request: NextRequest) {
             client.release();
         }
 
+        await invalidateAfterPublish();
+
         if (!contentType.includes('application/json')) {
             return NextResponse.redirect(new URL('/admin/moderation', request.url));
         }
 
         return NextResponse.json({ status: 'approved', videoId });
     } catch (error) {
-        console.error('[API AdminModeration] POST error:', error);
+        logger.error('Moderation POST failed', { route: '/api/admin/moderation', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

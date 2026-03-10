@@ -2,17 +2,16 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
 import { getCollectionBySlug, getVideosForCollection } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Video } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
-
-export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
     let collection;
     try {
         collection = await getCollectionBySlug(params.slug);
     } catch (error) {
-        console.error('[CollectionDetail] metadata DB error:', error);
+        logger.error('Collection metadata DB error', { page: 'collection/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const title = collection ? getLocalizedField(collection.title, params.locale) || params.slug : 'Collection';
     return {
@@ -28,7 +27,7 @@ export default async function CollectionDetailPage({ params }: { params: { local
     try {
         collection = await getCollectionBySlug(params.slug);
     } catch (error) {
-        console.error('[CollectionDetail] DB error:', error);
+        logger.error('Collection DB error', { page: 'collection/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
     if (!collection) {
@@ -53,7 +52,7 @@ export default async function CollectionDetailPage({ params }: { params: { local
         const result = await getVideosForCollection(collection.id);
         videos = result.data;
     } catch (error) {
-        console.error('[CollectionDetail] videos error:', error);
+        logger.error('Collection videos error', { page: 'collection/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
     return (

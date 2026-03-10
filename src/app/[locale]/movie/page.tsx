@@ -2,9 +2,8 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
 import { getMovies } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Movie, PaginatedResult } from '@/lib/types';
-
-export const dynamic = 'force-dynamic';
 
 const titles: Record<string, string> = {
     en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films',
@@ -43,7 +42,7 @@ export default async function MoviesPage({
     try {
         result = await getMovies(page, perPage, orderBy);
     } catch (error) {
-        console.error('[MoviesPage] DB error:', error);
+        logger.error('Movies page DB error', { page: 'movies', error: error instanceof Error ? error.message : String(error) });
     }
 
     const movies = result.data;

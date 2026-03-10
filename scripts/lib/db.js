@@ -1,19 +1,14 @@
 // CelebSkin Pipeline DB Connector
 // Connects to PostgreSQL on AbeloHost (remote)
 import pg from "pg";
-import dotenv from "dotenv";
-import { fileURLToPath } from "url";
-import path from "path";
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, "..", ".env") });
+import { config } from "./config.js";
 
 const pool = new pg.Pool({
-  host: process.env.DB_HOST || "185.224.82.214",
-  port: parseInt(process.env.DB_PORT || "5432"),
-  database: process.env.DB_NAME || "celebskin",
-  user: process.env.DB_USER || "celebskin",
-  password: process.env.DB_PASSWORD || "",
+  host: config.db.host,
+  port: config.db.port,
+  database: config.db.database,
+  user: config.db.user,
+  password: config.db.password,
   max: 10,
   idleTimeoutMillis: 30000,
 });

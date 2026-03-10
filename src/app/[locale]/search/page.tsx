@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { getLocalizedField } from '@/lib/i18n';
 import type { SearchResult } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
@@ -24,39 +24,79 @@ const placeholders: Record<string, string> = {
     tr: 'Ünlü, film, video ara...',
 };
 const tabs = ['all', 'videos', 'celebrities', 'movies'] as const;
+const SUGGESTIONS = ['Nadine Warmuth', 'Susan Blakely', 'Lara Harris', 'Marina Pasqua', 'Laetitia Martinucci'];
 
-export default function SearchPage({ params }: { params: { locale: string } }) {
+export default function SearchPage({ params, searchParams }: { params: { locale: string }; searchParams: { q?: string } }) {
     const locale = params.locale;
-    const [query, setQuery] = useState('');
+    const initialQuery = searchParams?.q || '';
+    const [query, setQuery] = useState(initialQuery);
     const [activeTab, setActiveTab] = useState<string>('all');
     const [results, setResults] = useState<SearchResult | null>(null);
-    const [, setLoading] = useState(false);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(false);
+    const controllerRef = useRef<AbortController | null>(null);
+    const initialFetched = useRef(false);
 
     const fetchResults = useCallback(async (q: string) => {
         if (q.length < 2) {
             setResults(null);
+            setLoading(false);
+            setError(false);
             return;
         }
+
+        // Cancel previous request
+        controllerRef.current?.abort();
+        controllerRef.current = new AbortController();
+
         setLoading(true);
+        setError(false);
         try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+            const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`, {
+                signal: controllerRef.current.signal,
+            });
             if (res.ok) {
                 const data = await res.json();
                 setResults(data);
+            } else {
+                setError(true);
             }
-        } catch (error) {
-            console.error('[Search] fetch error:', error);
+        } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === 'AbortError') return;
+            console.error('[Search] fetch error:', err);
+            setError(true);
         } finally {
             setLoading(false);
         }
     }, []);
 
+    // Auto-search on initial load if URL has ?q=
     useEffect(() => {
+        if (initialQuery && !initialFetched.current) {
+            initialFetched.current = true;
+            fetchResults(initialQuery);
+        }
+    }, [initialQuery, fetchResults]);
+
+    // Debounced search on typing (400ms)
+    useEffect(() => {
+        if (!initialFetched.current && !query) return;
+        initialFetched.current = true;
+
         const timer = setTimeout(() => {
             fetchResults(query);
-        }, 300);
+        }, 400);
         return () => clearTimeout(timer);
     }, [query, fetchResults]);
+
+    // Update URL without reload
+    const handleQueryChange = useCallback((value: string) => {
+        setQuery(value);
+        const url = value
+            ? `/${locale}/search?q=${encodeURIComponent(value)}`
+            : `/${locale}/search`;
+        window.history.replaceState({}, '', url);
+    }, [locale]);
 
     const hasResults = results && (results.videos.length > 0 || results.celebrities.length > 0 || results.movies.length > 0);
 
@@ -74,7 +114,7 @@ export default function SearchPage({ params }: { params: { locale: string } }) {
                 <input
                     type="search"
                     value={query}
-                    onChange={(e) => setQuery(e.target.value)}
+                    onChange={(e) => handleQueryChange(e.target.value)}
                     placeholder={placeholders[locale] || placeholders.en}
                     className="w-full rounded-xl border border-brand-border bg-brand-card pl-12 pr-4 py-3 text-white placeholder-brand-muted focus:border-brand-accent focus:outline-none focus:ring-1 focus:ring-brand-accent transition-colors"
                     autoFocus
@@ -82,7 +122,7 @@ export default function SearchPage({ params }: { params: { locale: string } }) {
             </div>
 
             {/* Tabs */}
-            {results && (
+            {results && hasResults && (
                 <div className="flex gap-1 mb-6 border-b border-brand-border pb-2">
                     {tabs.map((tab) => {
                         const count = tab === 'all'
@@ -106,28 +146,63 @@ export default function SearchPage({ params }: { params: { locale: string } }) {
                 </div>
             )}
 
-            {/* Results */}
-            {!results && (
+            {/* Loading skeleton */}
+            {loading && (
+                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+                    {Array.from({ length: 6 }).map((_, i) => (
+                        <div key={i} className="animate-pulse">
+                            <div className="aspect-video bg-gray-800 rounded-lg" />
+                            <div className="mt-2 h-4 bg-gray-800 rounded w-3/4" />
+                            <div className="mt-1.5 h-3 bg-gray-800 rounded w-1/2" />
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Empty state — no query */}
+            {!loading && !results && !error && (
                 <div className="text-center py-16 text-brand-secondary">
                     <svg className="w-16 h-16 mx-auto mb-4 text-brand-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                    <p>Enter a search query to find celebrities, movies, and videos</p>
+                    <p className="mb-4">Enter a search query to find celebrities, movies, and videos</p>
+                    <p className="text-sm text-brand-muted mb-3">Try searching for:</p>
+                    <div className="flex flex-wrap justify-center gap-2">
+                        {SUGGESTIONS.map((name) => (
+                            <button
+                                key={name}
+                                onClick={() => handleQueryChange(name)}
+                                className="text-sm bg-brand-card border border-brand-border text-brand-accent px-3 py-1.5 rounded-full hover:bg-brand-hover transition-colors"
+                            >
+                                {name}
+                            </button>
+                        ))}
+                    </div>
                 </div>
             )}
 
-            {results && !hasResults && (
+            {/* Error state */}
+            {!loading && error && (
                 <div className="text-center py-16 text-brand-secondary">
-                    <p className="text-lg mb-2">No results found</p>
-                    <p className="text-sm">Try a different search term</p>
+                    <p className="text-lg mb-2">Search temporarily unavailable</p>
+                    <p className="text-sm">Please try again.</p>
                 </div>
             )}
 
-            {results && hasResults && (
+            {/* No results */}
+            {!loading && results && !hasResults && (
+                <div className="text-center py-16 text-brand-secondary">
+                    <p className="text-lg mb-2">No results for &ldquo;{query}&rdquo;</p>
+                    <p className="text-sm">Try a different search term.</p>
+                </div>
+            )}
+
+            {/* Results */}
+            {!loading && results && hasResults && (
                 <div className="space-y-8">
                     {/* Videos */}
                     {(activeTab === 'all' || activeTab === 'videos') && results.videos.length > 0 && (
                         <section>
                             {activeTab === 'all' && <h2 className="text-lg font-semibold text-white mb-3">Videos ({results.videos.length})</h2>}
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                                 {results.videos.map((v) => (<VideoCard key={v.id} video={v} locale={locale} />))}
                             </div>
                         </section>

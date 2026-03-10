@@ -15,13 +15,8 @@
  *   node process-with-ai.js --skip-visual   # пропустить визуальное распознавание
  */
 
-import dotenv from "dotenv";
-import { fileURLToPath } from "url";
-import path from "path";
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__dirname, ".env") });
-
 import slugify from "slugify";
+import { config } from "./lib/config.js";
 import {
   getPendingVideos, markRawVideoProcessed, markRawVideoFailed,
   insertVideo, findOrCreateCelebrity, linkVideoCelebrity,
@@ -38,10 +33,10 @@ import { createWriteStream } from "fs";
 import { pipeline as streamPipeline } from "stream/promises";
 import { mkdir, access } from "fs/promises";
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = config.ai.geminiApiKey;
 // CLI override: --model=gemini-2.5-pro | gemini-2.0-flash | gemini-2.0-pro
 const _cliModel = process.argv.find(a => a.startsWith("--model="));
-const GEMINI_MODEL = _cliModel ? _cliModel.split("=")[1] : (process.env.GEMINI_MODEL || "gemini-2.5-flash");
+const GEMINI_MODEL = _cliModel ? _cliModel.split("=")[1] : config.ai.geminiModel;
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const VISUAL_ONLY = process.argv.includes("--visual-only");

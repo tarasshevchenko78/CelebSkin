@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
-
-const BUNNY_STORAGE_ZONE = process.env.BUNNY_STORAGE_ZONE || 'celebskin-media';
-const BUNNY_STORAGE_KEY = process.env.BUNNY_STORAGE_KEY || '';
-const BUNNY_STORAGE_HOST = process.env.BUNNY_STORAGE_HOST || 'storage.bunnycdn.com';
-const CDN_URL = process.env.BUNNY_CDN_URL || 'https://celebskin-cdn.b-cdn.net';
+import { config } from '@/lib/config';
+import { logger } from '@/lib/logger';
 
 /**
  * POST /api/admin/upload
@@ -24,7 +21,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: 'Missing required fields: file, type, id, slug' }, { status: 400 });
         }
 
-        if (!BUNNY_STORAGE_KEY) {
+        if (!config.bunny.storageKey) {
             return NextResponse.json({ error: 'BunnyCDN not configured' }, { status: 500 });
         }
 
@@ -59,12 +56,12 @@ export async function POST(request: NextRequest) {
 
         // Upload to BunnyCDN
         const buffer = Buffer.from(await file.arrayBuffer());
-        const uploadUrl = `https://${BUNNY_STORAGE_HOST}/${BUNNY_STORAGE_ZONE}/${remotePath}`;
+        const uploadUrl = `https://${config.bunny.storageHost}/${config.bunny.storageZone}/${remotePath}`;
 
         const uploadRes = await fetch(uploadUrl, {
             method: 'PUT',
             headers: {
-                'AccessKey': BUNNY_STORAGE_KEY,
+                'AccessKey': config.bunny.storageKey,
                 'Content-Type': file.type,
             },
             body: buffer,
@@ -75,7 +72,7 @@ export async function POST(request: NextRequest) {
             return NextResponse.json({ error: `CDN upload failed: ${uploadRes.status} ${text}` }, { status: 500 });
         }
 
-        const cdnUrl = `${CDN_URL}/${remotePath}`;
+        const cdnUrl = `${config.bunny.cdnUrl}/${remotePath}`;
 
         // Update DB
         await pool.query(
@@ -85,7 +82,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ url: cdnUrl, message: 'Uploaded successfully' });
     } catch (error) {
-        console.error('[Upload] Error:', error);
+        logger.error('Upload failed', { route: '/api/admin/upload', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: `Upload failed: ${error}` }, { status: 500 });
     }
 }

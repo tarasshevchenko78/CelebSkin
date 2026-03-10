@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -41,7 +42,7 @@ export async function GET() {
             stats: stats.rows[0],
         });
     } catch (error) {
-        console.error('[Cleanup API] GET error:', error);
+        logger.error('Cleanup analysis failed', { route: '/api/admin/cleanup', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Failed to analyze' }, { status: 500 });
     }
 }
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     } catch (error) {
-        console.error('[Cleanup API] POST error:', error);
+        logger.error('Cleanup execution failed', { route: '/api/admin/cleanup', action: 'POST', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Cleanup failed' }, { status: 500 });
     }
 }

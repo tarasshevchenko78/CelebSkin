@@ -11,13 +11,6 @@
  *   node visual-recognize.js --force            # переанализировать даже уже проверенные
  */
 
-import dotenv from "dotenv";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: join(__dirname, ".env") });
-
 import { query } from "./lib/db.js";
 import logger from "./lib/logger.js";
 import { writeProgress, clearProgress } from "./lib/progress.js";

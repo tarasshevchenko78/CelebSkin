@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { invalidateAfterEdit, invalidateAfterPublish, invalidateAfterDelete } from '@/lib/cache';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -57,7 +59,7 @@ export async function GET(
             rawVideo: rawResult.rows[0] || null,
         });
     } catch (error) {
-        console.error('[API AdminVideo GET] error:', error);
+        logger.error('Admin video GET failed', { route: '/api/admin/videos/[id]', videoId: id, error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -135,6 +137,13 @@ export async function PUT(
             }
         }
 
+        // Invalidate caches
+        if (status === 'published') {
+            await invalidateAfterPublish();
+        } else {
+            await invalidateAfterEdit();
+        }
+
         if (result) {
             return NextResponse.json(result.rows[0]);
         }
@@ -142,7 +151,7 @@ export async function PUT(
         const videoResult = await pool.query('SELECT * FROM videos WHERE id = $1', [id]);
         return NextResponse.json(videoResult.rows[0]);
     } catch (error) {
-        console.error('[API AdminVideo PUT] error:', error);
+        logger.error('Admin video PUT failed', { route: '/api/admin/videos/[id]', videoId: id, error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -163,9 +172,10 @@ export async function DELETE(
             return NextResponse.json({ error: 'Video not found' }, { status: 404 });
         }
 
+        await invalidateAfterDelete();
         return NextResponse.json({ deleted: true, id });
     } catch (error) {
-        console.error('[API AdminVideo DELETE] error:', error);
+        logger.error('Admin video DELETE failed', { route: '/api/admin/videos/[id]', videoId: id, error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

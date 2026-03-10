@@ -27,9 +27,6 @@
  *   node run-pipeline.js --auto-publish     # auto-publish high confidence
  */
 
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { execFile, spawn } from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
@@ -42,6 +39,7 @@ import {
     markStepDone, writeStepStatus, readProgressFile, readStepResult,
     writeVideoJourneys,
 } from './lib/progress.js';
+import { canTransition } from './lib/state-machine.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -303,13 +301,23 @@ async function waitForChildren(runningChildren, timeoutMs) {
 
 async function cleanupStuckVideos() {
     try {
-        const { rowCount } = await query(`
-            UPDATE videos SET status='needs_review', updated_at=NOW()
-            WHERE status NOT IN ('published','rejected','needs_review')
+        // Only transition statuses where needs_review is a valid target
+        const { rows } = await query(`
+            SELECT id, status FROM videos
+            WHERE status NOT IN ('published','rejected','needs_review','dmca_removed')
               AND (video_url IS NULL OR video_url = '')
               AND updated_at < NOW() - INTERVAL '5 minutes'
         `);
-        if (rowCount > 0) logger.info(`[scheduler] Moved ${rowCount} video(s) without video_url to needs_review`);
+        let moved = 0;
+        for (const row of rows) {
+            if (!canTransition(row.status, 'needs_review')) {
+                logger.warn(`[scheduler] Cannot move video ${row.id} from "${row.status}" to "needs_review" — skipping`);
+                continue;
+            }
+            await query(`UPDATE videos SET status='needs_review', updated_at=NOW() WHERE id = $1`, [row.id]);
+            moved++;
+        }
+        if (moved > 0) logger.info(`[scheduler] Moved ${moved} video(s) without video_url to needs_review`);
     } catch {}
 }
 

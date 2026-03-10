@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { logger } from '@/lib/logger';
 
 export async function POST(request: NextRequest) {
     try {
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
             status: 'placeholder',
         });
     } catch (error) {
-        console.error('[API AiChat] error:', error);
+        logger.error('AI chat error', { route: '/api/ai-chat', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

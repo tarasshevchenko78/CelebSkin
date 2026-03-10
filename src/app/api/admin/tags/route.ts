@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,7 +13,7 @@ export async function GET() {
         );
         return NextResponse.json(result.rows);
     } catch (error) {
-        console.error('[API AdminTags GET] error:', error);
+        logger.error('Tags fetch failed', { route: '/api/admin/tags', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

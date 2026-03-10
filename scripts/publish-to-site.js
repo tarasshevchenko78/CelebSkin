@@ -15,17 +15,17 @@
  *   node publish-to-site.js --auto             # auto-publish high confidence (>=0.8)
  */
 
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { fileURLToPath } from 'url';
 import slugify from 'slugify';
+import { config } from './lib/config.js';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
 import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
+import { validatePrePublish, validateTransition } from './lib/state-machine.js';
+import { isCdnUrl } from './lib/bunny.js';
 
 const LANGS = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
-const SITE_URL = process.env.SITE_URL || 'https://celeb.skin';
+const SITE_URL = config.siteUrl;
 
 // ============================================
 // Slug Generation
@@ -154,13 +154,6 @@ async function linkMovieScenes(videoId) {
 // ============================================
 // Pre-Publish Validation
 // ============================================
-
-const CDN_PATTERNS = ['b-cdn.net'];
-
-function isCdnUrl(url) {
-    if (!url) return false;
-    return CDN_PATTERNS.some(pattern => url.includes(pattern));
-}
 
 export function validateVideoForPublish(video) {
     const warnings = [];
@@ -366,7 +359,31 @@ async function main() {
                 elapsedMs: Date.now() - startedAt,
             });
 
-            // Pre-publish validation
+            // State machine pre-publish validation
+            const prePublish = validatePrePublish(video);
+            if (!prePublish.valid) {
+                blocked++;
+                removeActiveItem(video.id);
+                _blocked.push({ id: video.id, title: vTitle, errors: prePublish.errors });
+                logger.error(`  ✗ PRE-PUBLISH BLOCKED: ${vTitle}`);
+                for (const err of prePublish.errors) {
+                    logger.error(`    ❌ ${err}`);
+                }
+                continue;
+            }
+
+            // State transition validation
+            try {
+                validateTransition(video.status, 'published');
+            } catch (err) {
+                blocked++;
+                removeActiveItem(video.id);
+                _blocked.push({ id: video.id, title: vTitle, errors: [err.message] });
+                logger.error(`  ✗ TRANSITION BLOCKED: ${vTitle} — ${err.message}`);
+                continue;
+            }
+
+            // Pre-publish validation (detailed checks)
             const validation = validateVideoForPublish(video);
 
             // MODERATION: incomplete data → set needs_review for manual fix

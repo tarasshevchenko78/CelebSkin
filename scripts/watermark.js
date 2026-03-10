@@ -17,9 +17,6 @@
  *   node watermark.js --opacity=0.3      # watermark opacity (0.0-1.0)
  */
 
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdir, stat } from 'fs/promises';
@@ -28,13 +25,16 @@ import { promisify } from 'util';
 import axios from 'axios';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
+import { config } from './lib/config.js';
 import { query } from './lib/db.js';
 import logger from './lib/logger.js';
 import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
+import { withRetry } from './lib/retry.js';
+import { recordFailure } from './lib/dead-letter.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TMP_DIR = join(__dirname, 'tmp');
+const TMP_DIR = config.pipeline.tmpDir;
 
 const WATERMARK_TEXT = 'celeb.skin';
 const DEFAULTS = {
@@ -170,7 +170,9 @@ async function processVideo(video, config) {
         const outputPath = join(workDir, 'watermarked.mp4');
         logger.info(`  Applying watermark "${WATERMARK_TEXT}" (opacity: ${config.opacity})...`);
 
-        await addWatermark(inputPath, outputPath, config);
+        await withRetry(() => addWatermark(inputPath, outputPath, config), {
+            maxRetries: 2, delayMs: 5000, label: `watermark:${videoId}`,
+        });
 
         // Get output file size
         const outInfo = await stat(outputPath);
@@ -221,6 +223,7 @@ async function processVideo(video, config) {
              `,
             [videoId, JSON.stringify({ error: err.message })]
         );
+        await recordFailure(videoId, 'watermark', err, 3);
         return { status: 'error', reason: err.message };
     }
 }

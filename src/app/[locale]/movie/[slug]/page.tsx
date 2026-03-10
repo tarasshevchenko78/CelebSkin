@@ -2,11 +2,12 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
 import { getMovieBySlug, getVideosForMovie, getCelebritiesForMovie } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Video, Celebrity } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 
-export const dynamic = 'force-dynamic';
 import CelebrityCard from '@/components/CelebrityCard';
+import JsonLd from '@/components/JsonLd';
 
 function formatViews(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -19,7 +20,7 @@ export async function generateMetadata({ params }: { params: { locale: string; s
     try {
         movie = await getMovieBySlug(params.slug);
     } catch (error) {
-        console.error('[MovieDetail] metadata DB error:', error);
+        logger.error('Movie detail metadata DB error', { page: 'movie/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const title = movie ? `${getLocalizedField(movie.title_localized, params.locale) || movie.title} Nude Scenes` : 'Movie';
     return {
@@ -35,7 +36,7 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
     try {
         movie = await getMovieBySlug(params.slug);
     } catch (error) {
-        console.error('[MovieDetail] DB error:', error);
+        logger.error('Movie detail DB error', { page: 'movie/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
     if (!movie) {
@@ -57,11 +58,23 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
         videos = videosResult.data;
         cast = await getCelebritiesForMovie(movie.id);
     } catch (error) {
-        console.error('[MovieDetail] relations error:', error);
+        logger.error('Movie detail relations error', { page: 'movie/detail', error: error instanceof Error ? error.message : String(error) });
     }
+
+    const movieLd = {
+        '@context': 'https://schema.org',
+        '@type': 'Movie',
+        name: title,
+        url: `https://celeb.skin/${locale}/movie/${movie.slug}`,
+        ...(movie.poster_url && { image: movie.poster_url }),
+        ...(movie.year && { datePublished: movie.year.toString() }),
+        ...(movie.director && { director: { '@type': 'Person', name: movie.director } }),
+        ...(movie.genres.length > 0 && { genre: movie.genres }),
+    };
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">
+            <JsonLd data={movieLd} />
             <div className="flex flex-col gap-6 md:flex-row md:gap-8 mb-10">
                 {/* Poster */}
                 <div className="w-48 md:w-56 shrink-0 aspect-[2/3] rounded-2xl overflow-hidden border border-brand-border bg-brand-card">

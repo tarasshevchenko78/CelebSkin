@@ -2,11 +2,12 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
 import { getVideoBySlug, getRelatedVideos } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
 import VideoActions from '@/components/VideoActions';
-
-export const dynamic = 'force-dynamic';
+import ScreenshotGallery from '@/components/ScreenshotGallery';
+import JsonLd from '@/components/JsonLd';
 
 export async function generateMetadata({
     params,
@@ -17,7 +18,7 @@ export async function generateMetadata({
     try {
         video = await getVideoBySlug(params.slug, params.locale);
     } catch (error) {
-        console.error('[VideoDetail] metadata DB error:', error);
+        logger.error('Video detail metadata DB error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const title = video
         ? getLocalizedField(video.seo_title, params.locale) || getLocalizedField(video.title, params.locale)
@@ -35,6 +36,12 @@ export async function generateMetadata({
     };
 }
 
+function formatDurationISO(seconds: number): string {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `PT${m}M${s}S`;
+}
+
 export default async function VideoDetailPage({
     params,
 }: {
@@ -46,7 +53,7 @@ export default async function VideoDetailPage({
     try {
         video = await getVideoBySlug(params.slug, locale);
     } catch (error) {
-        console.error('[VideoDetail] DB error:', error);
+        logger.error('Video detail DB error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
     if (!video) {
@@ -63,13 +70,26 @@ export default async function VideoDetailPage({
 
     let similar: import('@/lib/types').Video[] = [];
     try {
-        similar = await getRelatedVideos(video.id, 4);
+        similar = await getRelatedVideos(video.id, locale, 6);
     } catch (error) {
-        console.error('[VideoDetail] related videos error:', error);
+        logger.error('Video detail related videos error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
     }
+
+    const videoLd = title && video.thumbnail_url ? {
+        '@context': 'https://schema.org',
+        '@type': 'VideoObject',
+        name: title,
+        description: getLocalizedField(video.seo_description, locale) || review || '',
+        thumbnailUrl: video.thumbnail_url,
+        ...(video.published_at && { uploadDate: new Date(video.published_at).toISOString() }),
+        ...(video.duration_seconds && { duration: formatDurationISO(video.duration_seconds) }),
+        ...((video.video_url_watermarked || video.video_url) && { contentUrl: video.video_url_watermarked || video.video_url }),
+        publisher: { '@type': 'Organization', name: 'CelebSkin', url: 'https://celeb.skin' },
+    } : null;
 
     return (
         <div className="mx-auto max-w-6xl px-4 py-6">
+            {videoLd && <JsonLd data={videoLd} />}
             {/* Video Player — CDN video, or source embed, or placeholder */}
             {(video.video_url_watermarked || video.video_url) ? (
                 <VideoPlayer
@@ -90,8 +110,31 @@ export default async function VideoDetailPage({
                 />
             )}
 
-            {/* Title & Info */}
+            {/* Screenshots Gallery */}
+            {video.screenshots && video.screenshots.length > 0 && (
+                <ScreenshotGallery screenshots={video.screenshots} />
+            )}
+
+            {/* Breadcrumbs + Title & Info */}
             <div className="mt-4">
+                <nav aria-label="breadcrumb" className="mb-2">
+                    <ol className="flex items-center gap-1.5 text-sm flex-wrap">
+                        <li><a href={`/${locale}`} className="text-brand-secondary hover:text-brand-text transition-colors">Home</a></li>
+                        <li className="text-brand-muted">&gt;</li>
+                        {video.celebrities?.[0] && (
+                            <>
+                                <li>
+                                    <a href={`/${locale}/celebrity/${video.celebrities[0].slug}`}
+                                       className="text-brand-secondary hover:text-brand-text transition-colors">
+                                        {video.celebrities[0].name}
+                                    </a>
+                                </li>
+                                <li className="text-brand-muted">&gt;</li>
+                            </>
+                        )}
+                        <li className="text-brand-muted truncate max-w-[300px]">{title}</li>
+                    </ol>
+                </nav>
                 <h1 className="text-xl sm:text-2xl font-bold text-white leading-tight">{title}</h1>
 
                 <VideoActions
@@ -183,7 +226,7 @@ export default async function VideoDetailPage({
 
                 {/* Sidebar — Similar Videos */}
                 <aside>
-                    <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Similar Videos</h2>
+                    <h2 className="text-sm font-semibold text-brand-secondary uppercase tracking-wider mb-3">Related Videos</h2>
                     <div className="flex flex-col gap-3">
                         {similar.map((v) => (
                             <VideoCard key={v.id} video={v} locale={locale} size="sm" />

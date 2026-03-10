@@ -1,15 +1,14 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, getLocalizedField } from '@/lib/i18n';
 import { getBlogPostBySlug } from '@/lib/db';
-
-export const dynamic = 'force-dynamic';
+import { logger } from '@/lib/logger';
 
 export async function generateMetadata({ params }: { params: { locale: string; slug: string } }): Promise<Metadata> {
     let post;
     try {
         post = await getBlogPostBySlug(params.slug);
     } catch (error) {
-        console.error('[BlogPost] metadata DB error:', error);
+        logger.error('Blog post metadata DB error', { page: 'blog/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const title = post
         ? getLocalizedField(post.seo_title, params.locale) || getLocalizedField(post.title, params.locale) || 'Blog'
@@ -29,7 +28,7 @@ export default async function BlogPostPage({ params }: { params: { locale: strin
     try {
         post = await getBlogPostBySlug(params.slug);
     } catch (error) {
-        console.error('[BlogPost] DB error:', error);
+        logger.error('Blog post DB error', { page: 'blog/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
     if (!post) {

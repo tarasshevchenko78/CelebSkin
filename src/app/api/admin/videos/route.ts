@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
             limit,
         });
     } catch (error) {
-        console.error('[API AdminVideos] error:', error);
+        logger.error('Admin videos list failed', { route: '/api/admin/videos', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -85,7 +86,7 @@ export async function PUT(request: NextRequest) {
 
         return NextResponse.json(result.rows[0]);
     } catch (error) {
-        console.error('[API AdminVideos PUT] error:', error);
+        logger.error('Admin videos update failed', { route: '/api/admin/videos', action: 'PUT', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -125,7 +126,7 @@ export async function DELETE(request: NextRequest) {
 
         return NextResponse.json({ deleted: true, id });
     } catch (error) {
-        console.error('[API AdminVideos DELETE] error:', error);
+        logger.error('Admin videos delete failed', { route: '/api/admin/videos', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

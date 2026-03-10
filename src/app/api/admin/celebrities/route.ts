@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
             limit,
         });
     } catch (error) {
-        console.error('[API AdminCelebrities] error:', error);
+        logger.error('Admin celebrities list failed', { route: '/api/admin/celebrities', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -85,7 +86,7 @@ export async function PUT(request: NextRequest) {
 
         return NextResponse.json(result.rows[0]);
     } catch (error) {
-        console.error('[API AdminCelebrities PUT] error:', error);
+        logger.error('Admin celebrities update failed', { route: '/api/admin/celebrities', action: 'PUT', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -123,7 +124,7 @@ export async function DELETE(request: NextRequest) {
             client.release();
         }
     } catch (error) {
-        console.error('[API AdminCelebrities DELETE] error:', error);
+        logger.error('Admin celebrities delete failed', { route: '/api/admin/celebrities', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

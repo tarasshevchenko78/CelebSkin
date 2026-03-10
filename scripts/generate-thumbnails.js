@@ -19,9 +19,6 @@
  *   node generate-thumbnails.js --width=320        # frame width (default 320)
  */
 
-import dotenv from 'dotenv';
-dotenv.config();
-
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import { mkdir, rm, readdir, access } from 'fs/promises';
@@ -30,14 +27,16 @@ import { promisify } from 'util';
 import axios from 'axios';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
+import { config } from './lib/config.js';
 import { query, log as dbLog } from './lib/db.js';
 import logger from './lib/logger.js';
 import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
+import { withRetry } from './lib/retry.js';
+import { recordFailure } from './lib/dead-letter.js';
 
 const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const TMP_DIR = join(__dirname, 'tmp');
-const CDN_URL = process.env.BUNNY_CDN_URL || 'https://celebskin-cdn.b-cdn.net';
+const TMP_DIR = config.pipeline.tmpDir;
 
 export const DEFAULTS = {
     thumbCount: 8,
@@ -238,7 +237,9 @@ export async function processVideo(video, config) {
             const fileName = `thumb_${String(i + 1).padStart(3, '0')}.jpg`;
             const framePath = join(workDir, fileName);
             try {
-                await extractFrame(videoPath, timestamps[i], framePath, width);
+                await withRetry(() => extractFrame(videoPath, timestamps[i], framePath, width), {
+                    maxRetries: 2, delayMs: 3000, label: `extractFrame:${videoId}:${i + 1}`,
+                });
                 framePaths.push(framePath);
                 screenshotFiles.push(fileName);
             } catch (err) {
@@ -257,7 +258,9 @@ export async function processVideo(video, config) {
         // Create sprite sheet
         const spritePath = join(workDir, 'sprite.jpg');
         try {
-            await createSpriteSheet(framePaths, spritePath);
+            await withRetry(() => createSpriteSheet(framePaths, spritePath), {
+                maxRetries: 2, delayMs: 3000, label: `spriteSheet:${videoId}`,
+            });
             logger.info(`  Sprite sheet created`);
         } catch (err) {
             logger.warn(`  Sprite creation failed: ${err.message}`);
@@ -359,6 +362,7 @@ export async function processVideo(video, config) {
     } catch (err) {
         removeActiveItem(videoId);
         await dbLog(videoId, 'thumbnails', 'error', `Thumbnail generation failed: ${err.message}`);
+        await recordFailure(videoId, 'thumbnails', err, 3);
         return { status: 'error', reason: err.message };
     }
     // NOTE: Don't clean up workDir yet — upload-to-cdn.js needs the files

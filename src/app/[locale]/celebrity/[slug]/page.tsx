@@ -2,10 +2,10 @@ import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES } from '@/lib/i18n';
 import { getLocalizedField } from '@/lib/i18n';
 import { getCelebrityBySlug, getVideosForCelebrity, getMoviesForCelebrity } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Video, Movie } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
-
-export const dynamic = 'force-dynamic';
+import JsonLd from '@/components/JsonLd';
 
 function formatViews(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -22,7 +22,7 @@ export async function generateMetadata({
     try {
         celeb = await getCelebrityBySlug(params.slug);
     } catch (error) {
-        console.error('[CelebrityDetail] metadata DB error:', error);
+        logger.error('Celebrity detail metadata DB error', { page: 'celebrity/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const name = celeb ? celeb.name : 'Celebrity';
     return {
@@ -42,7 +42,7 @@ export default async function CelebrityDetailPage({
     try {
         celeb = await getCelebrityBySlug(params.slug);
     } catch (error) {
-        console.error('[CelebrityDetail] DB error:', error);
+        logger.error('Celebrity detail DB error', { page: 'celebrity/detail', error: error instanceof Error ? error.message : String(error) });
     }
 
     if (!celeb) {
@@ -64,11 +64,22 @@ export default async function CelebrityDetailPage({
         videos = videosResult.data;
         celebMovies = await getMoviesForCelebrity(celeb.id);
     } catch (error) {
-        console.error('[CelebrityDetail] relations error:', error);
+        logger.error('Celebrity detail relations error', { page: 'celebrity/detail', error: error instanceof Error ? error.message : String(error) });
     }
+
+    const personLd = {
+        '@context': 'https://schema.org',
+        '@type': 'Person',
+        name: celeb.name,
+        url: `https://celeb.skin/${locale}/celebrity/${celeb.slug}`,
+        ...(celeb.photo_url && { image: celeb.photo_url }),
+        ...(celeb.birth_date && { birthDate: celeb.birth_date }),
+        ...(celeb.nationality && { nationality: celeb.nationality }),
+    };
 
     return (
         <div className="mx-auto max-w-7xl px-4 py-8">
+            <JsonLd data={personLd} />
             {/* Profile Header */}
             <div className="flex flex-col gap-6 md:flex-row md:gap-8 mb-10">
                 <div className="w-40 h-52 md:w-52 md:h-68 shrink-0 rounded-2xl overflow-hidden border border-brand-border bg-brand-card">

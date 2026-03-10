@@ -1,9 +1,8 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale, getLocalizedField } from '@/lib/i18n';
 import { getBlogPosts } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { BlogPost, PaginatedResult } from '@/lib/types';
-
-export const dynamic = 'force-dynamic';
 
 const titles: Record<string, string> = {
     en: 'Blog', ru: 'Блог', de: 'Blog', fr: 'Blog',
@@ -34,7 +33,7 @@ export default async function BlogPage({
     try {
         result = await getBlogPosts(page, perPage);
     } catch (error) {
-        console.error('[BlogPage] DB error:', error);
+        logger.error('Blog page DB error', { page: 'blog', error: error instanceof Error ? error.message : String(error) });
     }
 
     const posts = result.data;

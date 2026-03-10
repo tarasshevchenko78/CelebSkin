@@ -1,4 +1,5 @@
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Video } from '@/lib/types';
 import AdminVideosTable from '@/components/admin/AdminVideosTable';
 
@@ -52,7 +53,7 @@ export default async function AdminVideosPage({
         videos = dataResult.rows;
         total = parseInt(countResult.rows[0].count);
     } catch (error) {
-        console.error('[AdminVideos] DB error:', error);
+        logger.error('Admin videos page DB error', { page: 'admin/videos', error: error instanceof Error ? error.message : String(error) });
     }
 
     const totalPages = Math.ceil(total / limit);

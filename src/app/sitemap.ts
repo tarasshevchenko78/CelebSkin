@@ -1,9 +1,11 @@
 import { MetadataRoute } from 'next';
 import { pool } from '@/lib/db';
+import { publicConfig } from '@/lib/config';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
-const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://celeb.skin';
+const SITE_URL = publicConfig.siteUrl;
 const LOCALES = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
 
 interface VideoSlugRow {
@@ -54,7 +56,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const staticEntries = getStaticEntries();
 
   try {
-    const [videosResult, celebritiesResult, moviesResult] = await Promise.all([
+    const [videosResult, celebritiesResult, moviesResult, blogResult] = await Promise.all([
       pool.query<VideoSlugRow>(
         `SELECT slug, updated_at FROM videos WHERE status = 'published' ORDER BY published_at DESC LIMIT 10000`
       ),
@@ -63,6 +65,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       ),
       pool.query<SimpleSlugRow>(
         `SELECT slug, updated_at FROM movies LIMIT 5000`
+      ),
+      pool.query<SimpleSlugRow>(
+        `SELECT slug, published_at AS updated_at FROM blog_posts WHERE is_published = true ORDER BY published_at DESC LIMIT 1000`
       ),
     ]);
 
@@ -105,14 +110,27 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         }))
     );
 
+    const blogEntries: MetadataRoute.Sitemap = blogResult.rows.flatMap(
+      (post) =>
+        LOCALES.map((locale) => ({
+          url: `${SITE_URL}/${locale}/blog/${post.slug}`,
+          lastModified: post.updated_at
+            ? new Date(post.updated_at)
+            : new Date(),
+          changeFrequency: 'monthly' as const,
+          priority: 0.5,
+        }))
+    );
+
     return [
       ...staticEntries,
       ...videoEntries,
       ...celebrityEntries,
       ...movieEntries,
+      ...blogEntries,
     ];
   } catch (error) {
-    console.error('Sitemap generation error:', error);
+    logger.error('Sitemap generation error', { error: error instanceof Error ? error.message : String(error) });
     return staticEntries;
   }
 }

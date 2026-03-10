@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,7 +33,7 @@ export async function GET(request: NextRequest) {
             limit,
         });
     } catch (error) {
-        console.error('[API AdminMovies] error:', error);
+        logger.error('Admin movies list failed', { route: '/api/admin/movies', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -57,7 +58,7 @@ export async function DELETE(request: NextRequest) {
 
         return NextResponse.json({ deleted: true, count: result.rowCount, ids: result.rows.map((r: { id: number }) => r.id) });
     } catch (error) {
-        console.error('[API AdminMovies DELETE] error:', error);
+        logger.error('Admin movies delete failed', { route: '/api/admin/movies', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

@@ -1,16 +1,18 @@
 import { NextResponse } from 'next/server';
+import { config } from '@/lib/config';
 
 export async function GET() {
     // Return non-sensitive settings only
     return NextResponse.json({
-        site_url: process.env.SITE_URL || 'https://celeb.skin',
-        node_env: process.env.NODE_ENV || 'development',
-        db_host: process.env.DB_HOST || '127.0.0.1',
-        db_name: process.env.DB_NAME || 'celebskin',
-        bunny_storage_zone: process.env.BUNNY_STORAGE_ZONE || null,
-        has_bunny_key: !!process.env.BUNNY_API_KEY,
-        has_gemini_key: !!process.env.GEMINI_API_KEY,
-        has_tmdb_key: !!process.env.TMDB_API_KEY,
-        has_admin_password: !!process.env.ADMIN_PASSWORD,
+        site_url: config.siteUrl,
+        node_env: config.nodeEnv,
+        db_host: config.db.host,
+        db_name: config.db.name,
+        bunny_storage_zone: config.bunny.storageZone,
+        cdn_url: config.bunny.cdnUrl,
+        has_bunny_key: !!config.bunny.storageKey,
+        has_gemini_key: !!config.geminiApiKey,
+        has_tmdb_key: !!config.tmdbApiKey,
+        has_admin_password: !!config.admin.password,
     });
 }

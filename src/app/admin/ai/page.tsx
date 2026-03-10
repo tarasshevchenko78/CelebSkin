@@ -1,4 +1,5 @@
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +61,7 @@ export default async function AdminAiPage() {
         celebStats = { total: parseInt(celebResult.rows[0].total), tmdbEnriched: parseInt(celebResult.rows[0].enriched) };
         movieStats = { total: parseInt(movieResult.rows[0].total), tmdbEnriched: parseInt(movieResult.rows[0].enriched) };
     } catch (error) {
-        console.error('[AdminAI] DB error:', error);
+        logger.error('Admin AI page DB error', { page: 'admin/ai', error: error instanceof Error ? error.message : String(error) });
     }
 
     return (

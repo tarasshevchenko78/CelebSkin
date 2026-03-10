@@ -31,6 +31,7 @@ import { mkdir, writeFile, access, readFile, stat } from 'fs/promises';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import axios from 'axios';
+import { config } from './lib/config.js';
 import BoobsRadarAdapter from './adapters/boobsradar-adapter.js';
 import logger from './lib/logger.js';
 import { insertRawVideo, query, log as dbLog } from './lib/db.js';
@@ -216,13 +217,13 @@ async function saveProgress(progress) {
 // ============================================
 
 async function enrichWithAI(metadata) {
-  const apiKey = process.env.GEMINI_API_KEY;
+  const apiKey = config.ai.geminiApiKey;
   if (!apiKey) {
     logger.warn('GEMINI_API_KEY не задан, AI-обогащение пропущено');
     return metadata;
   }
 
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+  const model = config.ai.geminiModel;
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
   const prompt = `Проанализируй метаданные видеоролика и верни JSON с полями:

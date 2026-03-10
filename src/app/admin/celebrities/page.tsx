@@ -1,4 +1,5 @@
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Celebrity } from '@/lib/types';
 import AdminCelebritiesTable from '@/components/admin/AdminCelebritiesTable';
 
@@ -34,7 +35,7 @@ export default async function AdminCelebritiesPage({
         celebrities = dataResult.rows;
         total = parseInt(countResult.rows[0].count);
     } catch (error) {
-        console.error('[AdminCelebrities] DB error:', error);
+        logger.error('Admin celebrities page DB error', { page: 'admin/celebrities', error: error instanceof Error ? error.message : String(error) });
     }
 
     const totalPages = Math.ceil(total / limit);

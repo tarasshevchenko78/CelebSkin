@@ -4,9 +4,6 @@
  * and reset them for re-processing through the pipeline
  */
 
-import dotenv from 'dotenv';
-dotenv.config();
-
 import BoobsRadarAdapter from './adapters/boobsradar-adapter.js';
 import { query } from './lib/db.js';
 

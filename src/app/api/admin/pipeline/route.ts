@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { pool } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -203,7 +204,7 @@ export async function GET() {
             })),
         });
     } catch (error) {
-        console.error('[Pipeline API] Error:', error);
+        logger.error('Pipeline stats fetch failed', { route: '/api/admin/pipeline', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Failed to fetch pipeline stats' }, { status: 500 });
     }
 }
@@ -265,7 +266,7 @@ export async function POST(request: NextRequest) {
             message: `${pipelineAction.label} started on Contabo`,
         });
     } catch (error) {
-        console.error('[Pipeline API] Error starting action:', error);
+        logger.error('Pipeline action start failed', { route: '/api/admin/pipeline', action: 'POST', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
             { error: `Failed to start pipeline: ${error instanceof Error ? error.message : 'Unknown error'}` },
             { status: 500 }
@@ -362,7 +363,7 @@ export async function DELETE(request: NextRequest) {
             message: 'All pipeline processes stopped',
         });
     } catch (error) {
-        console.error('[Pipeline API] Error stopping:', error);
+        logger.error('Pipeline stop failed', { route: '/api/admin/pipeline', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
             { error: `Failed to stop pipeline: ${error instanceof Error ? error.message : 'Unknown error'}` },
             { status: 500 }

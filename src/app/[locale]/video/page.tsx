@@ -1,10 +1,9 @@
 import type { Metadata } from 'next';
 import { SUPPORTED_LOCALES, type SupportedLocale } from '@/lib/i18n';
 import { getVideos } from '@/lib/db';
+import { logger } from '@/lib/logger';
 import type { Video, PaginatedResult } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
-
-export const dynamic = 'force-dynamic';
 
 const titles: Record<string, string> = {
     en: 'All Videos', ru: 'Все видео', de: 'Alle Videos', fr: 'Toutes les vidéos',
@@ -48,7 +47,7 @@ export default async function VideosPage({
     try {
         result = await getVideos(page, perPage, orderBy);
     } catch (error) {
-        console.error('[VideosPage] DB error:', error);
+        logger.error('Videos page DB error', { page: 'videos', error: error instanceof Error ? error.message : String(error) });
     }
 
     const videos = result.data;
