@@ -522,6 +522,11 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
     }
 
     writePidFile(process.pid);
+
+    // Clear stale progress from previous runs and init all step panels
+    clearAllProgress();
+    initSteps(stepsToRun.map(s => ({ name: s.name, label: s.label })));
+
     logger.info(`\n🎯 CONVEYOR MODE — up to ${MAX_PER_STEP} videos per step, concurrent steps, instant re-spawn on child exit`);
     logger.info(`PID: ${process.pid}`);
 
