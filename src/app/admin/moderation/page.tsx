@@ -111,7 +111,7 @@ function VideoModerationCard({
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                     <h3 className="text-sm font-medium text-white truncate">
-                        {getLocalizedField(video.title, 'en') || video.original_title || 'Untitled'}
+                        {getLocalizedField(video.title, 'en') || video.original_title || 'Без названия'}
                     </h3>
                     <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
                         <span className={`px-2 py-0.5 rounded-full ${
@@ -132,7 +132,7 @@ function VideoModerationCard({
                     </div>
                     {video.ai_confidence !== null && (
                         <div className="mt-2 flex items-center gap-2">
-                            <span className="text-xs text-gray-500">AI Confidence:</span>
+                            <span className="text-xs text-gray-500">Точность AI:</span>
                             <div className="w-24 h-1.5 bg-gray-800 rounded-full overflow-hidden">
                                 <div
                                     className={`h-full rounded-full ${
@@ -164,18 +164,18 @@ function VideoModerationCard({
                     {/* Movie suggestions */}
                     {gemini.movie_title && (
                         <div>
-                            <h4 className="text-xs font-medium text-gray-400 mb-1.5">Movie/Show suggestions:</h4>
+                            <h4 className="text-xs font-medium text-gray-400 mb-1.5">Предложения фильмов/шоу:</h4>
                             <div className="space-y-1">
                                 <div className="flex items-center gap-2 text-sm">
                                     <ConfidenceBadge confidence={gemini.movie_confidence} />
                                     <span className="text-white">{gemini.movie_title}</span>
                                     {gemini.movie_year && <span className="text-gray-500">({gemini.movie_year})</span>}
-                                    {rd.movie?.tmdb_id && <span className="text-xs text-green-500">TMDB verified</span>}
+                                    {rd.movie?.tmdb_id && <span className="text-xs text-green-500">Подтверждено TMDB</span>}
                                     <button
                                         onClick={() => onApprove(video.id, gemini.movie_title!, rd.actors?.[0]?.name || undefined)}
                                         className="ml-auto px-2 py-0.5 text-xs rounded bg-green-900/50 text-green-400 border border-green-800 hover:bg-green-900"
                                     >
-                                        Approve
+                                        Одобрить
                                     </button>
                                 </div>
                                 {gemini.movie_title_alternatives?.map((alt, i) => (
@@ -185,7 +185,7 @@ function VideoModerationCard({
                                             onClick={() => onApprove(video.id, alt, rd.actors?.[0]?.name || undefined)}
                                             className="ml-auto px-2 py-0.5 text-xs rounded bg-gray-800 text-gray-400 hover:bg-gray-700"
                                         >
-                                            Use this
+                                            Выбрать
                                         </button>
                                     </div>
                                 ))}
@@ -196,7 +196,7 @@ function VideoModerationCard({
                     {/* Actor suggestions */}
                     {gemini.actors && gemini.actors.length > 0 && (
                         <div>
-                            <h4 className="text-xs font-medium text-gray-400 mb-1.5">Possible actors:</h4>
+                            <h4 className="text-xs font-medium text-gray-400 mb-1.5">Возможные актрисы:</h4>
                             <div className="space-y-1">
                                 {gemini.actors.map((actor, i) => (
                                     <div key={i} className="flex items-center gap-2 text-sm">
@@ -207,14 +207,14 @@ function VideoModerationCard({
                                             <span className="text-gray-400 italic">{actor.description}</span>
                                         )}
                                         {rd.actors?.[i]?.tmdb_id && (
-                                            <span className="text-xs text-green-500">TMDB verified</span>
+                                            <span className="text-xs text-green-500">Подтверждено TMDB</span>
                                         )}
                                         {actor.name && (
                                             <button
                                                 onClick={() => onApprove(video.id, gemini.movie_title || undefined, actor.name!)}
                                                 className="ml-auto px-2 py-0.5 text-xs rounded bg-green-900/50 text-green-400 border border-green-800 hover:bg-green-900"
                                             >
-                                                Approve
+                                                Одобрить
                                             </button>
                                         )}
                                     </div>
@@ -226,7 +226,7 @@ function VideoModerationCard({
                     {/* Suggested cast from TMDB */}
                     {rd.suggested_cast && rd.suggested_cast.length > 0 && (
                         <div>
-                            <h4 className="text-xs font-medium text-gray-400 mb-1.5">TMDB cast (pick one):</h4>
+                            <h4 className="text-xs font-medium text-gray-400 mb-1.5">Актёрский состав TMDB (выберите):</h4>
                             <div className="flex gap-2 flex-wrap">
                                 {rd.suggested_cast.map((cast, i) => (
                                     <button
@@ -241,7 +241,7 @@ function VideoModerationCard({
                                             />
                                         )}
                                         <span>{cast.name}</span>
-                                        <span className="text-gray-500">as {cast.character}</span>
+                                        <span className="text-gray-500">в роли {cast.character}</span>
                                     </button>
                                 ))}
                             </div>
@@ -251,7 +251,7 @@ function VideoModerationCard({
                     {/* Visible text (OCR) */}
                     {gemini.visible_text && gemini.visible_text.length > 0 && (
                         <div className="text-xs text-gray-500">
-                            Visible text: {gemini.visible_text.map((t, i) => (
+                            Видимый текст: {gemini.visible_text.map((t, i) => (
                                 <span key={i} className="bg-gray-800 px-1.5 py-0.5 rounded mr-1">{t}</span>
                             ))}
                         </div>
@@ -270,13 +270,13 @@ function VideoModerationCard({
                     <input
                         value={manualMovie}
                         onChange={(e) => setManualMovie(e.target.value)}
-                        placeholder="Movie title..."
+                        placeholder="Название фильма..."
                         className="w-full px-3 py-1.5 text-sm rounded bg-gray-800 text-white border border-gray-700 focus:border-blue-600 outline-none"
                     />
                     <input
                         value={manualActor}
                         onChange={(e) => setManualActor(e.target.value)}
-                        placeholder="Actor name..."
+                        placeholder="Имя актрисы..."
                         className="w-full px-3 py-1.5 text-sm rounded bg-gray-800 text-white border border-gray-700 focus:border-blue-600 outline-none"
                     />
                     <div className="flex gap-2">
@@ -284,13 +284,13 @@ function VideoModerationCard({
                             onClick={() => { onApprove(video.id, manualMovie || undefined, manualActor || undefined); setManualMode(false); }}
                             className="px-3 py-1.5 text-xs rounded bg-green-900/50 text-green-400 border border-green-800 hover:bg-green-900"
                         >
-                            Save
+                            Сохранить
                         </button>
                         <button
                             onClick={() => setManualMode(false)}
                             className="px-3 py-1.5 text-xs rounded bg-gray-800 text-gray-400 hover:bg-gray-700"
                         >
-                            Cancel
+                            Отмена
                         </button>
                     </div>
                 </div>
@@ -303,26 +303,26 @@ function VideoModerationCard({
                         onClick={() => setManualMode(true)}
                         className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700"
                     >
-                        Manual Entry
+                        Ручной ввод
                     </button>
                 )}
                 <button
                     onClick={() => onReanalyze(video.id)}
                     className="px-3 py-1.5 text-xs rounded-lg bg-blue-900/50 text-blue-400 border border-blue-800 hover:bg-blue-900"
                 >
-                    Re-analyze
+                    Переанализировать
                 </button>
                 <button
                     onClick={() => onApprove(video.id)}
                     className="px-3 py-1.5 text-xs rounded-lg bg-green-900/50 text-green-400 border border-green-800 hover:bg-green-900"
                 >
-                    Approve as-is
+                    Одобрить как есть
                 </button>
                 <button
                     onClick={() => onReject(video.id)}
                     className="px-3 py-1.5 text-xs rounded-lg bg-red-900/50 text-red-400 border border-red-800 hover:bg-red-900"
                 >
-                    Reject
+                    Отклонить
                 </button>
             </div>
         </div>
@@ -401,23 +401,22 @@ export default function AdminModerationPage() {
     return (
         <div>
             <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold text-white">Moderation Queue ({total})</h1>
+                <h1 className="text-2xl font-bold text-white">Очередь модерации ({total})</h1>
                 <button
                     onClick={fetchVideos}
                     className="px-3 py-1.5 text-sm rounded-lg bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700"
                 >
-                    Refresh
-                </button>
+                    Обновить                </button>
             </div>
 
             {loading ? (
-                <div className="text-center py-12 text-gray-500">Loading...</div>
+                <div className="text-center py-12 text-gray-500">Загрузка...</div>
             ) : total === 0 ? (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-12 text-center">
                     <svg className="w-12 h-12 text-green-500 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                     </svg>
-                    <p className="text-gray-400">All caught up! No videos pending review.</p>
+                    <p className="text-gray-400">Всё проверено! Нет видео на модерации.</p>
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -438,14 +437,14 @@ export default function AdminModerationPage() {
                     {page > 1 && (
                         <button onClick={() => setPage(page - 1)}
                                 className="px-3 py-1.5 text-sm rounded bg-gray-800 text-gray-400 hover:bg-gray-700">
-                            Prev
+                            Назад
                         </button>
                     )}
-                    <span className="text-sm text-gray-500">Page {page} / {totalPages}</span>
+                    <span className="text-sm text-gray-500">Стр. {page} / {totalPages}</span>
                     {page < totalPages && (
                         <button onClick={() => setPage(page + 1)}
                                 className="px-3 py-1.5 text-sm rounded bg-gray-800 text-gray-400 hover:bg-gray-700">
-                            Next
+                            Далее
                         </button>
                     )}
                 </div>

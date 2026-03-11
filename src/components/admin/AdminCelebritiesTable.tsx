@@ -12,7 +12,7 @@ export default function AdminCelebritiesTable({ celebrities }: { celebrities: Ce
         useRowSelection<number>(celebrities.map(c => c.id));
 
     const bulkDelete = async () => {
-        if (!confirm(`Delete ${selectedCount} celebrity(ies) permanently? This cannot be undone.`)) return;
+        if (!confirm(`Удалить ${selectedCount} актрис(у) безвозвратно? Это действие нельзя отменить.`)) return;
         setDeleting(true);
         try {
             const res = await fetch('/api/admin/celebrities', {
@@ -45,12 +45,13 @@ export default function AdminCelebritiesTable({ celebrities }: { celebrities: Ce
                                     className="rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
                                 />
                             </th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Photo</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Name</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Videos</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Movies</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Views</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Featured</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Фото</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Имя</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Статус</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Видео</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Фильмы</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Просмотры</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">В подборке</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
@@ -79,12 +80,19 @@ export default function AdminCelebritiesTable({ celebrities }: { celebrities: Ce
                                         {celeb.name}
                                     </a>
                                 </td>
+                                <td className="p-3">
+                                    {celeb.status === 'draft' ? (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">draft</span>
+                                    ) : (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/50 text-green-400">published</span>
+                                    )}
+                                </td>
                                 <td className="p-3 text-gray-400">{celeb.videos_count}</td>
                                 <td className="p-3 text-gray-400">{celeb.movies_count}</td>
                                 <td className="p-3 text-gray-400">{celeb.total_views.toLocaleString()}</td>
                                 <td className="p-3">
                                     {celeb.is_featured ? (
-                                        <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-900/50 text-yellow-400">Featured</span>
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-yellow-900/50 text-yellow-400">В подборке</span>
                                     ) : (
                                         <span className="text-xs text-gray-600">{'\u2014'}</span>
                                     )}
@@ -93,8 +101,8 @@ export default function AdminCelebritiesTable({ celebrities }: { celebrities: Ce
                         ))}
                         {celebrities.length === 0 && (
                             <tr>
-                                <td colSpan={7} className="p-8 text-center text-gray-500">
-                                    No celebrities found
+                                <td colSpan={8} className="p-8 text-center text-gray-500">
+                                    Актрисы не найдены
                                 </td>
                             </tr>
                         )}
@@ -105,20 +113,20 @@ export default function AdminCelebritiesTable({ celebrities }: { celebrities: Ce
             {/* Bulk action bar */}
             {selectedCount > 0 && (
                 <div className="sticky bottom-0 mt-3 flex items-center justify-between rounded-xl border border-gray-700 bg-gray-900/95 backdrop-blur px-4 py-3">
-                    <span className="text-sm text-gray-300">{selectedCount} selected</span>
+                    <span className="text-sm text-gray-300">{selectedCount} выбрано</span>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={clear}
                             className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"
                         >
-                            Deselect All
+                            Снять выделение
                         </button>
                         <button
                             onClick={bulkDelete}
                             disabled={deleting}
                             className="px-4 py-1.5 text-xs rounded-lg bg-red-700 text-white font-medium hover:bg-red-600 disabled:opacity-50 transition-colors"
                         >
-                            {deleting ? 'Deleting...' : `Delete Selected (${selectedCount})`}
+                            {deleting ? 'Удаление...' : `Удалить (${selectedCount})`}
                         </button>
                     </div>
                 </div>

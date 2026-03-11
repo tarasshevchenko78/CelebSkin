@@ -1,16 +1,27 @@
 import type { Metadata } from 'next';
 import '../globals.css';
+import { pool } from '@/lib/db';
 
 export const metadata: Metadata = {
     title: 'Admin — CelebSkin',
     robots: { index: false, follow: false },
 };
 
-export default function AdminLayout({
+export default async function AdminLayout({
     children,
 }: {
     children: React.ReactNode;
 }) {
+    let xcadrPendingCount = 0;
+    try {
+        const res = await pool.query<{ count: number }>(
+            `SELECT COUNT(*)::int AS count FROM xcadr_imports WHERE status IN ('matched', 'parsed', 'translated')`
+        );
+        xcadrPendingCount = res.rows[0]?.count ?? 0;
+    } catch {
+        // table may not exist yet in all environments — safe to ignore
+    }
+
     return (
         <html lang="en" className="dark">
             <body className="min-h-screen bg-gray-950 text-gray-100 antialiased">
@@ -21,28 +32,36 @@ export default function AdminLayout({
                         </div>
                         <nav className="flex flex-col gap-1">
                             <a href="/admin" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                Dashboard
+                                Дашборд
                             </a>
                             <a href="/admin/videos" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                Videos
+                                Видео
                             </a>
                             <a href="/admin/celebrities" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                Celebrities
+                                Актрисы
                             </a>
                             <a href="/admin/movies" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                Movies
+                                Фильмы
                             </a>
                             <a href="/admin/moderation" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                Moderation
+                                Модерация
                             </a>
                             <a href="/admin/scraper" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                🔄 Pipeline
+                                🔄 Пайплайн
                             </a>
                             <a href="/admin/ai" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                AI Pipeline
+                                AI Пайплайн
+                            </a>
+                            <a href="/admin/xcadr" className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                                <span>Импорт xcadr</span>
+                                {xcadrPendingCount > 0 && (
+                                    <span className="rounded-full bg-red-600/80 px-1.5 py-0.5 text-[10px] font-bold text-white leading-none">
+                                        {xcadrPendingCount}
+                                    </span>
+                                )}
                             </a>
                             <a href="/admin/settings" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
-                                Settings
+                                Настройки
                             </a>
                         </nav>
                     </aside>

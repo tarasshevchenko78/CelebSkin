@@ -13,12 +13,12 @@ function formatNumber(n: number): string {
 function timeAgo(dateStr: string): string {
     const diff = Date.now() - new Date(dateStr).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
+    if (mins < 1) return 'только что';
+    if (mins < 60) return `${mins} мин. назад`;
     const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
+    if (hours < 24) return `${hours} ч. назад`;
     const days = Math.floor(hours / 24);
-    return `${days}d ago`;
+    return `${days} д. назад`;
 }
 
 const STATUS_COLORS: Record<string, { border: string; text: string }> = {
@@ -75,33 +75,33 @@ export default async function AdminDashboard() {
     return (
         <div>
             <div className="flex items-center justify-between mb-8">
-                <h1 className="text-3xl font-bold text-white">Dashboard</h1>
+                <h1 className="text-3xl font-bold text-white">Дашборд</h1>
                 {/* Quick Actions */}
                 <div className="flex gap-2">
                     <a
                         href="/admin/scraper"
                         className="px-4 py-2 text-xs font-medium rounded-lg bg-green-900/50 text-green-400 border border-green-800 hover:bg-green-800/50 transition-colors"
                     >
-                        Run Pipeline
+                        Запустить пайплайн
                     </a>
                     <a
                         href="/admin/test-video"
                         className="px-4 py-2 text-xs font-medium rounded-lg bg-blue-900/50 text-blue-400 border border-blue-800 hover:bg-blue-800/50 transition-colors"
                     >
-                        Check Health
+                        Проверить здоровье
                     </a>
                     <a
                         href="#dead-letter"
                         className="px-4 py-2 text-xs font-medium rounded-lg bg-gray-800 text-gray-400 border border-gray-700 hover:bg-gray-700 transition-colors"
                     >
-                        View Stuck
+                        Зависшие
                     </a>
                 </div>
             </div>
 
             {/* Pipeline Health — Status Breakdown */}
             <section className="mb-8">
-                <h2 className="text-lg font-semibold text-white mb-4">Pipeline Health</h2>
+                <h2 className="text-lg font-semibold text-white mb-4">Здоровье пайплайна</h2>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                     {extended.statusBreakdown.map((s) => {
                         const colors = STATUS_COLORS[s.status] || { border: 'border-l-gray-600', text: 'text-gray-400' };
@@ -117,7 +117,7 @@ export default async function AdminDashboard() {
                     })}
                     {/* Broken media card */}
                     <div className={`rounded-lg border bg-gray-900/50 p-4 border-l-4 ${extended.brokenMediaCount > 0 ? 'border-red-500 border-gray-800' : 'border-l-green-500 border-gray-800'}`}>
-                        <p className="text-xs text-gray-500">Broken Media</p>
+                        <p className="text-xs text-gray-500">Битые медиа</p>
                         <p className={`text-2xl font-bold mt-1 ${extended.brokenMediaCount > 0 ? 'text-red-400' : 'text-green-400'}`}>
                             {extended.brokenMediaCount}
                         </p>
@@ -129,33 +129,33 @@ export default async function AdminDashboard() {
             <section className="mb-8">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Total Videos</p>
+                        <p className="text-sm text-gray-400">Всего видео</p>
                         <p className="mt-2 text-3xl font-bold text-white">{formatNumber(stats.totalVideos)}</p>
                     </div>
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Celebrities</p>
+                        <p className="text-sm text-gray-400">Актрисы</p>
                         <p className="mt-2 text-3xl font-bold text-purple-400">{formatNumber(stats.totalCelebrities)}</p>
                     </div>
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Total Views</p>
+                        <p className="text-sm text-gray-400">Всего просмотров</p>
                         <p className="mt-2 text-3xl font-bold text-blue-400">{formatNumber(stats.totalViews)}</p>
                     </div>
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Movies</p>
+                        <p className="text-sm text-gray-400">Фильмы</p>
                         <p className="mt-2 text-3xl font-bold text-orange-400">{formatNumber(stats.totalMovies)}</p>
                     </div>
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Published</p>
+                        <p className="text-sm text-gray-400">Опубликовано</p>
                         <p className="mt-2 text-2xl font-bold text-green-400">{formatNumber(stats.publishedVideos)}</p>
                     </div>
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Pending Review</p>
+                        <p className="text-sm text-gray-400">На проверке</p>
                         <p className="mt-2 text-2xl font-bold text-yellow-400">{formatNumber(stats.pendingVideos)}</p>
                     </div>
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-6">
-                        <p className="text-sm text-gray-400">Blog Posts</p>
+                        <p className="text-sm text-gray-400">Блог-посты</p>
                         <p className="mt-2 text-2xl font-bold text-cyan-400">{formatNumber(stats.totalBlogPosts)}</p>
                     </div>
                 </div>
@@ -163,26 +163,26 @@ export default async function AdminDashboard() {
 
             {/* Dead Letter Queue */}
             <section id="dead-letter" className="mb-8">
-                <h2 className="text-lg font-semibold text-white mb-4">Dead Letter Queue</h2>
+                <h2 className="text-lg font-semibold text-white mb-4">Очередь ошибок</h2>
                 {stuckCount > 0 ? (
                     <div className="rounded-xl border border-red-800 bg-red-950/30 p-4">
                         <div className="flex items-center gap-3 mb-4">
                             <div className="h-3 w-3 rounded-full bg-red-500 animate-pulse" />
-                            <p className="text-red-400 font-semibold">{stuckCount} video{stuckCount > 1 ? 's' : ''} stuck in pipeline</p>
+                            <p className="text-red-400 font-semibold">{stuckCount} видео зависло в пайплайне</p>
                         </div>
                         <details>
                             <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-300 transition-colors">
-                                Show details
+                                Показать детали
                             </summary>
                             <div className="mt-3 overflow-x-auto">
                                 <table className="w-full text-sm">
                                     <thead>
                                         <tr className="text-left text-gray-500 border-b border-gray-800">
-                                            <th className="pb-2 pr-4">Video ID</th>
-                                            <th className="pb-2 pr-4">Step</th>
-                                            <th className="pb-2 pr-4">Error</th>
-                                            <th className="pb-2 pr-4">Attempts</th>
-                                            <th className="pb-2">When</th>
+                                            <th className="pb-2 pr-4">ID видео</th>
+                                            <th className="pb-2 pr-4">Шаг</th>
+                                            <th className="pb-2 pr-4">Ошибка</th>
+                                            <th className="pb-2 pr-4">Попытки</th>
+                                            <th className="pb-2">Когда</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-800">
@@ -203,7 +203,7 @@ export default async function AdminDashboard() {
                 ) : (
                     <div className="rounded-xl border border-green-800/50 bg-green-950/20 p-4 flex items-center gap-3">
                         <div className="h-3 w-3 rounded-full bg-green-500" />
-                        <p className="text-green-400 text-sm">No stuck videos — pipeline is healthy</p>
+                        <p className="text-green-400 text-sm">Зависших видео нет — пайплайн работает нормально</p>
                     </div>
                 )}
             </section>
@@ -211,17 +211,17 @@ export default async function AdminDashboard() {
             {/* Recent Activity */}
             {extended.recentLogs.length > 0 && (
                 <section className="mb-8">
-                    <h2 className="text-lg font-semibold text-white mb-4">Recent Activity</h2>
+                    <h2 className="text-lg font-semibold text-white mb-4">Последняя активность</h2>
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 overflow-hidden">
                         <div className="overflow-x-auto">
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="text-left text-gray-500 border-b border-gray-800">
-                                        <th className="p-3">Time</th>
-                                        <th className="p-3">Step</th>
-                                        <th className="p-3">Status</th>
-                                        <th className="p-3">Message</th>
-                                        <th className="p-3">Duration</th>
+                                        <th className="p-3">Время</th>
+                                        <th className="p-3">Шаг</th>
+                                        <th className="p-3">Статус</th>
+                                        <th className="p-3">Сообщение</th>
+                                        <th className="p-3">Длительность</th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-800/50">

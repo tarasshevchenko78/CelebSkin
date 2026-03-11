@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import LocalizedTabs from '@/components/admin/LocalizedTabs';
+import ReEnrichButton from '@/components/admin/ReEnrichButton';
 import { getLocalizedField } from '@/lib/i18n';
 import type { LocalizedField } from '@/lib/types';
 
@@ -78,7 +79,7 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
             setStudio(data.movie.studio || '');
             setDirector(data.movie.director || '');
         } catch {
-            setMessage({ type: 'error', text: 'Failed to load movie' });
+            setMessage({ type: 'error', text: 'Ошибка загрузки фильма' });
         } finally {
             setLoading(false);
         }
@@ -102,9 +103,9 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                 }),
             });
             if (!res.ok) throw new Error('Save failed');
-            setMessage({ type: 'success', text: 'Saved!' });
+            setMessage({ type: 'success', text: 'Сохранено!' });
         } catch {
-            setMessage({ type: 'error', text: 'Save failed' });
+            setMessage({ type: 'error', text: 'Ошибка сохранения' });
         } finally {
             setSaving(false);
         }
@@ -115,14 +116,17 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
     }
 
     if (!movie) {
-        return <div className="py-20 text-center"><p className="text-gray-400">Movie not found</p><a href="/admin/movies" className="text-purple-400 hover:underline text-sm">Back</a></div>;
+        return <div className="py-20 text-center"><p className="text-gray-400">Фильм не найден</p><a href="/admin/movies" className="text-purple-400 hover:underline text-sm">Назад</a></div>;
     }
 
     return (
         <div className="max-w-5xl space-y-6">
-            <div className="flex items-center gap-3">
-                <a href="/admin/movies" className="text-gray-400 hover:text-white text-sm">← Movies</a>
-                <h1 className="text-xl font-bold text-white">{movie.title} {movie.year && <span className="text-gray-400">({movie.year})</span>}</h1>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <a href="/admin/movies" className="text-gray-400 hover:text-white text-sm">← Фильмы</a>
+                    <h1 className="text-xl font-bold text-white">{movie.title} {movie.year && <span className="text-gray-400">({movie.year})</span>}</h1>
+                </div>
+                <ReEnrichButton type="movie" id={movie.id} />
             </div>
 
             {message && (
@@ -138,15 +142,15 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                         <img src={posterUrl} alt="" className="w-full aspect-[2/3] rounded-lg object-cover border border-gray-700"
                             onError={() => setPosterImgError(true)} />
                     ) : (
-                        <div className="w-full aspect-[2/3] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 border border-gray-700">No poster</div>
+                        <div className="w-full aspect-[2/3] rounded-lg bg-gray-800 flex items-center justify-center text-gray-600 border border-gray-700">Нет постера</div>
                     )}
                     <input value={posterUrl} onChange={(e) => setPosterUrl(e.target.value)}
-                        placeholder="Poster URL..."
+                        placeholder="URL постера..."
                         className="w-full text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-gray-200" />
                     <label className={`block w-full text-center text-xs px-2 py-1.5 rounded cursor-pointer transition-colors ${
                         uploading ? 'bg-gray-700 text-gray-500' : 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-800/50'
                     }`}>
-                        {uploading ? 'Uploading...' : 'Upload Poster'}
+                        {uploading ? 'Загрузка...' : 'Загрузить постер'}
                         <input type="file" accept="image/*" className="hidden" disabled={uploading}
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
@@ -164,12 +168,12 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                                     if (res.ok) {
                                         setPosterUrl(data.url);
                                         setPosterImgError(false);
-                                        setMessage({ type: 'success', text: `Poster uploaded: ${data.url}` });
+                                        setMessage({ type: 'success', text: `Постер загружен: ${data.url}` });
                                     } else {
                                         setMessage({ type: 'error', text: data.error });
                                     }
                                 } catch (err) {
-                                    setMessage({ type: 'error', text: `Upload failed: ${err}` });
+                                    setMessage({ type: 'error', text: `Ошибка загрузки: ${err}` });
                                 } finally {
                                     setUploading(false);
                                     e.target.value = '';
@@ -180,36 +184,36 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
 
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">
                     <div>
-                        <label className="text-xs text-gray-500 block mb-1">Title</label>
+                        <label className="text-xs text-gray-500 block mb-1">Название</label>
                         <input value={title} onChange={(e) => setTitle(e.target.value)}
                             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500" />
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                         <div>
-                            <label className="text-xs text-gray-500 block mb-1">Year</label>
+                            <label className="text-xs text-gray-500 block mb-1">Год</label>
                             <input value={year} onChange={(e) => setYear(e.target.value)} type="number"
                                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500" />
                         </div>
                         <div>
-                            <label className="text-xs text-gray-500 block mb-1">Studio</label>
+                            <label className="text-xs text-gray-500 block mb-1">Студия</label>
                             <input value={studio} onChange={(e) => setStudio(e.target.value)}
                                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500" />
                         </div>
                     </div>
                     <div>
-                        <label className="text-xs text-gray-500 block mb-1">Director</label>
+                        <label className="text-xs text-gray-500 block mb-1">Режиссёр</label>
                         <input value={director} onChange={(e) => setDirector(e.target.value)}
                             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500" />
                     </div>
                     <div className="grid grid-cols-2 gap-3 text-xs">
                         <div><span className="text-gray-500">TMDB ID</span><span className="block text-gray-300">{movie.tmdb_id || '—'}</span></div>
                         <div><span className="text-gray-500">IMDb ID</span><span className="block text-gray-300">{movie.imdb_id || '—'}</span></div>
-                        <div><span className="text-gray-500">Scenes</span><span className="block text-gray-300">{movie.scenes_count}</span></div>
-                        <div><span className="text-gray-500">Views</span><span className="block text-gray-300">{movie.total_views.toLocaleString()}</span></div>
+                        <div><span className="text-gray-500">Сцены</span><span className="block text-gray-300">{movie.scenes_count}</span></div>
+                        <div><span className="text-gray-500">Просмотры</span><span className="block text-gray-300">{movie.total_views.toLocaleString()}</span></div>
                     </div>
                     {movie.genres && movie.genres.length > 0 && (
                         <div>
-                            <span className="text-xs text-gray-500">Genres</span>
+                            <span className="text-xs text-gray-500">Жанры</span>
                             <div className="flex flex-wrap gap-1 mt-1">
                                 {movie.genres.map((g) => (
                                     <span key={g} className="text-[10px] px-2 py-0.5 rounded-full bg-gray-800 text-gray-400">{g}</span>
@@ -220,13 +224,13 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                 </div>
             </div>
 
-            <LocalizedTabs label="Title Localized" value={titleLocalized} onChange={setTitleLocalized} />
-            <LocalizedTabs label="Description" value={description} onChange={setDescription} multiline />
+            <LocalizedTabs label="Название (локализованное)" value={titleLocalized} onChange={setTitleLocalized} />
+            <LocalizedTabs label="Описание" value={description} onChange={setDescription} multiline />
 
             {/* Scenes */}
             {scenes.length > 0 && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Scenes ({scenes.length})</h3>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Сцены ({scenes.length})</h3>
                     <div className="space-y-2">
                         {scenes.map((s) => (
                             <a key={s.id} href={`/admin/videos/${s.id}`}
@@ -241,12 +245,12 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs text-gray-200 truncate">{getLocalizedField(s.title, 'en') || 'Untitled'}</p>
+                                    <p className="text-xs text-gray-200 truncate">{getLocalizedField(s.title, 'en') || 'Без названия'}</p>
                                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                                         s.status === 'published' ? 'bg-green-900/50 text-green-400' : 'bg-gray-800 text-gray-500'
                                     }`}>{s.status}</span>
                                 </div>
-                                <span className="text-xs text-gray-500 shrink-0">{s.views_count.toLocaleString()} views</span>
+                                <span className="text-xs text-gray-500 shrink-0">{s.views_count.toLocaleString()} просмотров</span>
                             </a>
                         ))}
                     </div>
@@ -256,7 +260,7 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
             {/* Cast */}
             {cast.length > 0 && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Cast ({cast.length})</h3>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Актёры ({cast.length})</h3>
                     <div className="flex flex-wrap gap-2">
                         {cast.map((c) => (
                             <a key={c.id} href={`/admin/celebrities/${c.id}`}
@@ -268,7 +272,7 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
                                     <div className="w-6 h-6 rounded-full bg-gray-700 flex items-center justify-center text-[10px] text-gray-400">{c.name.charAt(0)}</div>
                                 )}
                                 <span className="text-xs text-gray-200">{c.name}</span>
-                                {c.role && <span className="text-[10px] text-gray-500">as {c.role}</span>}
+                                {c.role && <span className="text-[10px] text-gray-500">в роли {c.role}</span>}
                             </a>
                         ))}
                     </div>
@@ -279,7 +283,7 @@ export default function AdminMovieDetailPage({ params }: { params: { id: string 
             <div className="sticky bottom-4 flex justify-end">
                 <button onClick={save} disabled={saving}
                     className="px-6 py-2.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-500 disabled:opacity-50 shadow-lg shadow-purple-900/50">
-                    {saving ? 'Saving...' : 'Save Changes'}
+                    {saving ? 'Сохранение...' : 'Сохранить изменения'}
                 </button>
             </div>
         </div>

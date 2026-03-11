@@ -38,7 +38,7 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
         useRowSelection<string>(videos.map(v => v.id));
 
     const bulkDelete = async () => {
-        if (!confirm(`Delete ${selectedCount} video(s) permanently? This cannot be undone.`)) return;
+        if (!confirm(`Удалить ${selectedCount} видео безвозвратно? Это действие нельзя отменить.`)) return;
         setDeleting(true);
         try {
             const res = await fetch('/api/admin/videos', {
@@ -71,14 +71,14 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                                     className="rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
                                 />
                             </th>
-                            <th className="text-left p-3 text-gray-400 font-medium w-16">Thumb</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Title</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Celebrity</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Movie</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Status</th>
+                            <th className="text-left p-3 text-gray-400 font-medium w-16">Превью</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Название</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Актриса</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Фильм</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Статус</th>
                             <th className="text-left p-3 text-gray-400 font-medium">AI</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Views</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Created</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Просмотры</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Создано</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
@@ -145,7 +145,7 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                         {videos.length === 0 && (
                             <tr>
                                 <td colSpan={9} className="p-8 text-center text-gray-500">
-                                    No videos found
+                                    Видео не найдены
                                 </td>
                             </tr>
                         )}
@@ -156,20 +156,20 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
             {/* Bulk action bar */}
             {selectedCount > 0 && (
                 <div className="sticky bottom-0 mt-3 flex items-center justify-between rounded-xl border border-gray-700 bg-gray-900/95 backdrop-blur px-4 py-3">
-                    <span className="text-sm text-gray-300">{selectedCount} selected</span>
+                    <span className="text-sm text-gray-300">{selectedCount} выбрано</span>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={clear}
                             className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"
                         >
-                            Deselect All
+                            Снять выделение
                         </button>
                         <button
                             onClick={bulkDelete}
                             disabled={deleting}
                             className="px-4 py-1.5 text-xs rounded-lg bg-red-700 text-white font-medium hover:bg-red-600 disabled:opacity-50 transition-colors"
                         >
-                            {deleting ? 'Deleting...' : `Delete Selected (${selectedCount})`}
+                            {deleting ? 'Удаление...' : `Удалить (${selectedCount})`}
                         </button>
                     </div>
                 </div>

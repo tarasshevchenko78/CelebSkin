@@ -64,7 +64,12 @@ export async function PUT(
 
     try {
         const body = await request.json();
-        const { title, title_localized, year, poster_url, studio, director, description, genres } = body;
+        const { title, title_localized, year, poster_url, studio, director, description, genres, status } = body;
+
+        const ALLOWED_STATUSES = ['draft', 'published'];
+        if (status !== undefined && !ALLOWED_STATUSES.includes(status)) {
+            return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
+        }
 
         const updates: string[] = [];
         const values: unknown[] = [];
@@ -85,6 +90,7 @@ export async function PUT(
         addField('director', director);
         addField('description', description);
         addField('genres', genres);
+        addField('status', status);
 
         if (updates.length === 0) {
             return NextResponse.json({ error: 'No fields to update' }, { status: 400 });

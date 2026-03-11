@@ -137,6 +137,24 @@ export async function PUT(
             }
         }
 
+        // Auto-promote celebrities and movies to published when video is published
+        if (status === 'published') {
+            await Promise.all([
+                pool.query(
+                    `UPDATE celebrities SET status = 'published'
+                     WHERE status = 'draft'
+                       AND id IN (SELECT celebrity_id FROM video_celebrities WHERE video_id = $1)`,
+                    [id]
+                ),
+                pool.query(
+                    `UPDATE movies SET status = 'published'
+                     WHERE status = 'draft'
+                       AND id IN (SELECT movie_id FROM movie_scenes WHERE video_id = $1)`,
+                    [id]
+                ),
+            ]);
+        }
+
         // Invalidate caches
         if (status === 'published') {
             await invalidateAfterPublish();
@@ -163,6 +181,15 @@ export async function DELETE(
     const { id } = params;
 
     try {
+        // Cascade delete FK-dependent rows first
+        await Promise.all([
+            pool.query('DELETE FROM video_tags WHERE video_id = $1', [id]),
+            pool.query('DELETE FROM video_celebrities WHERE video_id = $1', [id]),
+            pool.query('DELETE FROM movie_scenes WHERE video_id = $1', [id]),
+            pool.query('DELETE FROM collection_videos WHERE video_id = $1', [id]),
+            pool.query('UPDATE xcadr_imports SET matched_video_id = NULL WHERE matched_video_id = $1', [id]),
+        ]);
+
         const result = await pool.query(
             `DELETE FROM videos WHERE id = $1 RETURNING id`,
             [id]

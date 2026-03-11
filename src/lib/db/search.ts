@@ -32,21 +32,22 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
        LIMIT $2`,
             [searchTerm, limit]
         ),
-        // Search celebrities
+        // Search celebrities (published only)
         pool.query(
             `SELECT c.*, similarity(c.name, $1) AS sim
        FROM celebrities c
-       WHERE similarity(c.name, $1) > 0.2
-          OR $1 = ANY(c.aliases)
+       WHERE c.status = 'published'
+         AND (similarity(c.name, $1) > 0.2 OR $1 = ANY(c.aliases))
        ORDER BY sim DESC
        LIMIT $2`,
             [searchTerm, limit]
         ),
-        // Search movies
+        // Search movies (published only)
         pool.query(
             `SELECT m.*, similarity(m.title, $1) AS sim
        FROM movies m
-       WHERE similarity(m.title, $1) > 0.2
+       WHERE m.status = 'published'
+         AND similarity(m.title, $1) > 0.2
        ORDER BY sim DESC
        LIMIT $2`,
             [searchTerm, limit]

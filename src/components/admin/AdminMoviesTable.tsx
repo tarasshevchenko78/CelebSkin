@@ -12,7 +12,7 @@ export default function AdminMoviesTable({ movies }: { movies: Movie[] }) {
         useRowSelection<number>(movies.map(m => m.id));
 
     const bulkDelete = async () => {
-        if (!confirm(`Delete ${selectedCount} movie(s) permanently? This cannot be undone.`)) return;
+        if (!confirm(`Удалить ${selectedCount} фильм(ов) безвозвратно? Это действие нельзя отменить.`)) return;
         setDeleting(true);
         try {
             const res = await fetch('/api/admin/movies', {
@@ -45,10 +45,11 @@ export default function AdminMoviesTable({ movies }: { movies: Movie[] }) {
                                     className="rounded border-gray-600 bg-gray-800 text-purple-500 focus:ring-purple-500"
                                 />
                             </th>
-                            <th className="text-left p-3 text-gray-400 font-medium w-12">Poster</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Title</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Year</th>
-                            <th className="text-left p-3 text-gray-400 font-medium">Scenes</th>
+                            <th className="text-left p-3 text-gray-400 font-medium w-12">Постер</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Название</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Статус</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Год</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Сцены</th>
                             <th className="text-left p-3 text-gray-400 font-medium">TMDB</th>
                         </tr>
                     </thead>
@@ -76,6 +77,13 @@ export default function AdminMoviesTable({ movies }: { movies: Movie[] }) {
                                         {movie.title}
                                     </a>
                                 </td>
+                                <td className="p-3">
+                                    {movie.status === 'draft' ? (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-gray-700 text-gray-400">draft</span>
+                                    ) : (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-900/50 text-green-400">published</span>
+                                    )}
+                                </td>
                                 <td className="p-3 text-gray-400">{movie.year || '\u2014'}</td>
                                 <td className="p-3 text-gray-400">{movie.scenes_count}</td>
                                 <td className="p-3 text-gray-500 text-xs">{movie.tmdb_id || '\u2014'}</td>
@@ -83,7 +91,7 @@ export default function AdminMoviesTable({ movies }: { movies: Movie[] }) {
                         ))}
                         {movies.length === 0 && (
                             <tr>
-                                <td colSpan={6} className="p-8 text-center text-gray-500">No movies found</td>
+                                <td colSpan={7} className="p-8 text-center text-gray-500">Фильмы не найдены</td>
                             </tr>
                         )}
                     </tbody>
@@ -93,20 +101,20 @@ export default function AdminMoviesTable({ movies }: { movies: Movie[] }) {
             {/* Bulk action bar */}
             {selectedCount > 0 && (
                 <div className="sticky bottom-0 mt-3 flex items-center justify-between rounded-xl border border-gray-700 bg-gray-900/95 backdrop-blur px-4 py-3">
-                    <span className="text-sm text-gray-300">{selectedCount} selected</span>
+                    <span className="text-sm text-gray-300">{selectedCount} выбрано</span>
                     <div className="flex items-center gap-2">
                         <button
                             onClick={clear}
                             className="px-3 py-1.5 text-xs rounded-lg bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"
                         >
-                            Deselect All
+                            Снять выделение
                         </button>
                         <button
                             onClick={bulkDelete}
                             disabled={deleting}
                             className="px-4 py-1.5 text-xs rounded-lg bg-red-700 text-white font-medium hover:bg-red-600 disabled:opacity-50 transition-colors"
                         >
-                            {deleting ? 'Deleting...' : `Delete Selected (${selectedCount})`}
+                            {deleting ? 'Удаление...' : `Удалить (${selectedCount})`}
                         </button>
                     </div>
                 </div>

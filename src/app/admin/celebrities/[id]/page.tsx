@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import LocalizedTabs from '@/components/admin/LocalizedTabs';
+import ReEnrichButton from '@/components/admin/ReEnrichButton';
 import { getLocalizedField } from '@/lib/i18n';
 import type { LocalizedField } from '@/lib/types';
 
@@ -76,7 +77,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
             setPhotoImgError(false);
             setIsFeatured(data.celebrity.is_featured);
         } catch {
-            setMessage({ type: 'error', text: 'Failed to load celebrity' });
+            setMessage({ type: 'error', text: 'Ошибка загрузки актрисы' });
         } finally {
             setLoading(false);
         }
@@ -94,9 +95,9 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                 body: JSON.stringify({ name, name_localized: nameLocalized, bio, photo_url: photoUrl || null, is_featured: isFeatured }),
             });
             if (!res.ok) throw new Error('Save failed');
-            setMessage({ type: 'success', text: 'Saved!' });
+            setMessage({ type: 'success', text: 'Сохранено!' });
         } catch {
-            setMessage({ type: 'error', text: 'Save failed' });
+            setMessage({ type: 'error', text: 'Ошибка сохранения' });
         } finally {
             setSaving(false);
         }
@@ -107,14 +108,17 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
     }
 
     if (!celebrity) {
-        return <div className="py-20 text-center"><p className="text-gray-400">Celebrity not found</p><a href="/admin/celebrities" className="text-purple-400 hover:underline text-sm">Back</a></div>;
+        return <div className="py-20 text-center"><p className="text-gray-400">Актриса не найдена</p><a href="/admin/celebrities" className="text-purple-400 hover:underline text-sm">Назад</a></div>;
     }
 
     return (
         <div className="max-w-5xl space-y-6">
-            <div className="flex items-center gap-3">
-                <a href="/admin/celebrities" className="text-gray-400 hover:text-white text-sm">← Celebrities</a>
-                <h1 className="text-xl font-bold text-white">{celebrity.name}</h1>
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <a href="/admin/celebrities" className="text-gray-400 hover:text-white text-sm">← Актрисы</a>
+                    <h1 className="text-xl font-bold text-white">{celebrity.name}</h1>
+                </div>
+                <ReEnrichButton type="celebrity" id={celebrity.id} />
             </div>
 
             {message && (
@@ -135,12 +139,12 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                         </div>
                     )}
                     <input value={photoUrl} onChange={(e) => { setPhotoUrl(e.target.value); setPhotoImgError(false); }}
-                        placeholder="Photo URL..."
+                        placeholder="URL фото..."
                         className="w-full text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-gray-200" />
                     <label className={`block w-full text-center text-xs px-2 py-1.5 rounded cursor-pointer transition-colors ${
                         uploading ? 'bg-gray-700 text-gray-500' : 'bg-purple-600/20 text-purple-400 hover:bg-purple-600/30 border border-purple-800/50'
                     }`}>
-                        {uploading ? 'Uploading...' : 'Upload Photo'}
+                        {uploading ? 'Загрузка...' : 'Загрузить фото'}
                         <input type="file" accept="image/*" className="hidden" disabled={uploading}
                             onChange={async (e) => {
                                 const file = e.target.files?.[0];
@@ -158,12 +162,12 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                                     if (res.ok) {
                                         setPhotoUrl(data.url);
                                         setPhotoImgError(false);
-                                        setMessage({ type: 'success', text: `Photo uploaded: ${data.url}` });
+                                        setMessage({ type: 'success', text: `Фото загружено: ${data.url}` });
                                     } else {
                                         setMessage({ type: 'error', text: data.error });
                                     }
                                 } catch (err) {
-                                    setMessage({ type: 'error', text: `Upload failed: ${err}` });
+                                    setMessage({ type: 'error', text: `Ошибка загрузки: ${err}` });
                                 } finally {
                                     setUploading(false);
                                     e.target.value = '';
@@ -174,7 +178,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
 
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">
                     <div>
-                        <label className="text-xs text-gray-500 block mb-1">Name</label>
+                        <label className="text-xs text-gray-500 block mb-1">Имя</label>
                         <input value={name} onChange={(e) => setName(e.target.value)}
                             className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-purple-500" />
                     </div>
@@ -188,37 +192,37 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                             <span className="block text-gray-300">{celebrity.imdb_id || '—'}</span>
                         </div>
                         <div>
-                            <span className="text-gray-500">Nationality</span>
+                            <span className="text-gray-500">Национальность</span>
                             <span className="block text-gray-300">{celebrity.nationality || '—'}</span>
                         </div>
                         <div>
-                            <span className="text-gray-500">Birth Date</span>
+                            <span className="text-gray-500">Дата рождения</span>
                             <span className="block text-gray-300">{celebrity.birth_date || '—'}</span>
                         </div>
                         <div>
-                            <span className="text-gray-500">Videos</span>
+                            <span className="text-gray-500">Видео</span>
                             <span className="block text-gray-300">{celebrity.videos_count}</span>
                         </div>
                         <div>
-                            <span className="text-gray-500">Total Views</span>
+                            <span className="text-gray-500">Всего просмотров</span>
                             <span className="block text-gray-300">{celebrity.total_views.toLocaleString()}</span>
                         </div>
                     </div>
                     <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={isFeatured} onChange={(e) => setIsFeatured(e.target.checked)}
                             className="rounded border-gray-600 bg-gray-800 text-purple-500" />
-                        <span className="text-sm text-gray-300">Featured</span>
+                        <span className="text-sm text-gray-300">В подборке</span>
                     </label>
                 </div>
             </div>
 
-            <LocalizedTabs label="Bio" value={bio} onChange={setBio} multiline />
-            <LocalizedTabs label="Name Localized" value={nameLocalized} onChange={setNameLocalized} />
+            <LocalizedTabs label="Биография" value={bio} onChange={setBio} multiline />
+            <LocalizedTabs label="Имя (локализованное)" value={nameLocalized} onChange={setNameLocalized} />
 
             {/* Videos */}
             {videos.length > 0 && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Videos ({videos.length})</h3>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Видео ({videos.length})</h3>
                     <div className="space-y-2">
                         {videos.map((v) => (
                             <a key={v.id} href={`/admin/videos/${v.id}`}
@@ -232,7 +236,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                                     )}
                                 </div>
                                 <div className="flex-1 min-w-0">
-                                    <p className="text-xs text-gray-200 truncate">{getLocalizedField(v.title, 'en') || 'Untitled'}</p>
+                                    <p className="text-xs text-gray-200 truncate">{getLocalizedField(v.title, 'en') || 'Без названия'}</p>
                                     <div className="flex items-center gap-2 mt-0.5">
                                         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
                                             v.status === 'published' ? 'bg-green-900/50 text-green-400' :
@@ -244,7 +248,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                                         )}
                                     </div>
                                 </div>
-                                <span className="text-xs text-gray-500 shrink-0">{v.views_count.toLocaleString()} views</span>
+                                <span className="text-xs text-gray-500 shrink-0">{v.views_count.toLocaleString()} просмотров</span>
                             </a>
                         ))}
                     </div>
@@ -254,7 +258,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
             {/* Movies */}
             {movies.length > 0 && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Movies ({movies.length})</h3>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Фильмы ({movies.length})</h3>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                         {movies.map((m) => (
                             <a key={m.id} href={`/admin/movies/${m.id}`}
@@ -263,7 +267,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
                                     <img src={m.poster_url} alt="" className="w-full aspect-[2/3] object-cover"
                                         onError={() => setMoviePosterErrors(prev => new Set(prev).add(m.id))} />
                                 ) : (
-                                    <div className="w-full aspect-[2/3] bg-gray-800 flex items-center justify-center text-gray-600 text-xs">No poster</div>
+                                    <div className="w-full aspect-[2/3] bg-gray-800 flex items-center justify-center text-gray-600 text-xs">Нет постера</div>
                                 )}
                                 <div className="p-2">
                                     <p className="text-xs text-gray-200 truncate">{m.title}</p>
@@ -279,7 +283,7 @@ export default function AdminCelebrityDetailPage({ params }: { params: { id: str
             <div className="sticky bottom-4 flex justify-end">
                 <button onClick={save} disabled={saving}
                     className="px-6 py-2.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-500 disabled:opacity-50 shadow-lg shadow-purple-900/50">
-                    {saving ? 'Saving...' : 'Save Changes'}
+                    {saving ? 'Сохранение...' : 'Сохранить изменения'}
                 </button>
             </div>
         </div>

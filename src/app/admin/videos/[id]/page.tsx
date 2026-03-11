@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import LocalizedTabs from '@/components/admin/LocalizedTabs';
 import JsonViewer from '@/components/admin/JsonViewer';
 import VideoPlayer from '@/components/VideoPlayer';
+import ReEnrichButton from '@/components/admin/ReEnrichButton';
+import ScreenshotPicker from '@/components/admin/ScreenshotPicker';
 import { getLocalizedField } from '@/lib/i18n';
 import type { LocalizedField } from '@/lib/types';
 
@@ -115,7 +117,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             setStatus(data.video.status);
         } catch (error) {
             console.error('Fetch error:', error);
-            setMessage({ type: 'error', text: 'Failed to load video' });
+            setMessage({ type: 'error', text: 'Ошибка загрузки видео' });
         } finally {
             setLoading(false);
         }
@@ -144,21 +146,21 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             const updated = await res.json();
             setVideo(updated);
             setStatus(updated.status);
-            setMessage({ type: 'success', text: 'Saved!' });
+            setMessage({ type: 'success', text: 'Сохранено!' });
         } catch {
-            setMessage({ type: 'error', text: 'Save failed' });
+            setMessage({ type: 'error', text: 'Ошибка сохранения' });
         } finally {
             setSaving(false);
         }
     };
 
     const deleteVideo = async () => {
-        if (!confirm('Delete this video permanently?')) return;
+        if (!confirm('Удалить это видео безвозвратно?')) return;
         try {
             await fetch(`/api/admin/videos/${params.id}`, { method: 'DELETE' });
             router.push('/admin/videos');
         } catch {
-            setMessage({ type: 'error', text: 'Delete failed' });
+            setMessage({ type: 'error', text: 'Ошибка удаления' });
         }
     };
 
@@ -173,8 +175,8 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
     if (!video) {
         return (
             <div className="py-20 text-center">
-                <p className="text-gray-400">Video not found</p>
-                <a href="/admin/videos" className="text-purple-400 hover:underline text-sm mt-2 inline-block">Back to Videos</a>
+                <p className="text-gray-400">Видео не найдено</p>
+                <a href="/admin/videos" className="text-purple-400 hover:underline text-sm mt-2 inline-block">← Назад к видео</a>
             </div>
         );
     }
@@ -188,23 +190,24 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                    <a href="/admin/videos" className="text-gray-400 hover:text-white text-sm">← Videos</a>
+                    <a href="/admin/videos" className="text-gray-400 hover:text-white text-sm">← Видео</a>
                     <h1 className="text-xl font-bold text-white truncate max-w-md">
                         {getLocalizedField(video.title, 'en') || video.original_title || 'Untitled'}
                     </h1>
                 </div>
                 <div className="flex gap-2">
+                    <ReEnrichButton type="video" id={video.id} />
                     <button onClick={() => save({ status: 'published' })} disabled={saving}
                         className="px-3 py-1.5 text-xs rounded-lg bg-green-700 text-white hover:bg-green-600 disabled:opacity-50">
-                        Publish
+                        Опубликовать
                     </button>
                     <button onClick={() => save({ status: 'rejected' })} disabled={saving}
                         className="px-3 py-1.5 text-xs rounded-lg bg-yellow-700 text-white hover:bg-yellow-600 disabled:opacity-50">
-                        Reject
+                        Отклонить
                     </button>
                     <button onClick={deleteVideo}
                         className="px-3 py-1.5 text-xs rounded-lg bg-red-700 text-white hover:bg-red-600">
-                        Delete
+                        Удалить
                     </button>
                 </div>
             </div>
@@ -229,13 +232,13 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                         </div>
                     ) : (
                         <div className="aspect-video rounded-xl bg-gray-900 flex items-center justify-center text-gray-500">
-                            No preview available
+                            Превью недоступно
                         </div>
                     )}
                     {/* Embed from source */}
                     {rawVideo?.embed_code && !videoSrc && (
                         <div className="mt-3">
-                            <p className="text-xs text-gray-500 mb-1">Source embed:</p>
+                            <p className="text-xs text-gray-500 mb-1">Исходный embed:</p>
                             <div
                                 className="aspect-video rounded-lg overflow-hidden bg-black"
                                 dangerouslySetInnerHTML={{ __html: rawVideo.embed_code }}
@@ -248,7 +251,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                 <div className="space-y-3">
                     <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4 space-y-3">
                         <div className="flex items-center justify-between">
-                            <span className="text-xs text-gray-500">Status</span>
+                            <span className="text-xs text-gray-500">Статус</span>
                             <select value={status} onChange={(e) => setStatus(e.target.value)}
                                 className="text-xs bg-gray-800 border border-gray-700 rounded px-2 py-1 text-gray-200">
                                 {STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -257,7 +260,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                         {confidence !== null && (
                             <div>
                                 <div className="flex items-center justify-between mb-1">
-                                    <span className="text-xs text-gray-500">AI Confidence</span>
+                                    <span className="text-xs text-gray-500">Уверенность AI</span>
                                     <span className={`text-xs font-medium ${confidence > 80 ? 'text-green-400' : confidence > 50 ? 'text-yellow-400' : 'text-red-400'}`}>
                                         {confidence}%
                                     </span>
@@ -270,35 +273,35 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                         )}
                         {video.ai_model && (
                             <div className="flex justify-between">
-                                <span className="text-xs text-gray-500">AI Model</span>
+                                <span className="text-xs text-gray-500">Модель AI</span>
                                 <span className="text-xs text-gray-300">{video.ai_model}</span>
                             </div>
                         )}
                         <div className="flex justify-between">
-                            <span className="text-xs text-gray-500">Quality</span>
+                            <span className="text-xs text-gray-500">Качество</span>
                             <span className="text-xs text-gray-300">{video.quality || '—'}</span>
                         </div>
                         <div className="flex justify-between">
-                            <span className="text-xs text-gray-500">Duration</span>
+                            <span className="text-xs text-gray-500">Длительность</span>
                             <span className="text-xs text-gray-300">{video.duration_formatted || '—'}</span>
                         </div>
                         <div className="flex justify-between">
-                            <span className="text-xs text-gray-500">Views</span>
+                            <span className="text-xs text-gray-500">Просмотры</span>
                             <span className="text-xs text-gray-300">{video.views_count.toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between">
-                            <span className="text-xs text-gray-500">Created</span>
+                            <span className="text-xs text-gray-500">Создано</span>
                             <span className="text-xs text-gray-300">{new Date(video.created_at).toLocaleDateString()}</span>
                         </div>
                         {video.published_at && (
                             <div className="flex justify-between">
-                                <span className="text-xs text-gray-500">Published</span>
+                                <span className="text-xs text-gray-500">Опубликовано</span>
                                 <span className="text-xs text-gray-300">{new Date(video.published_at).toLocaleDateString()}</span>
                             </div>
                         )}
                         {rawVideo?.source_url && (
                             <div>
-                                <span className="text-xs text-gray-500 block mb-1">Source URL</span>
+                                <span className="text-xs text-gray-500 block mb-1">Исходный URL</span>
                                 <a href={rawVideo.source_url} target="_blank" rel="noopener noreferrer"
                                     className="text-xs text-purple-400 hover:underline break-all">{rawVideo.source_url}</a>
                             </div>
@@ -306,6 +309,9 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                     </div>
                 </div>
             </div>
+
+            {/* Screenshot Picker */}
+            <ScreenshotPicker videoId={video.id} currentThumbnail={video.thumbnail_url} screenshots={video.screenshots} />
 
             {/* AI Raw Response */}
             <JsonViewer data={video.ai_raw_response} />
@@ -320,7 +326,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             {/* Relations */}
             {celebrities.length > 0 && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Celebrities</h3>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Актрисы</h3>
                     <div className="flex flex-wrap gap-2">
                         {celebrities.map((c) => (
                             <a key={c.id} href={`/admin/celebrities/${c.id}`}
@@ -342,7 +348,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
 
             {movie && (
                 <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                    <h3 className="text-sm font-medium text-gray-300 mb-3">Movie</h3>
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Фильм</h3>
                     <a href={`/admin/movies/${movie.id}`}
                         className="flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 hover:border-purple-600 transition-colors w-fit">
                         {movie.poster_url && !movieImgError ? (
@@ -360,7 +366,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             )}
 
             <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
-                <h3 className="text-sm font-medium text-gray-300 mb-3">Tags</h3>
+                <h3 className="text-sm font-medium text-gray-300 mb-3">Теги</h3>
                 <div className="flex flex-wrap gap-2 mb-3">
                     {editedTags.map((t) => (
                         <span key={t.id} className="flex items-center gap-1 text-xs px-2.5 py-1 rounded-full bg-blue-900/30 text-blue-300 border border-blue-800/50">
@@ -369,14 +375,14 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                                 className="ml-1 text-blue-500 hover:text-blue-300">&times;</button>
                         </span>
                     ))}
-                    {editedTags.length === 0 && <span className="text-xs text-gray-600">No tags</span>}
+                    {editedTags.length === 0 && <span className="text-xs text-gray-600">Теги отсутствуют</span>}
                 </div>
                 <div className="relative">
                     <button
                         onClick={() => setShowTagDropdown(!showTagDropdown)}
                         className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700 border border-gray-700"
                     >
-                        + Add tag
+                        + Добавить тег
                     </button>
                     {showTagDropdown && (
                         <div className="absolute z-10 top-full left-0 mt-1 bg-gray-800 border border-gray-700 rounded-lg max-h-48 overflow-y-auto min-w-[200px] shadow-xl">
@@ -394,7 +400,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                                     </button>
                                 ))}
                             {allTags.filter(t => !editedTags.find(et => et.id === t.id)).length === 0 && (
-                                <div className="px-3 py-2 text-xs text-gray-500">No more tags available</div>
+                                <div className="px-3 py-2 text-xs text-gray-500">Больше тегов нет</div>
                             )}
                         </div>
                     )}
@@ -411,7 +417,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                         raw_celebrities: rawVideo.raw_celebrities,
                         source_url: rawVideo.source_url,
                     } as Record<string, unknown>}
-                    label="Raw Scraped Data"
+                    label="Исходные данные скрейпера"
                 />
             )}
 
@@ -419,7 +425,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             <div className="sticky bottom-4 flex justify-end">
                 <button onClick={() => save()} disabled={saving}
                     className="px-6 py-2.5 rounded-lg bg-purple-600 text-white font-medium hover:bg-purple-500 disabled:opacity-50 shadow-lg shadow-purple-900/50 transition-all">
-                    {saving ? 'Saving...' : 'Save Changes'}
+                    {saving ? 'Сохранение...' : 'Сохранить изменения'}
                 </button>
             </div>
         </div>

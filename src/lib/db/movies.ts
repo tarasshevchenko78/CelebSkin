@@ -8,7 +8,7 @@ import type { Movie, Celebrity, PaginatedResult } from '../types';
 
 export async function getMovieBySlug(slug: string): Promise<Movie | null> {
     const result = await pool.query(
-        `SELECT * FROM movies WHERE slug = $1 LIMIT 1`,
+        `SELECT * FROM movies WHERE slug = $1 AND status = 'published' LIMIT 1`,
         [slug]
     );
     return result.rows[0] || null;
@@ -29,11 +29,12 @@ export async function getMovies(
         const [dataResult, countResult] = await Promise.all([
             pool.query(
                 `SELECT * FROM movies
+           WHERE status = 'published'
            ORDER BY ${order} ${dir}
            LIMIT $1 OFFSET $2`,
                 [limit, offset]
             ),
-            pool.query(`SELECT COUNT(*) FROM movies`),
+            pool.query(`SELECT COUNT(*) FROM movies WHERE status = 'published'`),
         ]);
 
         const total = parseInt(countResult.rows[0].count);
@@ -53,7 +54,7 @@ export async function getMoviesForCelebrity(celebrityId: number): Promise<Movie[
     const result = await pool.query(
         `SELECT DISTINCT m.* FROM movies m
          JOIN movie_celebrities mc ON mc.movie_id = m.id
-         WHERE mc.celebrity_id = $1
+         WHERE mc.celebrity_id = $1 AND m.status = 'published'
          ORDER BY m.year DESC NULLS LAST`,
         [celebrityId]
     );
@@ -84,6 +85,7 @@ export async function getSimilarMovies(
                  SELECT celebrity_id FROM movie_celebrities WHERE movie_id = $1
              )
              AND m.id != $1
+             AND m.status = 'published'
              AND m.scenes_count > 0
              ORDER BY m.total_views DESC
              LIMIT $2`,

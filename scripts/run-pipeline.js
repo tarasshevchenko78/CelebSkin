@@ -10,6 +10,7 @@
  *   4. Watermark → video with celeb.skin overlay (watermark.js)
  *   5. Thumbnails → screenshots + sprite + preview GIF (generate-thumbnails.js)
  *   6. CDN Upload → BunnyCDN (upload-to-cdn.js)
+ *   6b. Preview Clips → 6s hover preview from watermarked video (generate-preview.js)
  *   7. Publish → status=published, multilingual slugs (publish-to-site.js)
  *
  * Modes:
@@ -111,6 +112,15 @@ const STEPS = [
         timeout: 1800000,
         required: false,
         deps: ['watermark', 'thumbnails'],
+    },
+    {
+        name: 'preview-generate',
+        label: '6b. Preview Clip Generation',
+        script: 'generate-preview.js',
+        args: [],
+        timeout: 1800000,  // 30 min
+        required: false,
+        deps: ['cdn-upload'],
     },
     {
         name: 'publish',
@@ -335,7 +345,10 @@ async function getWorkAvailability() {
                  AND (video_url_watermarked LIKE 'tmp/%' OR thumbnail_url LIKE 'tmp/%')) AS cdn_ready,
                 (SELECT COUNT(*) FROM videos WHERE status='watermarked'
                  AND video_url_watermarked LIKE '%b-cdn.net%'
-                 AND thumbnail_url LIKE '%b-cdn.net%') AS publish_ready
+                 AND thumbnail_url LIKE '%b-cdn.net%') AS publish_ready,
+                (SELECT COUNT(*) FROM videos WHERE status IN ('watermarked','published')
+                 AND video_url_watermarked LIKE '%b-cdn.net%'
+                 AND preview_url IS NULL) AS preview_ready
         `);
         const r = rows[0];
         return {
@@ -346,6 +359,7 @@ async function getWorkAvailability() {
             'watermark': parseInt(r.watermark_ready) || 0,
             'thumbnails': parseInt(r.thumbnail_ready) || 0,
             'cdn-upload': parseInt(r.cdn_ready) || 0,
+            'preview-generate': parseInt(r.preview_ready) || 0,
             'publish': parseInt(r.publish_ready) || 0,
         };
     } catch (err) {

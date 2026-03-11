@@ -62,7 +62,7 @@ export default async function AdminVideosPage({
     return (
         <div>
             <div className="flex items-center justify-between mb-6">
-                <h1 className="text-2xl font-bold text-white">Videos ({total})</h1>
+                <h1 className="text-2xl font-bold text-white">Видео ({total})</h1>
             </div>
 
             <div className="flex flex-wrap gap-2 mb-6">
@@ -76,7 +76,7 @@ export default async function AdminVideosPage({
                                 : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                         }`}
                     >
-                        {s || 'All'}
+                        {s || 'Все'}
                     </a>
                 ))}
             </div>
@@ -88,14 +88,14 @@ export default async function AdminVideosPage({
                     {page > 1 && (
                         <a href={`/admin/videos?${status ? `status=${status}&` : ''}page=${page - 1}`}
                            className="px-3 py-1.5 text-sm rounded bg-gray-800 text-gray-400 hover:bg-gray-700">
-                            &larr; Prev
+                            &larr; Назад
                         </a>
                     )}
-                    <span className="text-sm text-gray-500">Page {page} / {totalPages}</span>
+                    <span className="text-sm text-gray-500">Стр. {page} / {totalPages}</span>
                     {page < totalPages && (
                         <a href={`/admin/videos?${status ? `status=${status}&` : ''}page=${page + 1}`}
                            className="px-3 py-1.5 text-sm rounded bg-gray-800 text-gray-400 hover:bg-gray-700">
-                            Next &rarr;
+                            Вперёд &rarr;
                         </a>
                     )}
                 </div>

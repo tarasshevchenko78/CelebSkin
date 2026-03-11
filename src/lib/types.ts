@@ -80,6 +80,7 @@ export interface Celebrity {
     total_views: number;
     is_featured: boolean;
     ai_matched: boolean;
+    status: string;
     created_at: string;
     updated_at: string;
 }
@@ -102,6 +103,7 @@ export interface Movie {
     scenes_count: number;
     total_views: number;
     ai_matched: boolean;
+    status: string;
     created_at: string;
     updated_at: string;
 }

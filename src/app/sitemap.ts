@@ -62,10 +62,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
         `SELECT slug, updated_at FROM videos WHERE status = 'published' ORDER BY published_at DESC LIMIT 10000`
       ),
       pool.query<SimpleSlugRow>(
-        `SELECT slug, updated_at FROM celebrities LIMIT 5000`
+        `SELECT slug, updated_at FROM celebrities WHERE status = 'published' LIMIT 5000`
       ),
       pool.query<SimpleSlugRow>(
-        `SELECT slug, updated_at FROM movies LIMIT 5000`
+        `SELECT slug, updated_at FROM movies WHERE status = 'published' LIMIT 5000`
       ),
       pool.query<SimpleSlugRow>(
         `SELECT slug, published_at AS updated_at FROM blog_posts WHERE is_published = true ORDER BY published_at DESC LIMIT 1000`

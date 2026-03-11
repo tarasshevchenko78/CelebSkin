@@ -8,7 +8,7 @@ import type { Celebrity, Tag, PaginatedResult } from '../types';
 
 export async function getCelebrityBySlug(slug: string): Promise<Celebrity | null> {
     const result = await pool.query(
-        `SELECT * FROM celebrities WHERE slug = $1 LIMIT 1`,
+        `SELECT * FROM celebrities WHERE slug = $1 AND status = 'published' LIMIT 1`,
         [slug]
     );
     return result.rows[0] || null;
@@ -31,11 +31,11 @@ export async function getCelebrities(
             ? [limit, offset, letterFilter.toUpperCase()]
             : [limit, offset];
         const dataWhere = letterFilter
-            ? `WHERE UPPER(LEFT(name, 1)) = $3`
-            : '';
+            ? `WHERE status = 'published' AND UPPER(LEFT(name, 1)) = $3`
+            : `WHERE status = 'published'`;
         const countWhere = letterFilter
-            ? `WHERE UPPER(LEFT(name, 1)) = $1`
-            : '';
+            ? `WHERE status = 'published' AND UPPER(LEFT(name, 1)) = $1`
+            : `WHERE status = 'published'`;
 
         const [dataResult, countResult] = await Promise.all([
             pool.query(
@@ -66,7 +66,7 @@ export async function getTrendingCelebrities(limit: number = 10): Promise<Celebr
     return cached(`trending_celebs:${limit}`, async () => {
         const result = await pool.query(
             `SELECT * FROM celebrities
-         WHERE is_featured = true OR videos_count > 0
+         WHERE status = 'published' AND (is_featured = true OR videos_count > 0)
          ORDER BY total_views DESC, videos_count DESC
          LIMIT $1`,
             [limit]
@@ -88,6 +88,7 @@ export async function getSimilarCelebrities(
                  SELECT movie_id FROM movie_celebrities WHERE celebrity_id = $1
              )
              AND c.id != $1
+             AND c.status = 'published'
              AND c.videos_count > 0
              ORDER BY c.total_views DESC
              LIMIT $2`,

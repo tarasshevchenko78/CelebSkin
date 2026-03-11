@@ -64,7 +64,12 @@ export async function PUT(
 
     try {
         const body = await request.json();
-        const { name, name_localized, bio, photo_url, is_featured, nationality, birth_date } = body;
+        const { name, name_localized, bio, photo_url, is_featured, nationality, birth_date, status } = body;
+
+        const ALLOWED_STATUSES = ['draft', 'published'];
+        if (status !== undefined && !ALLOWED_STATUSES.includes(status)) {
+            return NextResponse.json({ error: 'Invalid status' }, { status: 400 });
+        }
 
         const updates: string[] = [];
         const values: unknown[] = [];
@@ -84,6 +89,7 @@ export async function PUT(
         addField('is_featured', is_featured);
         addField('nationality', nationality);
         addField('birth_date', birth_date);
+        addField('status', status);
 
         if (updates.length === 0) {
             return NextResponse.json({ error: 'No fields to update' }, { status: 400 });

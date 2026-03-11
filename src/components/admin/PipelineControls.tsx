@@ -310,14 +310,14 @@ export default function PipelineControls() {
                 setMessage({ type: 'error', text: data.error });
             }
         } catch (err) {
-            setMessage({ type: 'error', text: `Connection error: ${err}` });
+            setMessage({ type: 'error', text: `Ошибка соединения: ${err}` });
         } finally {
             setRunning(null);
         }
     };
 
     const stopAll = async () => {
-        if (!confirm('Stop all running pipeline processes?')) return;
+        if (!confirm('Остановить все запущенные процессы пайплайна?')) return;
         setStopping(true);
         setMessage(null);
         try {
@@ -326,14 +326,14 @@ export default function PipelineControls() {
             setMessage({ type: res.ok ? 'success' : 'error', text: res.ok ? data.message : data.error });
             if (res.ok) setTimeout(fetchStats, 2000);
         } catch (err) {
-            setMessage({ type: 'error', text: `Connection error: ${err}` });
+            setMessage({ type: 'error', text: `Ошибка соединения: ${err}` });
         } finally {
             setStopping(false);
         }
     };
 
     const drainPipeline = async () => {
-        if (!confirm('Finish current videos and stop?')) return;
+        if (!confirm('Завершить обработку текущих видео и остановиться?')) return;
         setStopping(true);
         setMessage(null);
         try {
@@ -346,7 +346,7 @@ export default function PipelineControls() {
             setMessage({ type: res.ok ? 'success' : 'error', text: res.ok ? data.message : data.error });
             if (res.ok) setTimeout(fetchStats, 2000);
         } catch (err) {
-            setMessage({ type: 'error', text: `Connection error: ${err}` });
+            setMessage({ type: 'error', text: `Ошибка соединения: ${err}` });
         } finally {
             setStopping(false);
         }
@@ -367,7 +367,7 @@ export default function PipelineControls() {
             const res = await fetch('/api/admin/cleanup');
             if (res.ok) setCleanupData(await res.json());
         } catch (err) {
-            setMessage({ type: 'error', text: `Failed: ${err}` });
+            setMessage({ type: 'error', text: `Ошибка: ${err}` });
         } finally {
             setCleanupLoading(false);
         }
@@ -385,14 +385,14 @@ export default function PipelineControls() {
             });
             const data = await res.json();
             if (res.ok) {
-                setMessage({ type: 'success', text: `Cleaned: ${data.deletedMovies} movies, ${data.deletedMovieCelebs} links` });
+                setMessage({ type: 'success', text: `Удалено: ${data.deletedMovies} фильмов, ${data.deletedMovieCelebs} связей` });
                 setCleanupData(null);
                 fetchStats();
             } else {
                 setMessage({ type: 'error', text: data.error });
             }
         } catch (err) {
-            setMessage({ type: 'error', text: `Cleanup failed: ${err}` });
+            setMessage({ type: 'error', text: `Ошибка очистки: ${err}` });
         } finally {
             setCleanupLoading(false);
         }
@@ -438,7 +438,7 @@ export default function PipelineControls() {
                         } ${running !== null && running !== 'full-pipeline' ? 'opacity-50' : ''}`}
                     >
                         <span>⚡</span>
-                        <span>{running === 'full-pipeline' ? 'Starting...' : 'Run Full Pipeline'}</span>
+                        <span>{running === 'full-pipeline' ? 'Запуск...' : 'Запустить пайплайн'}</span>
                     </button>
 
                     {hasRunning && (
@@ -448,14 +448,14 @@ export default function PipelineControls() {
                                 disabled={stopping}
                                 className="flex-1 sm:flex-none px-4 py-3 text-sm rounded-lg bg-amber-600 text-white font-medium hover:bg-amber-500 disabled:opacity-50 transition-colors"
                             >
-                                {stopping ? '...' : 'Finish & Stop'}
+                                {stopping ? '...' : 'Завершить и остановить'}
                             </button>
                             <button
                                 onClick={stopAll}
                                 disabled={stopping}
                                 className="flex-1 sm:flex-none px-4 py-3 text-sm rounded-lg bg-red-600 text-white font-medium hover:bg-red-500 disabled:opacity-50 transition-colors"
                             >
-                                {stopping ? '...' : 'Stop All'}
+                                {stopping ? '...' : 'Остановить всё'}
                             </button>
                         </div>
                     )}
@@ -527,7 +527,7 @@ export default function PipelineControls() {
                                                     ? 'bg-purple-900/50 text-purple-300 animate-pulse'
                                                     : 'bg-amber-900/40 text-amber-400'
                                             }`}>
-                                                {isActivelyProcessing ? `processing ${JOURNEY_LABELS[currentStep] || currentStep}` : `waiting for ${JOURNEY_LABELS[currentStep] || currentStep}`}
+                                                {isActivelyProcessing ? `обработка: ${JOURNEY_LABELS[currentStep] || currentStep}` : `ожидание: ${JOURNEY_LABELS[currentStep] || currentStep}`}
                                             </span>
                                             <span className="text-xs text-gray-500">{elapsed}</span>
                                         </div>
@@ -671,12 +671,12 @@ export default function PipelineControls() {
                         onClick={() => { setShowLogs(!showLogs); if (!showLogs) fetchLogs(); }}
                         className="text-xs px-3 py-1.5 rounded-lg bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700"
                     >
-                        {showLogs ? 'Stop' : 'Start'} Live Stream
+                        {showLogs ? 'Стоп' : 'Старт'} Live Stream
                     </button>
                 </div>
                 {showLogs && (
                     <pre className="text-xs text-gray-400 font-mono whitespace-pre-wrap leading-relaxed max-h-80 overflow-y-auto bg-gray-950 rounded-lg p-3">
-                        {logs || 'Loading...'}
+                        {logs || 'Загрузка...'}
                     </pre>
                 )}
             </Section>
@@ -714,7 +714,7 @@ export default function PipelineControls() {
                         disabled={cleanupLoading}
                         className="px-3 py-1.5 text-xs rounded-lg bg-orange-800/30 text-orange-300 border border-orange-700/50 hover:bg-orange-800/50 disabled:opacity-50"
                     >
-                        {cleanupLoading ? 'Analyzing...' : 'Analyze'}
+                        {cleanupLoading ? 'Анализ...' : 'Анализировать'}
                     </button>
                 </div>
 
@@ -760,7 +760,7 @@ export default function PipelineControls() {
                                 disabled={cleanupLoading}
                                 className="w-full px-4 py-2.5 text-sm rounded-lg bg-red-700 text-white font-medium hover:bg-red-600 disabled:opacity-50"
                             >
-                                {cleanupLoading ? 'Cleaning...' : `Remove ${cleanupData.orphanedMoviesCount} Orphaned Movies`}
+                                {cleanupLoading ? 'Очистка...' : `Удалить ${cleanupData.orphanedMoviesCount} фильмов без сцен`}
                             </button>
                         ) : (
                             <p className="text-xs text-green-400 text-center py-2">Database is clean.</p>
@@ -841,7 +841,7 @@ function PipelineProgressView({ progress }: { progress: VideoProgressData }) {
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-lg">{isFinished ? '✅' : '🔄'}</span>
                         <span className={`text-sm font-medium ${isFinished ? 'text-green-400' : 'text-gray-300'}`}>
-                            {isFinished ? 'Pipeline Complete' : 'Scheduler Pipeline'}
+                            {isFinished ? 'Пайплайн завершён' : 'Пайплайн (планировщик)'}
                         </span>
                         <span className="text-xs text-gray-500">
                             {completedCount} done, {activeCount} active

@@ -241,6 +241,22 @@ export async function publishVideo(video, dryRun = false) {
         [videoId, JSON.stringify(slugs)]
     );
 
+    // Promote linked draft celebrities and movies to published
+    await Promise.all([
+        query(
+            `UPDATE celebrities SET status = 'published'
+             WHERE status = 'draft'
+               AND id IN (SELECT celebrity_id FROM video_celebrities WHERE video_id = $1)`,
+            [videoId]
+        ),
+        query(
+            `UPDATE movies SET status = 'published'
+             WHERE status = 'draft'
+               AND id IN (SELECT movie_id FROM movie_scenes WHERE video_id = $1)`,
+            [videoId]
+        ),
+    ]);
+
     // Link to movie scenes
     const scenesLinked = await linkMovieScenes(videoId);
 

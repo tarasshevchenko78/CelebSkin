@@ -99,14 +99,23 @@ export async function DELETE(request: NextRequest) {
             if (body.ids.length > 100) {
                 return NextResponse.json({ error: 'Maximum 100 items per batch' }, { status: 400 });
             }
+            // Cascade delete FK-dependent rows first
+            await Promise.all([
+                pool.query('DELETE FROM video_tags WHERE video_id = ANY($1::uuid[])', [body.ids]),
+                pool.query('DELETE FROM video_celebrities WHERE video_id = ANY($1::uuid[])', [body.ids]),
+                pool.query('DELETE FROM movie_scenes WHERE video_id = ANY($1::uuid[])', [body.ids]),
+                pool.query('DELETE FROM collection_videos WHERE video_id = ANY($1::uuid[])', [body.ids]),
+                pool.query('UPDATE xcadr_imports SET matched_video_id = NULL WHERE matched_video_id = ANY($1::uuid[])', [body.ids]),
+            ]);
             const result = await pool.query(
                 `DELETE FROM videos WHERE id = ANY($1::uuid[]) RETURNING id`,
                 [body.ids]
             );
             return NextResponse.json({ deleted: true, count: result.rowCount, ids: result.rows.map((r: { id: string }) => r.id) });
         }
-    } catch {
-        // Fall through to single delete
+    } catch (error) {
+        logger.error('Admin videos bulk delete failed', { route: '/api/admin/videos', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
+        return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 
     // Single delete: ?id= in query param
@@ -118,6 +127,13 @@ export async function DELETE(request: NextRequest) {
     }
 
     try {
+        await Promise.all([
+            pool.query('DELETE FROM video_tags WHERE video_id = $1', [id]),
+            pool.query('DELETE FROM video_celebrities WHERE video_id = $1', [id]),
+            pool.query('DELETE FROM movie_scenes WHERE video_id = $1', [id]),
+            pool.query('DELETE FROM collection_videos WHERE video_id = $1', [id]),
+            pool.query('UPDATE xcadr_imports SET matched_video_id = NULL WHERE matched_video_id = $1', [id]),
+        ]);
         const result = await pool.query(`DELETE FROM videos WHERE id = $1 RETURNING id`, [id]);
 
         if (result.rows.length === 0) {
