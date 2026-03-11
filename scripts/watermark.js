@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { spawn } from 'child_process';
 /**
  * watermark.js — CelebSkin Video Watermarking
  *
@@ -167,59 +168,87 @@ function buildTextFilter(config) {
     ].join(':');
 }
 
-async function addWatermark(inputPath, outputPath, config) {
+async function addWatermark(inputPath, outputPath, config, onProgress) {
+    // Get video duration for progress calculation
+    let durationSec = 0;
+    try {
+        const { stdout } = await execFileAsync('ffprobe', [
+            '-v', 'quiet', '-show_entries', 'format=duration',
+            '-of', 'csv=p=0', inputPath,
+        ], { timeout: 30000 });
+        durationSec = parseFloat(stdout.trim()) || 0;
+    } catch { /* ignore */ }
+
+    function runFFmpeg(ffmpegArgs) {
+        return new Promise((resolve, reject) => {
+            const proc = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'pipe', 'pipe'] });
+            let stderr = '';
+
+            proc.stdout.on('data', (chunk) => {
+                const lines = chunk.toString().split('\n');
+                for (const line of lines) {
+                    // FFmpeg -progress outputs: out_time_us=12345678
+                    const match = line.match(/out_time_us=(\d+)/);
+                    if (match && durationSec > 0 && onProgress) {
+                        const currentSec = parseInt(match[1]) / 1000000;
+                        const pct = Math.min(99, Math.round((currentSec / durationSec) * 100));
+                        onProgress(pct);
+                    }
+                }
+            });
+
+            proc.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+
+            proc.on('close', (code) => {
+                if (code === 0) resolve();
+                else reject(new Error(`FFmpeg exit ${code}: ${stderr.slice(-500)}`));
+            });
+
+            // Timeout
+            const timer = setTimeout(() => {
+                proc.kill('SIGKILL');
+                reject(new Error('FFmpeg timeout (30min)'));
+            }, 1800000);
+            proc.on('close', () => clearTimeout(timer));
+        });
+    }
+
     if (config.watermarkType === 'image' && config.watermarkImageUrl) {
-        // ── IMAGE watermark (PNG overlay with position switching) ──
         const wmPath = join(TMP_DIR, `watermark_${Date.now()}.png`);
         const downloaded = await downloadWatermarkPng(config.watermarkImageUrl, wmPath);
         if (!downloaded) {
             logger.warn('  Image watermark download failed, falling back to text watermark');
-            // Fall through to text watermark below
         } else {
             const filterComplex = buildImageOverlayFilter(
-                config.margin,
-                config.opacity,
-                config.watermarkScale,
-                config.watermarkMovement
+                config.margin, config.opacity, config.watermarkScale, config.watermarkMovement
             );
 
-            await execFileAsync('ffmpeg', [
-                '-i', inputPath,
-                '-i', wmPath,
+            await runFFmpeg([
+                '-i', inputPath, '-i', wmPath,
                 '-filter_complex', filterComplex,
-                '-codec:a', 'copy',
-                '-c:v', 'libx264',
-                '-preset', 'veryfast',
-                '-crf', '20',
-                '-g', '48',
-                '-bf', '2',
-                '-threads', '0',
+                '-codec:a', 'copy', '-c:v', 'libx264',
+                '-preset', 'veryfast', '-crf', '20',
+                '-g', '48', '-bf', '2', '-threads', '0',
                 '-movflags', '+faststart',
-                '-y',
-                outputPath,
-            ], { timeout: 1800000 });
+                '-progress', 'pipe:1',
+                '-y', outputPath,
+            ]);
 
             return true;
         }
     }
 
-    // ── TEXT watermark (default / fallback) ──
     const textFilter = buildTextFilter(config);
 
-    await execFileAsync('ffmpeg', [
-        '-i', inputPath,
-        '-vf', textFilter,
-        '-codec:a', 'copy',
-        '-c:v', 'libx264',
-        '-preset', 'veryfast',
-        '-crf', '20',
-        '-g', '48',
-        '-bf', '2',
-        '-threads', '0',
+    await runFFmpeg([
+        '-i', inputPath, '-vf', textFilter,
+        '-codec:a', 'copy', '-c:v', 'libx264',
+        '-preset', 'veryfast', '-crf', '20',
+        '-g', '48', '-bf', '2', '-threads', '0',
         '-movflags', '+faststart',
-        '-y',
-        outputPath,
-    ], { timeout: 1800000 });
+        '-progress', 'pipe:1',
+        '-y', outputPath,
+    ]);
 
     return true;
 }
@@ -266,7 +295,12 @@ async function processVideo(video, config) {
         const outputPath = join(workDir, 'watermarked.mp4');
         logger.info(`  Applying watermark "${WATERMARK_TEXT}" (opacity: ${config.opacity})...`);
 
-        await withRetry(() => addWatermark(inputPath, outputPath, config), {
+        const onProgress = (pct) => {
+            // Map FFmpeg 0-100 → UI 40-95 range (0-40 = download, 95-100 = save)
+            const uiPct = 40 + Math.round(pct * 0.55);
+            setActiveItem(videoId, { label: video.display_title || videoId, subStep: `Encoding ${pct}%`, pct: uiPct });
+        };
+        await withRetry(() => addWatermark(inputPath, outputPath, config, onProgress), {
             maxRetries: 2, delayMs: 5000, label: `watermark:${videoId}`,
         });
 
