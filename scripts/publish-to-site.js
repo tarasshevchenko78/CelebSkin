@@ -173,15 +173,15 @@ export function validateVideoForPublish(video) {
         errors.push(`NO_CDN_THUMBNAIL: thumbnail_url=${(video.thumbnail_url || 'null').substring(0, 60)}`);
     }
 
-    // MODERATION: Missing movie poster → needs_review (user adds manually)
+    // WARNING: Missing movie poster (cosmetic, not blocking)
     if (!video.movie_poster_url && video.movie_title) {
-        needsReview.push(`NO_MOVIE_POSTER: movie "${video.movie_title}" has no poster`);
+        warnings.push(`NO_MOVIE_POSTER: movie "${video.movie_title}" has no poster`);
     }
 
-    // MODERATION: Celebrity(s) without photo → needs_review (user adds manually)
+    // WARNING: Celebrity(s) without photo (cosmetic, not blocking)
     const celebsNoPhoto = parseInt(video.celebs_no_photo) || 0;
     if (celebsNoPhoto > 0) {
-        needsReview.push(`CELEBS_NO_PHOTO: ${celebsNoPhoto} celebrity(s) have no photo`);
+        warnings.push(`CELEBS_NO_PHOTO: ${celebsNoPhoto} celebrity(s) have no photo`);
     }
 
     // MODERATION: No celebrities linked → needs_review
