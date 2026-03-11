@@ -107,6 +107,7 @@ export default function XcadrPipelineControls({ stats }: Props) {
     const router = useRouter();
 
     const [running, setRunning]   = useState<RunState>(null);
+    const [connectionStatus, setConnectionStatus] = useState<'idle' | 'checking' | 'ok' | 'fail'>('idle');
     const [logs, setLogs]         = useState<LogEntry[]>([]);
     const logContainerRef         = useRef<HTMLDivElement>(null);
 
@@ -116,6 +117,10 @@ export default function XcadrPipelineControls({ stats }: Props) {
     const [parseCeleb, setParseCeleb] = useState('');
     const [parseColl, setParseColl]   = useState('');
     const [showParseForm, setShowParseForm] = useState(false);
+
+    // Categories from xcadr
+    const [categories, setCategories] = useState<Array<{ name: string; url: string; count: number | null }>>([]);
+    const [loadingCategories, setLoadingCategories] = useState(false);
 
     // Limit inputs
     const [translateLimit, setTranslateLimit] = useState(50);
@@ -280,8 +285,45 @@ export default function XcadrPipelineControls({ stats }: Props) {
                 </div>
             )}
 
-            {/* ── Step buttons ── */}
+            {/* ── Test connection + Step buttons ── */}
             <div className="flex flex-wrap gap-3">
+
+                {/* 0. Test Connection */}
+                <button
+                    onClick={async () => {
+                        setConnectionStatus('checking');
+                        try {
+                            const res = await fetch('/api/admin/xcadr/pipeline', {
+                                method: 'POST',
+                                credentials: 'include',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ step: 'test-connection' }),
+                            });
+                            const data = await res.json();
+                            setConnectionStatus(data.success ? 'ok' : 'fail');
+                            const id = addLog('test', 'Тест соединения');
+                            updateLog(id, {
+                                status: data.success ? 'success' : 'error',
+                                output: data.output || data.error || JSON.stringify(data.checks),
+                                duration: data.duration,
+                            });
+                        } catch {
+                            setConnectionStatus('fail');
+                        }
+                        setTimeout(() => setConnectionStatus('idle'), 5000);
+                    }}
+                    disabled={busy || connectionStatus === 'checking'}
+                    className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                        connectionStatus === 'ok' ? 'bg-green-700/40 text-green-200' :
+                        connectionStatus === 'fail' ? 'bg-red-700/40 text-red-200' :
+                        'bg-gray-700/40 text-gray-300 hover:bg-gray-600/50'
+                    }`}
+                >
+                    {connectionStatus === 'checking' ? <Spinner /> : null}
+                    {connectionStatus === 'ok' ? '✓ Contabo OK' :
+                     connectionStatus === 'fail' ? '✗ Ошибка' :
+                     connectionStatus === 'checking' ? 'Проверка...' : 'Тест соединения'}
+                </button>
 
                 {/* 1. Parse */}
                 <div className="flex flex-col gap-1.5">
@@ -338,14 +380,54 @@ export default function XcadrPipelineControls({ stats }: Props) {
                                 />
                             </div>
                             <div className="flex items-center gap-2">
-                                <label className="text-[10px] text-gray-500 w-20 shrink-0">Коллекция</label>
-                                <input
-                                    type="text"
-                                    value={parseColl}
-                                    onChange={(e) => setParseColl(e.target.value)}
-                                    placeholder="https://xcadr.online/podborki/..."
-                                    className="flex-1 rounded bg-gray-800 border border-gray-700 px-2 py-1 text-xs text-gray-200 placeholder-gray-600"
-                                />
+                                <label className="text-[10px] text-gray-500 w-20 shrink-0">Категория</label>
+                                <div className="flex-1 flex gap-1.5">
+                                    {categories.length > 0 ? (
+                                        <select
+                                            value={parseColl}
+                                            onChange={(e) => setParseColl(e.target.value)}
+                                            className="flex-1 rounded bg-gray-800 border border-gray-700 px-2 py-1 text-xs text-gray-200"
+                                        >
+                                            <option value="">— Не выбрана —</option>
+                                            {categories.map((cat) => (
+                                                <option key={cat.url} value={cat.url}>
+                                                    {cat.name}{cat.count !== null ? ` (${cat.count})` : ''}
+                                                </option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            value={parseColl}
+                                            onChange={(e) => setParseColl(e.target.value)}
+                                            placeholder="https://xcadr.online/podborki/..."
+                                            className="flex-1 rounded bg-gray-800 border border-gray-700 px-2 py-1 text-xs text-gray-200 placeholder-gray-600"
+                                        />
+                                    )}
+                                    <button
+                                        onClick={async () => {
+                                            setLoadingCategories(true);
+                                            try {
+                                                const res = await fetch('/api/admin/xcadr/pipeline', {
+                                                    method: 'POST',
+                                                    credentials: 'include',
+                                                    headers: { 'Content-Type': 'application/json' },
+                                                    body: JSON.stringify({ step: 'list-categories' }),
+                                                });
+                                                const data = await res.json();
+                                                if (data.success && Array.isArray(data.categories)) {
+                                                    setCategories(data.categories);
+                                                }
+                                            } catch { /* ignore */ }
+                                            finally { setLoadingCategories(false); }
+                                        }}
+                                        disabled={loadingCategories || busy}
+                                        className="shrink-0 rounded bg-gray-700 px-2 py-1 text-[10px] text-gray-300 hover:bg-gray-600 disabled:opacity-50 transition-colors"
+                                        title="Загрузить список категорий с xcadr.online"
+                                    >
+                                        {loadingCategories ? '...' : '↻'}
+                                    </button>
+                                </div>
                             </div>
                             <button
                                 onClick={() => {

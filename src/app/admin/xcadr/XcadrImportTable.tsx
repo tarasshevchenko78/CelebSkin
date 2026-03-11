@@ -254,6 +254,18 @@ export default function XcadrImportTable({ imports, total, page, limit }: Props)
                                             )}
                                         </div>
                                     )}
+                                    {row.collections_ru && row.collections_ru.length > 0 && (
+                                        <div className="mt-1 flex flex-wrap gap-1">
+                                            {row.collections_ru.map((col) => (
+                                                <span
+                                                    key={col}
+                                                    className="rounded bg-red-900/20 px-1.5 py-0.5 text-[10px] text-red-400 border border-red-800/30"
+                                                >
+                                                    {col}
+                                                </span>
+                                            ))}
+                                        </div>
+                                    )}
                                 </td>
 
                                 {/* Status */}

@@ -250,6 +250,21 @@ export default async function VideoDetailPage({
                         </div>
                     )}
 
+                    {/* ── 3b. Collections ── */}
+                    {video.collections && video.collections.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-3">
+                            {video.collections.map((col) => (
+                                <a
+                                    key={col.id}
+                                    href={`/${locale}/collection/${col.slug}`}
+                                    className="px-2.5 py-1 rounded-full text-xs bg-red-900/30 text-red-300 border border-red-800/50 hover:border-red-500 hover:text-red-200 transition-colors"
+                                >
+                                    {getLocalizedField(col.title, locale) || col.slug}
+                                </a>
+                            ))}
+                        </div>
+                    )}
+
                     {/* ── 4. Screenshots Gallery ── */}
                     {video.screenshots && video.screenshots.length > 0 && (
                         <div className="mt-5 pt-5 border-t border-gray-800/50">

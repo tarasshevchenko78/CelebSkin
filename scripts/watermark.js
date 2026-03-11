@@ -45,6 +45,10 @@ const DEFAULTS = {
     margin: 20,
     limit: 20,
     force: false,
+    watermarkType: 'text',     // 'text' or 'image'
+    watermarkImageUrl: '',     // CDN URL to PNG watermark
+    watermarkScale: 0.1,       // Size relative to video width
+    watermarkMovement: 'rotating_corners', // Position pattern
 };
 
 // ============================================
@@ -74,56 +78,142 @@ async function downloadVideo(url, destPath) {
 // Watermark Video
 // ============================================
 
-async function addWatermark(inputPath, outputPath, config) {
-    // Position calculation for drawtext
-    let x, y;
-    switch (config.position) {
-        case 'bottom-right':
-            x = `w-tw-${config.margin}`;
-            y = `h-th-${config.margin}`;
-            break;
-        case 'bottom-left':
-            x = String(config.margin);
-            y = `h-th-${config.margin}`;
-            break;
-        case 'top-right':
-            x = `w-tw-${config.margin}`;
-            y = String(config.margin);
-            break;
-        case 'top-left':
-            x = String(config.margin);
-            y = String(config.margin);
-            break;
-        default:
-            x = `w-tw-${config.margin}`;
-            y = `h-th-${config.margin}`;
+/**
+ * Download watermark PNG from CDN to local temp file.
+ */
+async function downloadWatermarkPng(url, destPath) {
+    try {
+        const response = await axios({
+            method: 'get',
+            url,
+            responseType: 'stream',
+            timeout: 30000,
+        });
+        await pipeline(response.data, createWriteStream(destPath));
+        return true;
+    } catch (err) {
+        logger.error(`  Failed to download watermark PNG: ${err.message}`);
+        return false;
+    }
+}
+
+/**
+ * Build FFmpeg filter for IMAGE watermark with position switching.
+ * Switches corner every 60 seconds: top-right → bottom-right → bottom-left → top-left
+ * Uses discrete position jumps (not smooth animation).
+ *
+ * @param {number} margin - Margin from edges in pixels
+ * @param {number} opacity - Watermark opacity (0.0-1.0)
+ * @param {number} scale - Scale relative to video width (0.05-0.20)
+ * @param {string} movement - 'static' or 'rotating_corners'
+ */
+function buildImageOverlayFilter(margin, opacity, scale, movement) {
+    // Scale watermark to a fraction of video width, then set opacity
+    const scaleFilter = `[1:v]scale=iw*${scale}:-1,format=rgba,colorchannelmixer=aa=${opacity}[wm]`;
+
+    let overlayExpr;
+    if (movement === 'static') {
+        // Static: bottom-right corner
+        overlayExpr = `overlay=x=W-w-${margin}:y=H-h-${margin}`;
+    } else {
+        // rotating_corners: switch corner every 60 seconds
+        // Phase 0 (0-59s): top-right, Phase 1 (60-119s): bottom-right, Phase 2: bottom-left, Phase 3: top-left
+        const m = margin;
+        overlayExpr = [
+            `overlay=`,
+            `x='if(lt(mod(t\\,240)\\,60)\\,W-w-${m}\\,if(lt(mod(t\\,240)\\,120)\\,W-w-${m}\\,if(lt(mod(t\\,240)\\,180)\\,${m}\\,${m})))'`,
+            `:y='if(lt(mod(t\\,240)\\,60)\\,${m}\\,if(lt(mod(t\\,240)\\,120)\\,H-h-${m}\\,if(lt(mod(t\\,240)\\,180)\\,H-h-${m}\\,${m})))'`,
+        ].join('');
     }
 
-    // Build FFmpeg drawtext filter
-    // Using alpha channel for opacity
+    return `${scaleFilter};[0:v][wm]${overlayExpr}`;
+}
+
+/**
+ * Build FFmpeg drawtext filter for TEXT watermark with position switching.
+ */
+function buildTextFilter(config) {
     const alpha = config.opacity;
-    const textFilter = [
+    const m = config.margin;
+
+    if (config.watermarkMovement === 'static') {
+        // Static position
+        let x, y;
+        switch (config.position) {
+            case 'bottom-left':  x = String(m); y = `h-th-${m}`; break;
+            case 'top-right':    x = `w-tw-${m}`; y = String(m); break;
+            case 'top-left':     x = String(m); y = String(m); break;
+            default:             x = `w-tw-${m}`; y = `h-th-${m}`;
+        }
+        return [
+            `drawtext=text='${WATERMARK_TEXT}'`,
+            `fontsize=${config.fontSize}`,
+            `fontcolor=${config.fontColor}@${alpha}`,
+            `x=${x}`, `y=${y}`,
+            `shadowcolor=black@${alpha * 0.7}`, `shadowx=1`, `shadowy=1`,
+        ].join(':');
+    }
+
+    // rotating_corners: switch corner every 60 seconds
+    const xExpr = `'if(lt(mod(t\\,240)\\,60)\\,w-tw-${m}\\,if(lt(mod(t\\,240)\\,120)\\,w-tw-${m}\\,if(lt(mod(t\\,240)\\,180)\\,${m}\\,${m})))'`;
+    const yExpr = `'if(lt(mod(t\\,240)\\,60)\\,${m}\\,if(lt(mod(t\\,240)\\,120)\\,h-th-${m}\\,if(lt(mod(t\\,240)\\,180)\\,h-th-${m}\\,${m})))'`;
+
+    return [
         `drawtext=text='${WATERMARK_TEXT}'`,
         `fontsize=${config.fontSize}`,
         `fontcolor=${config.fontColor}@${alpha}`,
-        `x=${x}`,
-        `y=${y}`,
-        `shadowcolor=black@${alpha * 0.7}`,
-        `shadowx=1`,
-        `shadowy=1`,
+        `x=${xExpr}`, `y=${yExpr}`,
+        `shadowcolor=black@${alpha * 0.7}`, `shadowx=1`, `shadowy=1`,
     ].join(':');
+}
+
+async function addWatermark(inputPath, outputPath, config) {
+    if (config.watermarkType === 'image' && config.watermarkImageUrl) {
+        // ── IMAGE watermark (PNG overlay with position switching) ──
+        const wmPath = join(TMP_DIR, `watermark_${Date.now()}.png`);
+        const downloaded = await downloadWatermarkPng(config.watermarkImageUrl, wmPath);
+        if (!downloaded) {
+            logger.warn('  Image watermark download failed, falling back to text watermark');
+            // Fall through to text watermark below
+        } else {
+            const filterComplex = buildImageOverlayFilter(
+                config.margin,
+                config.opacity,
+                config.watermarkScale,
+                config.watermarkMovement
+            );
+
+            await execFileAsync('ffmpeg', [
+                '-i', inputPath,
+                '-i', wmPath,
+                '-filter_complex', filterComplex,
+                '-codec:a', 'copy',
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-movflags', '+faststart',
+                '-y',
+                outputPath,
+            ], { timeout: 600000 });
+
+            return true;
+        }
+    }
+
+    // ── TEXT watermark (default / fallback) ──
+    const textFilter = buildTextFilter(config);
 
     await execFileAsync('ffmpeg', [
         '-i', inputPath,
         '-vf', textFilter,
-        '-codec:a', 'copy',        // Copy audio without re-encoding
-        '-c:v', 'libx264',         // H.264 video encoding
-        '-preset', 'fast',         // Fast encoding (good for pipeline)
-        '-crf', '23',              // Quality (18=high, 23=medium, 28=low)
-        '-movflags', '+faststart', // Web-optimized MP4
+        '-codec:a', 'copy',
+        '-c:v', 'libx264',
+        '-preset', 'fast',
+        '-crf', '23',
+        '-movflags', '+faststart',
         '-y',
         outputPath,
-    ], { timeout: 600000 }); // 10 min timeout
+    ], { timeout: 600000 });
 
     return true;
 }
@@ -232,13 +322,41 @@ async function processVideo(video, config) {
 // Main
 // ============================================
 
+async function loadWatermarkSettings() {
+    try {
+        const { rows } = await query(
+            `SELECT key, value FROM settings WHERE key LIKE 'watermark_%'`
+        );
+        const dbSettings = {};
+        for (const row of rows) {
+            dbSettings[row.key] = row.value;
+        }
+        return {
+            watermarkType: dbSettings.watermark_type || 'text',
+            watermarkImageUrl: dbSettings.watermark_image_url || '',
+            watermarkScale: parseFloat(dbSettings.watermark_scale) || 0.1,
+            opacity: parseFloat(dbSettings.watermark_opacity) || 0.3,
+            watermarkMovement: dbSettings.watermark_movement || 'rotating_corners',
+        };
+    } catch (err) {
+        logger.warn(`Could not load watermark settings from DB: ${err.message}. Using defaults.`);
+        return {};
+    }
+}
+
 async function main() {
-    const config = { ...DEFAULTS, ...parseArgs() };
+    const dbSettings = await loadWatermarkSettings();
+    const config = { ...DEFAULTS, ...dbSettings, ...parseArgs() };
 
     logger.info('='.repeat(60));
     logger.info('CelebSkin — Video Watermarking');
     logger.info('='.repeat(60));
-    logger.info(`Text: "${WATERMARK_TEXT}", Opacity: ${config.opacity}, Position: ${config.position}`);
+    logger.info(`Type: ${config.watermarkType}, Opacity: ${config.opacity}, Movement: ${config.watermarkMovement}`);
+    if (config.watermarkType === 'image' && config.watermarkImageUrl) {
+        logger.info(`Image URL: ${config.watermarkImageUrl}`);
+    } else {
+        logger.info(`Text: "${WATERMARK_TEXT}", Position: ${config.position}`);
+    }
 
     // Check FFmpeg
     try {

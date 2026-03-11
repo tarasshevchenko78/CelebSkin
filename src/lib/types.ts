@@ -56,6 +56,7 @@ export interface Video {
     celebrities?: Celebrity[];
     tags?: Tag[];
     categories?: Category[];
+    collections?: Collection[];
     movie?: Movie | null;
     embed_code?: string | null;
 }

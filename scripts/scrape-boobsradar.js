@@ -609,6 +609,7 @@ function parseArgs() {
     if (arg === '--resume') args.resume = true;
     if (arg === '--with-ai') args.withAi = true;
     if (arg.startsWith('--category=')) args.filterCategory = arg.split('=')[1];
+    if (arg.startsWith('--categories=')) args.filterCategory = arg.split('=')[1];
     if (arg.startsWith('--max-pages=')) args.maxPagesPerCategory = parseInt(arg.split('=')[1]);
     if (arg.startsWith('--max-videos=')) args.maxVideosTotal = parseInt(arg.split('=')[1]);
     if (arg.startsWith('--limit=')) args.maxVideosTotal = parseInt(arg.split('=')[1]);

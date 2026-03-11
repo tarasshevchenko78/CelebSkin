@@ -13,7 +13,7 @@ const SSH_OPTS     = `-o ConnectTimeout=10 -o StrictHostKeyChecking=no -i ${SSH_
 const SCRIPTS_DIR  = '/opt/celebskin/scripts';
 const TIMEOUT_MS   = 30 * 60 * 1000; // 30 minutes (download step can take long)
 
-type Step = 'parse' | 'translate' | 'match' | 'map-tags' | 'download';
+type Step = 'parse' | 'translate' | 'match' | 'map-tags' | 'download' | 'test-connection' | 'list-categories';
 
 interface RequestBody {
     step: Step;
@@ -79,9 +79,74 @@ export async function POST(request: NextRequest) {
 
     const { step, options = {} } = body;
 
-    const validSteps: Step[] = ['parse', 'translate', 'match', 'map-tags', 'download'];
+    const validSteps: Step[] = ['parse', 'translate', 'match', 'map-tags', 'download', 'test-connection', 'list-categories'];
     if (!validSteps.includes(step)) {
         return NextResponse.json({ success: false, error: `Invalid step: ${step}` }, { status: 400 });
+    }
+
+    // Special: test-connection — check SSH + DB + node on Contabo
+    if (step === 'test-connection') {
+        const startedAt = Date.now();
+        try {
+            const { stdout } = await runOnContabo('echo "SSH_OK" && node -e "console.log(\'NODE_OK\')" && node -e "const {query}=require(\'./lib/db.js\');query(\'SELECT 1 as ok\').then(r=>console.log(\'DB_OK:\',r.rows[0].ok)).catch(e=>console.error(\'DB_FAIL:\',e.message)).finally(()=>process.exit())"');
+            const duration = Date.now() - startedAt;
+            const sshOk = stdout.includes('SSH_OK');
+            const nodeOk = stdout.includes('NODE_OK');
+            const dbOk = stdout.includes('DB_OK');
+            return NextResponse.json({
+                success: sshOk && nodeOk,
+                step: 'test-connection',
+                checks: { ssh: sshOk, node: nodeOk, db: dbOk },
+                output: stdout.slice(-2000),
+                duration,
+            });
+        } catch (err) {
+            const execErr = err as ExecError;
+            return NextResponse.json({
+                success: false,
+                step: 'test-connection',
+                checks: { ssh: false, node: false, db: false },
+                error: execErr.message?.slice(-500) ?? 'SSH connection failed',
+                output: (execErr.stdout ?? '').slice(-2000),
+                duration: Date.now() - startedAt,
+            }, { status: 500 });
+        }
+    }
+
+    // Special: list-categories — fetch available categories from xcadr.online
+    if (step === 'list-categories') {
+        const startedAt = Date.now();
+        try {
+            const { stdout } = await runOnContabo('node xcadr/list-categories.js');
+            const duration = Date.now() - startedAt;
+            let categories = [];
+            try {
+                categories = JSON.parse(stdout.trim());
+            } catch {
+                return NextResponse.json({
+                    success: false,
+                    step: 'list-categories',
+                    error: 'Failed to parse categories output',
+                    output: stdout.slice(-2000),
+                    duration,
+                }, { status: 500 });
+            }
+            return NextResponse.json({
+                success: true,
+                step: 'list-categories',
+                categories,
+                duration,
+            });
+        } catch (err) {
+            const execErr = err as ExecError;
+            return NextResponse.json({
+                success: false,
+                step: 'list-categories',
+                error: execErr.message?.slice(-500) ?? 'Failed to fetch categories',
+                output: (execErr.stdout ?? '').slice(-2000),
+                duration: Date.now() - startedAt,
+            }, { status: 500 });
+        }
     }
 
     let remoteCmd: string;

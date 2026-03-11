@@ -23,7 +23,7 @@ export async function GET(
 
         const video = videoResult.rows[0];
 
-        const [celebResult, tagResult, movieResult, rawResult] = await Promise.all([
+        const [celebResult, tagResult, movieResult, rawResult, collResult] = await Promise.all([
             pool.query(
                 `SELECT c.* FROM celebrities c
                  JOIN video_celebrities vc ON vc.celebrity_id = c.id
@@ -49,12 +49,20 @@ export async function GET(
                       [video.raw_video_id]
                   )
                 : Promise.resolve({ rows: [] }),
+            pool.query(
+                `SELECT c.* FROM collections c
+                 JOIN collection_videos cv ON cv.collection_id = c.id
+                 WHERE cv.video_id = $1
+                 ORDER BY c.sort_order ASC`,
+                [id]
+            ),
         ]);
 
         return NextResponse.json({
             video,
             celebrities: celebResult.rows,
             tags: tagResult.rows,
+            collections: collResult.rows,
             movie: movieResult.rows[0] || null,
             rawVideo: rawResult.rows[0] || null,
         });

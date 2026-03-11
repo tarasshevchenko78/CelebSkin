@@ -640,11 +640,20 @@ export default function PipelineControls() {
                     </label>
                 </div>
 
-                {stats?.categories && stats.categories.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-800">
-                        <label className="text-xs text-gray-500 block mb-2">
-                            Categories {options.categories.length > 0 && <span className="text-purple-400">({options.categories.length})</span>}
+                <div className="mt-3 pt-3 border-t border-gray-800">
+                    <div className="flex items-center justify-between mb-2">
+                        <label className="text-xs text-gray-500">
+                            Категории {options.categories.length > 0 && <span className="text-purple-400">({options.categories.length} выбрано)</span>}
                         </label>
+                        <button
+                            onClick={() => runAction('sync-categories')}
+                            disabled={!!running}
+                            className="text-[10px] px-2 py-1 rounded bg-gray-800 text-gray-400 hover:text-gray-200 border border-gray-700 disabled:opacity-50 transition-colors"
+                        >
+                            {running === 'sync-categories' ? '...' : '↻ Обновить с boobsradar'}
+                        </button>
+                    </div>
+                    {stats?.categories && stats.categories.length > 0 ? (
                         <div className="flex flex-wrap gap-2">
                             {stats.categories.map(cat => (
                                 <button
@@ -660,8 +669,10 @@ export default function PipelineControls() {
                                 </button>
                             ))}
                         </div>
-                    </div>
-                )}
+                    ) : (
+                        <p className="text-xs text-gray-600">Категории пусты. Нажмите «Обновить с boobsradar» для загрузки.</p>
+                    )}
+                </div>
             </Section>
 
             {/* Live Logs */}

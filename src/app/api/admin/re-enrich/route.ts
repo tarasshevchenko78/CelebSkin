@@ -4,22 +4,38 @@ import { config } from '@/lib/config';
 import { logger } from '@/lib/logger';
 import { invalidateAfterEdit } from '@/lib/cache';
 import { extractGeminiJSON } from '@/lib/gemini';
+import { getSettingOrEnv } from '@/lib/db/settings';
 
 export const dynamic = 'force-dynamic';
 
 const TMDB_BASE  = 'https://api.themoviedb.org/3';
 const TMDB_IMAGE = 'https://image.tmdb.org/t/p/w500';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiApiKey}`;
 
 const LOCALES = ['en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'nl', 'tr', 'ru'] as const;
 type Locale = typeof LOCALES[number];
 
+// ── Dynamic API key helpers ──────────────────────────────────────────────────
+
+async function getGeminiUrl(): Promise<string | null> {
+    const key = await getSettingOrEnv('gemini_api_key', config.geminiApiKey);
+    if (!key) return null;
+    return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
+}
+
+async function getTmdbApiKey(): Promise<string> {
+    return getSettingOrEnv('tmdb_api_key', config.tmdbApiKey);
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function callGemini(prompt: string): Promise<Record<string, string> | null> {
-    if (!config.geminiApiKey) return null;
+    const geminiUrl = await getGeminiUrl();
+    if (!geminiUrl) {
+        logger.error('callGemini: no API key configured (neither DB nor env)');
+        return null;
+    }
     try {
-        const res = await fetch(GEMINI_URL, {
+        const res = await fetch(geminiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -27,9 +43,15 @@ async function callGemini(prompt: string): Promise<Record<string, string> | null
                 generationConfig: { temperature: 0.2, responseMimeType: 'application/json' },
             }),
         });
+        if (!res.ok) {
+            const errBody = await res.text();
+            logger.error('callGemini: HTTP error', { status: res.status, body: errBody.substring(0, 500) });
+            return null;
+        }
         const data = await res.json();
         return extractGeminiJSON(data);
-    } catch {
+    } catch (err) {
+        logger.error('callGemini: exception', { error: err instanceof Error ? err.message : String(err) });
         return null;
     }
 }
@@ -61,15 +83,23 @@ Return JSON with exactly these keys: en, de, fr, es, it, pt, pl, nl, tr
 }
 
 async function tmdbGet(path: string, params: Record<string, string> = {}) {
-    if (!config.tmdbApiKey) return null;
+    const apiKey = await getTmdbApiKey();
+    if (!apiKey) {
+        logger.error('tmdbGet: no TMDB API key configured (neither DB nor env)');
+        return null;
+    }
     const url = new URL(`${TMDB_BASE}${path}`);
-    url.searchParams.set('api_key', config.tmdbApiKey);
+    url.searchParams.set('api_key', apiKey);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
     try {
         const res = await fetch(url.toString());
-        if (!res.ok) return null;
+        if (!res.ok) {
+            logger.error('tmdbGet: HTTP error', { path, status: res.status });
+            return null;
+        }
         return await res.json();
-    } catch {
+    } catch (err) {
+        logger.error('tmdbGet: exception', { path, error: err instanceof Error ? err.message : String(err) });
         return null;
     }
 }
@@ -212,7 +242,7 @@ async function reEnrichVideo(id: string) {
 // ── Re-translate ──────────────────────────────────────────────────────────────
 
 async function reTranslate(type: 'video' | 'celebrity' | 'movie', id: string | number) {
-    if (!config.geminiApiKey) return { error: 'GEMINI_API_KEY not configured' };
+    if (!(await getGeminiUrl())) return { error: 'Gemini API ключ не настроен (Настройки → API ключи)' };
 
     const updated: string[] = [];
 
@@ -362,10 +392,14 @@ interface GeminiPart {
 }
 
 async function callGeminiVision(imageParts: GeminiPart[], textPrompt: string): Promise<Record<string, unknown> | null> {
-    if (!config.geminiApiKey) return null;
+    const geminiUrl = await getGeminiUrl();
+    if (!geminiUrl) {
+        logger.error('callGeminiVision: no API key configured');
+        return null;
+    }
     const parts: GeminiPart[] = [...imageParts, { text: textPrompt }];
     try {
-        const res = await fetch(GEMINI_URL, {
+        const res = await fetch(geminiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -373,9 +407,15 @@ async function callGeminiVision(imageParts: GeminiPart[], textPrompt: string): P
                 generationConfig: { temperature: 0.3, responseMimeType: 'application/json' },
             }),
         });
+        if (!res.ok) {
+            const errBody = await res.text();
+            logger.error('callGeminiVision: HTTP error', { status: res.status, body: errBody.substring(0, 500) });
+            return null;
+        }
         const data = await res.json();
         return extractGeminiJSON(data);
-    } catch {
+    } catch (err) {
+        logger.error('callGeminiVision: exception', { error: err instanceof Error ? err.message : String(err) });
         return null;
     }
 }
@@ -383,7 +423,7 @@ async function callGeminiVision(imageParts: GeminiPart[], textPrompt: string): P
 // ── Regenerate description ────────────────────────────────────────────────────
 
 async function regenerateDescription(type: 'video' | 'celebrity' | 'movie', id: string | number) {
-    if (!config.geminiApiKey) return { error: 'GEMINI_API_KEY not configured' };
+    if (!(await getGeminiUrl())) return { error: 'Gemini API ключ не настроен (Настройки → API ключи)' };
 
     if (type === 'video') {
         // Fetch video with related data

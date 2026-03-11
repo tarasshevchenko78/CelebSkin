@@ -52,6 +52,13 @@ interface TagRef {
     slug: string;
 }
 
+interface CollectionRef {
+    id: number;
+    title: LocalizedField;
+    slug: string;
+    videos_count: number;
+}
+
 interface MovieRef {
     id: number;
     title: string;
@@ -82,6 +89,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
     const router = useRouter();
     const [video, setVideo] = useState<VideoData | null>(null);
     const [celebrities, setCelebrities] = useState<CelebrityRef[]>([]);
+    const [collections, setCollections] = useState<CollectionRef[]>([]);
     const [movie, setMovie] = useState<MovieRef | null>(null);
     const [rawVideo, setRawVideo] = useState<RawVideoData | null>(null);
     const [loading, setLoading] = useState(true);
@@ -108,6 +116,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             setVideo(data.video);
             setCelebrities(data.celebrities);
             setEditedTags(data.tags);
+            setCollections(data.collections || []);
             setMovie(data.movie);
             setRawVideo(data.rawVideo);
             setTitle(data.video.title || {});
@@ -311,7 +320,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
             </div>
 
             {/* Screenshot Picker */}
-            <ScreenshotPicker videoId={video.id} currentThumbnail={video.thumbnail_url} screenshots={video.screenshots} />
+            <ScreenshotPicker videoId={video.id} currentThumbnail={video.thumbnail_url} screenshots={video.screenshots} videoUrl={video.video_url_watermarked || video.video_url} />
 
             {/* AI Raw Response */}
             <JsonViewer data={video.ai_raw_response} />
@@ -362,6 +371,21 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                             {movie.year && <span className="text-xs text-gray-500 ml-2">({movie.year})</span>}
                         </div>
                     </a>
+                </div>
+            )}
+
+            {collections.length > 0 && (
+                <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+                    <h3 className="text-sm font-medium text-gray-300 mb-3">Коллекции</h3>
+                    <div className="flex flex-wrap gap-2">
+                        {collections.map((c) => (
+                            <a key={c.id} href={`/admin/collections`}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-red-900/20 border border-red-800/40 hover:border-red-600 transition-colors">
+                                <span className="text-xs text-red-300">{getLocalizedField(c.title, 'ru') || c.slug}</span>
+                                <span className="text-[10px] text-gray-500">({c.videos_count})</span>
+                            </a>
+                        ))}
+                    </div>
                 </div>
             )}
 

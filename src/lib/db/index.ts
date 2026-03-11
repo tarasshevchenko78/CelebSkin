@@ -8,3 +8,4 @@ export * from './search';
 export * from './collections';
 export * from './blog';
 export * from './admin';
+export * from './settings';

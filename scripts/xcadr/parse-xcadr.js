@@ -28,7 +28,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // --- CONFIGURATION ---
 const XCADR_BASE = 'https://xcadr.online';
 const REQUEST_DELAY_MS = 2000;
-const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+// Rotate User-Agents to reduce detection risk
+const USER_AGENTS = [
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:134.0) Gecko/20100101 Firefox/134.0',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+];
+const USER_AGENT = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
 const httpClient = axios.create({
   headers: { 'User-Agent': USER_AGENT },
@@ -105,8 +112,28 @@ function extractVideoId(url) {
 // --- FETCH HELPERS ---
 
 async function fetchHtml(url) {
-  const response = await httpClient.get(url);
-  return response.data;
+  try {
+    const response = await httpClient.get(url);
+    if (DEBUG) {
+      const { writeFileSync } = await import('fs');
+      const slug = url.replace(/[^a-z0-9]/gi, '_').substring(0, 80);
+      const debugPath = `/tmp/xcadr_debug_${slug}.html`;
+      writeFileSync(debugPath, response.data);
+      console.log(`[DEBUG] HTML saved to ${debugPath} (${response.data.length} bytes, status ${response.status})`);
+    }
+    return response.data;
+  } catch (err) {
+    if (err.response) {
+      console.error(`[ERROR] HTTP ${err.response.status} for ${url}`);
+      if (err.response.status === 403) {
+        console.error(`[ERROR] Possible anti-bot protection. Try again later or check if site is up.`);
+      }
+      if (err.response.status === 429) {
+        console.error(`[ERROR] Rate limited. Increase REQUEST_DELAY_MS.`);
+      }
+    }
+    throw err;
+  }
 }
 
 // --- PARSERS ---

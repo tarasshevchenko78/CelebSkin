@@ -55,6 +55,17 @@ export async function getCollectionBySlug(slug: string): Promise<Collection | nu
     return result.rows[0] || null;
 }
 
+export async function getCollectionsForVideo(videoId: string): Promise<Collection[]> {
+    const result = await pool.query(
+        `SELECT c.* FROM collections c
+         JOIN collection_videos cv ON cv.collection_id = c.id
+         WHERE cv.video_id = $1
+         ORDER BY c.sort_order ASC`,
+        [videoId]
+    );
+    return result.rows;
+}
+
 export async function getVideosForCollection(
     collectionId: number,
     page: number = 1,

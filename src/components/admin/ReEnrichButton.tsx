@@ -56,15 +56,14 @@ export default function ReEnrichButton({ type, id }: Props) {
 
             if (!res.ok || data.error) {
                 setState('error');
-                setMessage(data.error || 'Request failed');
-                setTimeout(() => setState('idle'), 4000);
+                setMessage(data.error || 'Запрос не удался');
+                // Don't auto-hide errors — let user read them
                 return;
             }
 
             if (data.success === false) {
                 setState('error');
-                setMessage(data.message || 'Not available');
-                setTimeout(() => setState('idle'), 4000);
+                setMessage(data.message || 'Недоступно');
                 return;
             }
 
@@ -90,8 +89,7 @@ export default function ReEnrichButton({ type, id }: Props) {
             }, 1500);
         } catch {
             setState('error');
-            setMessage('Network error');
-            setTimeout(() => setState('idle'), 4000);
+            setMessage('Ошибка сети (таймаут?)');
         }
     }
 
@@ -111,7 +109,10 @@ export default function ReEnrichButton({ type, id }: Props) {
         <div ref={ref} className="relative inline-block">
             {/* Main button */}
             <button
-                onClick={() => state === 'idle' && setOpen((o) => !o)}
+                onClick={() => {
+                    if (state === 'idle') setOpen((o) => !o);
+                    if (state === 'error') { setState('idle'); setMessage(''); }
+                }}
                 disabled={state === 'loading'}
                 className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm transition-colors ${
                     state === 'loading'

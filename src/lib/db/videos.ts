@@ -366,7 +366,7 @@ export async function getOtherVideosByMovie(
 // ============================================
 
 async function enrichVideoWithRelations(video: Video): Promise<Video> {
-    const [celebResult, tagResult, movieResult, rawResult] = await Promise.all([
+    const [celebResult, tagResult, movieResult, rawResult, collResult] = await Promise.all([
         pool.query(
             `SELECT c.* FROM celebrities c
        JOIN video_celebrities vc ON vc.celebrity_id = c.id
@@ -392,6 +392,13 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
                   [video.raw_video_id]
               )
             : Promise.resolve({ rows: [] }),
+        pool.query(
+            `SELECT c.* FROM collections c
+             JOIN collection_videos cv ON cv.collection_id = c.id
+             WHERE cv.video_id = $1
+             ORDER BY c.sort_order ASC`,
+            [video.id]
+        ),
     ]);
 
     const raw = rawResult.rows[0] || null;
@@ -409,6 +416,7 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
         video_url_watermarked: videoUrlWatermarked,
         celebrities: celebResult.rows,
         tags: tagResult.rows,
+        collections: collResult.rows,
         movie: movieResult.rows[0] || null,
         embed_code: raw?.embed_code || null,
     } as Video;

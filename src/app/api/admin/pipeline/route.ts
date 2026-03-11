@@ -54,6 +54,11 @@ const PIPELINE_ACTIONS: Record<string, { script: string; label: string; timeout:
         label: 'Publish Videos',
         timeout: 300,
     },
+    'sync-categories': {
+        script: 'sync-categories.js',
+        label: 'Sync Categories (Boobsradar)',
+        timeout: 60,
+    },
     'full-pipeline': {
         script: 'run-pipeline.js',
         label: 'Full Pipeline',
