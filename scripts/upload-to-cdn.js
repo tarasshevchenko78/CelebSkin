@@ -415,7 +415,7 @@ async function main() {
                     AND v.video_url_watermarked IS NOT NULL
                     AND v.video_url_watermarked LIKE '%b-cdn.net%')
              )
-             AND v.status IN ('watermarked', 'published')
+             AND v.status IN ('watermarked', 'published', 'needs_review')
              ORDER BY v.created_at ASC
              LIMIT $1`,
             [limit]

@@ -396,8 +396,9 @@ async function getWorkAvailability() {
                  )) AS watermark_ready,
                 (SELECT COUNT(*) FROM videos WHERE status='watermarked'
                  AND (thumbnail_url IS NULL OR thumbnail_url NOT LIKE '%b-cdn.net%')) AS thumbnail_ready,
-                (SELECT COUNT(*) FROM videos WHERE status='watermarked'
-                 AND (video_url_watermarked LIKE 'tmp/%' OR thumbnail_url LIKE 'tmp/%')) AS cdn_ready,
+                (SELECT COUNT(*) FROM videos WHERE status IN ('watermarked','needs_review')
+                 AND (video_url_watermarked LIKE 'tmp/%' OR thumbnail_url LIKE 'tmp/%'
+                      OR (screenshots IS NOT NULL AND screenshots::text LIKE '%tmp/%'))) AS cdn_ready,
                 (SELECT COUNT(*) FROM videos WHERE status='watermarked'
                  AND video_url_watermarked LIKE '%b-cdn.net%'
                  AND thumbnail_url LIKE '%b-cdn.net%') AS publish_ready,
