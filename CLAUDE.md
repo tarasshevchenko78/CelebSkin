@@ -25,12 +25,13 @@ src/
     admin/             — админка (русский интерфейс)
     api/admin/         — API админки
   lib/
-    db/                — модули БД (pool, videos, celebrities, movies, search, etc.)
+    db/                — модули БД (pool, videos, celebrities, movies, search, settings, etc.)
     config.ts          — централизованный конфиг
     cache.ts           — Redis кэш с инвалидацией
     logger.ts          — структурированные логи
     gemini.ts          — Gemini API хелперы
     seo.ts             — hreflang хелпер
+    bunny.ts           — Bunny CDN upload helper
   components/
     VideoCard.tsx      — универсальная карточка видео с hover preview
     BottomNav.tsx      — мобильная навигация
@@ -59,11 +60,12 @@ scripts/
   upload-to-cdn.js
   publish-to-site.js
   run-pipeline.js
+  sync-categories.js   — синхронизация категорий из boobsradar в БД
   deploy-web.sh
   deploy-pipeline.sh
   backup-db.sh
 db/
-  migrations/          — SQL миграции (001-008)
+  migrations/          — SQL миграции (001-009, 009 = settings table)
 ```
 
 ## Два сервера — строгое разделение
@@ -71,7 +73,8 @@ db/
 - Contabo: ТОЛЬКО pipeline скрипты. Триггерится через SSH с AbeloHost
 - Pipeline scripts на Contabo коннектятся к БД на AbeloHost (DB_HOST=185.224.82.214)
 - Никогда не запускать pipeline на AbeloHost
-- API ключи (Gemini, TMDB) хранятся на Contabo в /opt/celebskin/scripts/.env
+- API ключи (Gemini, TMDB) хранятся в `settings` таблице БД (приоритет) + fallback на .env
+- `getSettingOrEnv(dbKey, envFallback)` — единый геттер для API ключей
 
 ## xcadr Pipeline (Contabo)
 Порядок: parse → translate → match → map-tags → import (из админки) → download-and-process
@@ -86,11 +89,19 @@ db/
 1. Import пишет boobsradar URL в video_url — должен быть NULL
 2. Скачивается 480p вместо максимального качества
 3. Водяной знак xcadr.online не убирается — delogo не реализован
-4. Коллекции не привязываются к видео при Import
+4. ~~Коллекции не привязываются к видео при Import~~ — ИСПРАВЛЕНО: collections теперь отображаются на публичных и админ страницах
 5. Draft статус для актрис/фильмов не реализован
 6. AI описание — промт не обновлён на эротический стиль
 7. Удаление видео из админки может не работать
 8. Часть админки всё ещё на английском
+
+## Реализовано (март 2026)
+- Settings table: управление API ключами (Gemini, TMDB) из админки `/admin/settings`
+- AI re-enrich: динамические ключи из DB, логирование ошибок, детальные сообщения
+- Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback)
+- Водяной знак: UI для загрузки PNG, выбор паттерна движения, настройка прозрачности/масштаба
+- Категории boobsradar: `sync-categories.js`, фильтр по категориям в pipeline UI, `--categories=` флаг
+- XCadr: dropdown категорий, badges коллекций в таблице импорта
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
