@@ -159,7 +159,7 @@ export default async function VideoDetailPage({
                             <li className="text-gray-600">/</li>
                             <li>
                                 <a href={`/${locale}/celebrity/${celebrity.slug}`}
-                                   className="text-gray-500 hover:text-gray-300 transition-colors">
+                                    className="text-gray-500 hover:text-gray-300 transition-colors">
                                     {celebrity.name}
                                 </a>
                             </li>
@@ -235,12 +235,23 @@ export default async function VideoDetailPage({
                         />
                     </div>
 
-                    {/* ── 3. Tags ── */}
-                    {video.tags && video.tags.length > 0 && (
+                    {/* ── 3. Categories & Tags ── */}
+                    {(video.categories && video.categories.length > 0) || (video.tags && video.tags.length > 0) ? (
                         <div className="flex flex-wrap gap-1.5 mt-5 pt-5 border-t border-gray-800/50">
-                            {video.tags.map((tag) => (
+                            {/* Categories */}
+                            {video.categories?.map((cat) => (
                                 <a
-                                    key={tag.id}
+                                    key={`cat-${cat.id}`}
+                                    href={`/${locale}/category/${cat.slug}`}
+                                    className="px-2 py-0.5 rounded-full text-xs bg-red-900/40 text-red-200 border border-red-800 hover:border-red-500 hover:text-white transition-colors"
+                                >
+                                    {getLocalizedField(cat.name_localized, locale) || cat.name}
+                                </a>
+                            ))}
+                            {/* Tags */}
+                            {video.tags?.map((tag) => (
+                                <a
+                                    key={`tag-${tag.id}`}
                                     href={`/${locale}/tag/${tag.slug}`}
                                     className="px-2 py-0.5 rounded-full text-xs bg-gray-800/50 text-gray-400 border border-gray-700 hover:border-red-600 hover:text-red-400 transition-colors"
                                 >
@@ -248,7 +259,7 @@ export default async function VideoDetailPage({
                                 </a>
                             ))}
                         </div>
-                    )}
+                    ) : null}
 
                     {/* ── 3b. Collections ── */}
                     {video.collections && video.collections.length > 0 && (
