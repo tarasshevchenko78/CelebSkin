@@ -39,7 +39,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TMP_DIR = config.pipeline.tmpDir;
 
 export const DEFAULTS = {
-    thumbCount: 8,
+    thumbCount: 20,
     thumbWidth: 1280,
     gifDuration: 4,
     gifFps: 8,
