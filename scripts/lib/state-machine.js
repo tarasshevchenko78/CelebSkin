@@ -27,7 +27,7 @@ export const ALLOWED_TRANSITIONS = {
     [VIDEO_STATES.PROCESSING]: [VIDEO_STATES.ENRICHED, VIDEO_STATES.FAILED, VIDEO_STATES.NEEDS_REVIEW],
     [VIDEO_STATES.ENRICHED]: [VIDEO_STATES.AUTO_RECOGNIZED, VIDEO_STATES.NEEDS_REVIEW, VIDEO_STATES.UNKNOWN_WITH_SUGGESTIONS, VIDEO_STATES.WATERMARKED],
     [VIDEO_STATES.AUTO_RECOGNIZED]: [VIDEO_STATES.WATERMARKED, VIDEO_STATES.NEEDS_REVIEW, VIDEO_STATES.REJECTED],
-    [VIDEO_STATES.NEEDS_REVIEW]: [VIDEO_STATES.WATERMARKED, VIDEO_STATES.REJECTED, VIDEO_STATES.PROCESSING],
+    [VIDEO_STATES.NEEDS_REVIEW]: [VIDEO_STATES.WATERMARKED, VIDEO_STATES.PUBLISHED, VIDEO_STATES.REJECTED, VIDEO_STATES.PROCESSING],
     [VIDEO_STATES.UNKNOWN]: [VIDEO_STATES.NEEDS_REVIEW, VIDEO_STATES.REJECTED],
     [VIDEO_STATES.UNKNOWN_WITH_SUGGESTIONS]: [VIDEO_STATES.NEEDS_REVIEW, VIDEO_STATES.REJECTED],
     [VIDEO_STATES.WATERMARKED]: [VIDEO_STATES.PUBLISHED, VIDEO_STATES.NEEDS_REVIEW],
@@ -89,21 +89,8 @@ export function getNextStates(currentState) {
 export function validatePrePublish(video) {
     const errors = [];
 
-    if (video.status !== VIDEO_STATES.WATERMARKED) {
-        errors.push(`Status must be "watermarked", got "${video.status}"`);
-    }
-
-    const videoUrl = video.video_url_watermarked || video.video_url;
-    if (!isCdnUrl(videoUrl)) {
-        errors.push(`Video URL must be on CDN, got "${(videoUrl || 'null').substring(0, 80)}"`);
-    }
-
-    if (!isCdnUrl(video.thumbnail_url)) {
-        errors.push(`Thumbnail URL must be on CDN, got "${(video.thumbnail_url || 'null').substring(0, 80)}"`);
-    }
-
-    if (video.celebrity_count !== undefined && parseInt(video.celebrity_count) === 0) {
-        errors.push('No celebrities linked to this video');
+    if (video.status !== VIDEO_STATES.WATERMARKED && video.status !== VIDEO_STATES.NEEDS_REVIEW) {
+        errors.push(`Status must be "watermarked" or "needs_review", got "${video.status}"`);
     }
 
     return { valid: errors.length === 0, errors };

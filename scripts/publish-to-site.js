@@ -184,9 +184,9 @@ export function validateVideoForPublish(video) {
         warnings.push(`CELEBS_NO_PHOTO: ${celebsNoPhoto} celebrity(s) have no photo`);
     }
 
-    // MODERATION: No celebrities linked → needs_review
+    // WARNING: No celebrities linked (should still publish)
     if (video.celebrity_count === 0 || video.celebrity_count === undefined) {
-        needsReview.push('NO_CELEBRITIES: no celebrities linked to this video');
+        warnings.push('NO_CELEBRITIES: no celebrities linked to this video');
     }
 
     // MODERATION: Missing description/review → needs_review
