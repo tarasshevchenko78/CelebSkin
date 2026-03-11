@@ -86,9 +86,14 @@ function tmdbFetch(path) {
             res.on('data', chunk => data += chunk);
             res.on('end', () => {
                 try {
-                    resolve(JSON.parse(data));
+                    const parsed = JSON.parse(data);
+                    // Check for TMDB API errors (non-200 status or error object)
+                    if (res.statusCode !== 200) {
+                        console.error(`  TMDB API error (HTTP ${res.statusCode}): ${parsed.status_message || data.slice(0, 200)}`);
+                    }
+                    resolve(parsed);
                 } catch (e) {
-                    reject(new Error(`TMDB parse error: ${data.slice(0, 200)}`));
+                    reject(new Error(`TMDB parse error (HTTP ${res.statusCode}): ${data.slice(0, 200)}`));
                 }
             });
         }).on('error', reject);
@@ -126,19 +131,27 @@ export async function findOrCreateMovie(movieTitle, year) {
         [cleanTitle]
     );
 
-    if (existing.rows.length > 0 && !FORCE) {
-        console.log(`  Movie already exists: "${existing.rows[0].title}" (id=${existing.rows[0].id})`);
-        return existing.rows[0];
+    const existingMovie = existing.rows[0] || null;
+
+    // If movie exists AND already has TMDB data → skip (unless --force)
+    if (existingMovie && existingMovie.tmdb_id && !FORCE) {
+        console.log(`  Movie already enriched: "${existingMovie.title}" (tmdb_id=${existingMovie.tmdb_id})`);
+        return existingMovie;
+    }
+
+    // Search TMDB — either new movie or existing without TMDB data
+    if (existingMovie && !existingMovie.tmdb_id) {
+        console.log(`  Movie exists but no TMDB data: "${existingMovie.title}" — searching TMDB...`);
     }
 
     // Multi-strategy TMDB search to maximize match rate
     const tmdbResult = await searchTmdbMovie(cleanTitle, year);
     if (tmdbResult) {
-        return await enrichMovieFromTmdb(tmdbResult.result, tmdbResult.type, existing.rows[0] || null);
+        return await enrichMovieFromTmdb(tmdbResult.result, tmdbResult.type, existingMovie);
     }
 
     console.log(`  TMDB: no results for "${cleanTitle}" after all strategies`);
-    return null;
+    return existingMovie; // Return existing movie even without TMDB data (better than null)
 }
 
 /**
