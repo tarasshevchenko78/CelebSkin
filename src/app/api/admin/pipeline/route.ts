@@ -358,14 +358,51 @@ export async function DELETE(request: NextRequest) {
             killed = true;
         }
 
+        // DB cleanup — delete ALL unpublished videos + mark raw_videos as skipped
+        let cleanedVideos = 0;
+        let cleanedRaw = 0;
+        try {
+            // 1. Delete unpublished videos and relations
+            const { rows: unpublished } = await pool.query(
+                `SELECT id FROM videos WHERE status NOT IN ('published','rejected','dmca_removed')`
+            );
+            if (unpublished.length > 0) {
+                const ids = unpublished.map((r: { id: string }) => r.id);
+                await pool.query(`DELETE FROM video_celebrities WHERE video_id = ANY($1)`, [ids]);
+                await pool.query(`DELETE FROM video_tags WHERE video_id = ANY($1)`, [ids]);
+                await pool.query(`DELETE FROM movie_scenes WHERE video_id = ANY($1)`, [ids]);
+                await pool.query(`DELETE FROM video_categories WHERE video_id = ANY($1)`, [ids]);
+                await pool.query(`DELETE FROM collection_videos WHERE video_id = ANY($1)`, [ids]);
+                const del = await pool.query(`DELETE FROM videos WHERE id = ANY($1)`, [ids]);
+                cleanedVideos = del.rowCount || 0;
+            }
+
+            // 2. Mark all non-published raw_videos as skipped
+            const r2 = await pool.query(
+                `UPDATE raw_videos SET status = 'skipped' WHERE status IN ('pending','processing','processed','failed')`
+            );
+            cleanedRaw = r2.rowCount || 0;
+
+            // 3. Clean orphan celebrities from last day
+            await pool.query(`
+                DELETE FROM celebrities
+                WHERE id NOT IN (
+                    SELECT DISTINCT vc.celebrity_id FROM video_celebrities vc
+                    JOIN videos v ON v.id = vc.video_id WHERE v.status = 'published'
+                ) AND created_at > NOW() - INTERVAL '1 day'
+            `);
+        } catch (cleanErr) {
+            logger.error('Pipeline stop DB cleanup failed', { error: cleanErr instanceof Error ? cleanErr.message : String(cleanErr) });
+        }
+
         await pool.query(
             `INSERT INTO processing_log (step, status, metadata) VALUES ($1, $2, $3::jsonb)`,
-            ['admin:stop-all', 'completed', JSON.stringify({ killed, stoppedAt: new Date().toISOString() })]
+            ['admin:stop-all', 'completed', JSON.stringify({ killed, cleanedVideos, cleanedRaw, stoppedAt: new Date().toISOString() })]
         );
 
         return NextResponse.json({
             success: true,
-            message: 'All pipeline processes stopped',
+            message: `Остановлено. Удалено ${cleanedVideos} незавершённых видео, ${cleanedRaw} raw_videos помечены как skipped`,
         });
     } catch (error) {
         logger.error('Pipeline stop failed', { route: '/api/admin/pipeline', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });

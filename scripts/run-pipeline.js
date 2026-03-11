@@ -337,17 +337,14 @@ async function fullPipelineReset() {
             logger.info(`[cleanup] Deleted ${r2.rowCount} unpublished videos + relations`);
         }
 
-        // 3. Reset raw_videos whose video was just deleted → back to 'pending'
+        // 3. Mark ALL non-published raw_videos as 'skipped' — DON'T re-process old data
+        // Only fresh scrape creates new 'pending' raw_videos
         const r3 = await query(`
-            UPDATE raw_videos SET status = 'pending'
-            WHERE status = 'processed'
-            AND id NOT IN (SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL)
+            UPDATE raw_videos SET status = 'skipped'
+            WHERE status IN ('processed', 'pending', 'failed')
+            AND id NOT IN (SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL AND status = 'published')
         `);
-        if (r3.rowCount > 0) logger.info(`[cleanup] Reset ${r3.rowCount} raw_videos back to pending (orphaned)`);
-
-        // 4. Reset failed raw_videos with retry_count < 3 → give them another chance
-        const r4 = await query(`UPDATE raw_videos SET status = 'pending' WHERE status = 'failed' AND retry_count < 3`);
-        if (r4.rowCount > 0) logger.info(`[cleanup] Reset ${r4.rowCount} failed raw_videos for retry`);
+        if (r3.rowCount > 0) logger.info(`[cleanup] Marked ${r3.rowCount} old raw_videos as skipped (won't re-process)`);
 
         // 5. Clean orphan celebrities/movies without published videos
         const r5 = await query(`
@@ -367,9 +364,13 @@ async function fullPipelineReset() {
 }
 
 async function cleanupStuckVideos() {
-    // Light cleanup during scheduler loop — just reset processing raw_videos
+    // Light cleanup: reset raw_videos stuck in 'processing' for > 10 min (probably crashed)
     try {
-        await query(`UPDATE raw_videos SET status = 'pending' WHERE status = 'processing'`);
+        await query(`
+            UPDATE raw_videos SET status = 'pending'
+            WHERE status = 'processing'
+            AND updated_at < NOW() - INTERVAL '10 minutes'
+        `);
     } catch {}
 }
 
@@ -569,10 +570,12 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
             const available = work[step.name] || 0;
             if (available <= 0) continue;
 
-            // Scrape: runs once, full batch
+            // Scrape: runs once, uses --limit from user args (default 10)
+            // Other steps: always --limit=1 (true conveyor — 1 video per step)
             const isScrapStep = step.name === 'scrape';
-            const stepLimit = isScrapStep ? (testMode ? 3 : 10) : 1;
-            const stepArgs = [`--limit=${stepLimit}`, ...extraArgs];
+            // For scrape, don't add --limit here — let extraArgs handle it
+            // For other steps, force --limit=1
+            const stepArgs = isScrapStep ? [...extraArgs] : [`--limit=1`, ...extraArgs];
             if (testMode && !stepArgs.includes('--test')) stepArgs.push('--test');
             if (isScrapStep) scrapeStarted = true;
 
