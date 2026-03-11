@@ -403,7 +403,14 @@ async function main() {
         FROM videos v
         WHERE v.ai_raw_response IS NOT NULL
           AND v.status NOT IN ('rejected', 'dmca_removed')
-          ${FORCE ? '' : `AND NOT EXISTS (SELECT 1 FROM movie_scenes ms WHERE ms.video_id = v.id)`}
+          ${FORCE ? '' : `AND (
+              NOT EXISTS (SELECT 1 FROM movie_scenes ms WHERE ms.video_id = v.id)
+              OR EXISTS (
+                  SELECT 1 FROM movie_scenes ms
+                  JOIN movies m ON m.id = ms.movie_id
+                  WHERE ms.video_id = v.id AND m.tmdb_id IS NULL
+              )
+          )`}
         ORDER BY v.created_at DESC
         LIMIT $1
     `, [LIMIT]);
