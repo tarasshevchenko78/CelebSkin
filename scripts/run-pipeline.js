@@ -515,11 +515,19 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
             }
         }
 
-        // 3. Spawn ALL steps that have work and aren't already running
+        // 3. Spawn steps that have work, aren't running, and whose deps are satisfied
         for (const step of stepsToRun) {
             if (runningChildren.has(step.name)) continue;
             const available = work[step.name] || 0;
             if (available <= 0) continue;
+
+            // Enforce deps: don't start if any dependency is currently running
+            if (step.deps && step.deps.length > 0) {
+                const depsRunning = step.deps.some(dep => runningChildren.has(dep));
+                if (depsRunning) {
+                    continue; // Wait for deps to finish
+                }
+            }
 
             const stepArgs = [`--limit=${maxPerStep}`, ...extraArgs];
             if (testMode && !stepArgs.includes('--test')) stepArgs.push('--test');
