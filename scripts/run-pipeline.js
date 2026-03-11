@@ -298,10 +298,10 @@ async function waitForChildren(runningChildren, timeoutMs) {
         }
         if (runningChildren.size > 0) await sleep(1000);
     }
-    for (const [name, child] of runningChildren) {
+    for (const [jobId, child] of runningChildren) {
         try { child.proc.kill('SIGTERM'); } catch {}
-        logger.warn(`[scheduler] Force killed ${name} (PID ${child.pid})`);
-        runningChildren.delete(name);
+        logger.warn(`[scheduler] Force killed ${child.stepName || jobId} (PID ${child.pid})`);
+        runningChildren.delete(jobId);
     }
 }
 
@@ -491,25 +491,31 @@ async function buildVideoJourneys() {
 // ─────────────────────────────────────────────────
 
 async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
-    const maxPerStep = testMode ? 1 : MAX_PER_STEP;
-    const runningChildren = new Map();
+    // TRUE CONVEYOR: each step processes 1 video at a time.
+    // Multiple steps run concurrently — DB state ensures ordering.
+    // Video flows: scrape → AI → TMDB → watermark → thumbnails → CDN → publish
+    // As soon as a video finishes one step, it becomes available for the next.
+    const runningChildren = new Map(); // key = unique jobId, value = {step, proc, ...}
     const stepStats = {};
+    let jobCounter = 0;
 
     for (const step of stepsToRun) {
         stepStats[step.name] = { totalProcessed: 0, runs: 0, errors: [], lastDuration: 0 };
     }
 
     writePidFile(process.pid);
-    logger.info(`\n🎯 SCHEDULER MODE — max ${maxPerStep} videos/step, check every ${SCHEDULER_INTERVAL / 1000}s`);
+    logger.info(`\n🎯 CONVEYOR MODE — 1 video per step, concurrent steps, check every ${SCHEDULER_INTERVAL / 1000}s`);
     logger.info(`PID: ${process.pid}`);
 
     let consecutiveEmpty = 0;
+    let scrapeStarted = false;
 
     while (!shouldStop()) {
-        // 1. Collect finished children
-        for (const [stepName, child] of runningChildren) {
+        // 1. Collect finished jobs
+        for (const [jobId, child] of runningChildren) {
             if (child.proc.exitCode !== null) {
                 const elapsed = Date.now() - child.startedAt;
+                const stepName = child.stepName;
                 const stats = stepStats[stepName];
                 stats.runs++;
                 stats.lastDuration = elapsed;
@@ -520,9 +526,9 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
                 if (child.proc.exitCode !== 0) {
                     const errMsg = child.stderr.slice(-300).trim() || `exit code ${child.proc.exitCode}`;
                     stats.errors.push({ run: stats.runs, error: errMsg });
-                    logger.warn(`[scheduler] ${stepName} failed (exit ${child.proc.exitCode}): ${errMsg.slice(0, 100)}`);
+                    logger.warn(`[conveyor] ${stepName} failed (exit ${child.proc.exitCode}): ${errMsg.slice(0, 100)}`);
                 } else {
-                    logger.info(`[scheduler] ${stepName} done in ${(elapsed / 1000).toFixed(1)}s (processed: ${processed})`);
+                    logger.info(`[conveyor] ${stepName} done in ${(elapsed / 1000).toFixed(1)}s`);
                 }
 
                 markStepDone(stepName, {
@@ -530,59 +536,56 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
                     videosTotal: stats.totalProcessed,
                     elapsedMs: elapsed,
                 });
-                runningChildren.delete(stepName);
+                runningChildren.delete(jobId);
                 await logPipelineStep(stepName, child.proc.exitCode === 0 ? 'completed' : 'failed', {
                     duration: (elapsed / 1000).toFixed(1), processed,
                 }).catch(() => {});
             }
         }
 
-        // 2. CONVEYOR BELT: all steps run in parallel, each processes up to 3 videos
-        // Each step only picks up videos that FINISHED the previous step
-        // Videos flow: scrape → ai → tmdb → watermark → thumbnails → cdn → publish
-
+        // 2. Get work availability from DB state
         await cleanupStuckVideos();
         const work = await getWorkAvailability();
 
         // Scrape runs once at the start
-        if (stepStats['scrape'] && stepStats['scrape'].runs === 0 && !runningChildren.has('scrape')) {
+        if (stepStats['scrape'] && !scrapeStarted) {
             work['scrape'] = 1;
         }
 
-        // tmdb-enrich: DB-driven, runs whenever there are un-enriched celebrities/movies
-        if (!runningChildren.has('tmdb-enrich')) {
-            const enrichNeeded = await checkEnrichNeeded();
-            if (enrichNeeded > 0) {
-                work['tmdb-enrich'] = enrichNeeded;
-            }
+        // tmdb-enrich: DB-driven
+        const enrichNeeded = await checkEnrichNeeded();
+        if (enrichNeeded > 0) {
+            work['tmdb-enrich'] = enrichNeeded;
         }
 
-        // 3. Spawn steps that have work, aren't running, and whose deps are satisfied
+        // 3. CONVEYOR: spawn steps based on DB state, no deps blocking
+        // Each step with --limit=1, one instance per step type at a time
+        // Scrape is special: runs once with full limit
         for (const step of stepsToRun) {
-            if (runningChildren.has(step.name)) continue;
+            // Skip if this step type is already running
+            const stepRunning = [...runningChildren.values()].some(c => c.stepName === step.name);
+            if (stepRunning) continue;
+
             const available = work[step.name] || 0;
             if (available <= 0) continue;
 
-            // Enforce deps: don't start if any dependency is currently running
-            if (step.deps && step.deps.length > 0) {
-                const depsRunning = step.deps.some(dep => runningChildren.has(dep));
-                if (depsRunning) {
-                    continue; // Wait for deps to finish
-                }
-            }
-
-            const stepArgs = [`--limit=${maxPerStep}`, ...extraArgs];
+            // Scrape: runs once, full batch
+            const isScrapStep = step.name === 'scrape';
+            const stepLimit = isScrapStep ? (testMode ? 3 : 10) : 1;
+            const stepArgs = [`--limit=${stepLimit}`, ...extraArgs];
             if (testMode && !stepArgs.includes('--test')) stepArgs.push('--test');
+            if (isScrapStep) scrapeStarted = true;
 
             const proc = spawnStepProcess(step, stepArgs);
-            const child = { proc, pid: proc.pid, startedAt: Date.now(), stdout: '', stderr: '' };
+            const jobId = `${step.name}_${++jobCounter}`;
+            const child = { proc, pid: proc.pid, startedAt: Date.now(), stdout: '', stderr: '', stepName: step.name };
             proc.stdout.on('data', (d) => { child.stdout += d.toString(); });
             proc.stderr.on('data', (d) => { child.stderr += d.toString(); });
             proc.on('error', (err) => { child.stderr += err.message; });
 
-            runningChildren.set(step.name, child);
+            runningChildren.set(jobId, child);
             writeStepStatus(step.name, 'active', { stepLabel: step.label });
-            logger.info(`[scheduler] ▶ ${step.name} (PID ${proc.pid}) — ${available} videos ready`);
+            logger.info(`[conveyor] ▶ ${step.name} [${jobId}] (PID ${proc.pid}) — ${available} videos ready`);
         }
 
         // 4. Write child PIDs
@@ -592,9 +595,10 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
         const videos = await buildVideoJourneys();
         writeVideoJourneys(videos);
 
-        const activeNames = [...runningChildren.keys()];
+        const activeNames = [...runningChildren.values()].map(c => c.stepName);
+        const activeStepSet = new Set(activeNames);
         const completedCount = stepsToRun.filter(s =>
-            stepStats[s.name].runs > 0 && !runningChildren.has(s.name)
+            stepStats[s.name].runs > 0 && !activeStepSet.has(s.name)
         ).length;
 
         writePipelineProgress({
