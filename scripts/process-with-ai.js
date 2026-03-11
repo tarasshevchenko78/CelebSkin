@@ -385,7 +385,7 @@ for (let i = 0; i < pending.length; i += CONCURRENCY) {
       // Video skipped (no video_url) — already marked failed in processVideo
       failed++;
       _errors.push({ id: raw.id, title: raw.raw_title, error: 'No video file URL' });
-      continue;
+      return;
     }
     processed++;
     _completed.push({ id: raw.id, title: raw.raw_title, status: 'ok', ms: Date.now() - _start });
