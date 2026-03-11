@@ -344,7 +344,8 @@ export async function DELETE(request: NextRequest) {
                 // Safety net: pkill any remaining
                 `pkill -f 'node.*(scrape|process-with-ai|visual-recognize|enrich-metadata|watermark|generate-thumbnails|upload-to-cdn|publish-to-site|run-pipeline)' 2>/dev/null`,
                 // Cleanup PID files
-                `rm -f ${PID_FILE} ${CHILDREN_FILE} ${STOP_FILE}`,
+                // Cleanup PID files and stale progress
+                `rm -f ${PID_FILE} ${CHILDREN_FILE} ${STOP_FILE} ${SCRIPTS_DIR}/logs/progress.json`,
                 'echo done',
             ].join('; ');
 
