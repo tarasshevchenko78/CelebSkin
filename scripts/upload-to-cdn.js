@@ -65,9 +65,15 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
         return { status: 'ok', uploadCount: 0, urls: { video_url: video.video_url_watermarked }, fixOnly: true };
     }
 
-    // Check if workDir exists — if missing, reset to enriched for re-watermark
+    // Check if workDir exists — handle missing work dir gracefully
     if (!await fileExists(workDir)) {
-        logger.warn(`  [${videoId}] Work dir missing — resetting to enriched for re-watermark`);
+        // If watermarked video is already on CDN, don't reset — just skip
+        if (video.video_url_watermarked && isCdnUrl(video.video_url_watermarked)) {
+            logger.info(`  [${videoId}] Work dir missing but CDN watermark exists — skipping (already uploaded)`);
+            return { status: 'skip', reason: 'work_dir_missing_but_cdn_exists' };
+        }
+        // Only reset to enriched if we truly need to re-watermark
+        logger.warn(`  [${videoId}] Work dir missing and no CDN watermark — resetting to enriched for re-watermark`);
         await query(
             `UPDATE videos SET status = 'enriched', video_url_watermarked = NULL, updated_at = NOW() WHERE id = $1`,
             [videoId]
@@ -420,27 +426,27 @@ async function main() {
         for (let i = 0; i < videos.length; i += CONCURRENCY) {
             const batch = videos.slice(i, i + CONCURRENCY);
             await Promise.all(batch.map(async (video) => {
-            const _start = Date.now();
-            const vTitle = video.display_title || video.id;
-            writeProgress({
-                step: 'cdn-upload', stepLabel: 'CDN Upload',
-                videosTotal: videos.length, videosDone: videoUploads,
-                currentVideo: { id: video.id, title: vTitle, subStep: 'Uploading to BunnyCDN' },
-                completedVideos: _completed.slice(-10),
-                errors: _errors.slice(-10),
-                elapsedMs: Date.now() - startedAt,
-            });
-            logger.info(`\n[${videoUploads + 1}/${videos.length}] Video: ${video.id}`);
-            const result = await uploadVideoMedia(video, args.force, args.cleanup);
+                const _start = Date.now();
+                const vTitle = video.display_title || video.id;
+                writeProgress({
+                    step: 'cdn-upload', stepLabel: 'CDN Upload',
+                    videosTotal: videos.length, videosDone: videoUploads,
+                    currentVideo: { id: video.id, title: vTitle, subStep: 'Uploading to BunnyCDN' },
+                    completedVideos: _completed.slice(-10),
+                    errors: _errors.slice(-10),
+                    elapsedMs: Date.now() - startedAt,
+                });
+                logger.info(`\n[${videoUploads + 1}/${videos.length}] Video: ${video.id}`);
+                const result = await uploadVideoMedia(video, args.force, args.cleanup);
 
-            if (result.status === 'ok') {
-                videoUploads++;
-                _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
-                logger.info(`  ✓ ${result.uploadCount} files uploaded`);
-            } else {
-                logger.info(`  - ${result.reason}`);
-                _errors.push({ id: video.id, title: vTitle, error: result.reason || 'skipped' });
-            }
+                if (result.status === 'ok') {
+                    videoUploads++;
+                    _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
+                    logger.info(`  ✓ ${result.uploadCount} files uploaded`);
+                } else {
+                    logger.info(`  - ${result.reason}`);
+                    _errors.push({ id: video.id, title: vTitle, error: result.reason || 'skipped' });
+                }
             }));
         }
     }

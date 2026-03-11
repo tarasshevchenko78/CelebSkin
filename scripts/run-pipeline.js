@@ -108,7 +108,7 @@ const STEPS = [
         name: 'cdn-upload',
         label: '6. CDN Upload (BunnyCDN)',
         script: 'upload-to-cdn.js',
-        args: ['--cleanup'],
+        args: [],
         timeout: 1800000,
         required: false,
         deps: ['watermark', 'thumbnails'],
@@ -171,7 +171,7 @@ async function runStep(step, extraArgs = [], testMode = false) {
         }
 
         logger.info(`✓ ${step.label} — completed in ${duration}s`);
-        await logPipelineStep(step.name, 'completed', { duration, args }).catch(() => {});
+        await logPipelineStep(step.name, 'completed', { duration, args }).catch(() => { });
 
         return { success: true, duration, stdout: stdout || '' };
     } catch (err) {
@@ -184,7 +184,7 @@ async function runStep(step, extraArgs = [], testMode = false) {
             lines.forEach(line => logger.info(`  ${line}`));
         }
 
-        await logPipelineStep(step.name, 'failed', { duration, error: err.message }).catch(() => {});
+        await logPipelineStep(step.name, 'failed', { duration, error: err.message }).catch(() => { });
 
         return { success: false, error: err.message, duration, stdout: err.stdout || '' };
     }
@@ -205,7 +205,7 @@ async function logPipelineStep(stepName, status, details) {
 const PID_FILE = join(__dirname, 'logs', 'pipeline.pid');
 const CHILDREN_PID_FILE = join(__dirname, 'logs', 'children.pid');
 const STOP_FILE = join(__dirname, 'logs', '.stop');
-const SCHEDULER_INTERVAL = 5000;  // 5 sec between checks
+const SCHEDULER_INTERVAL = 3000;  // 3 sec between checks — fast conveyor
 const MAX_PER_STEP = 3;           // max videos per step
 
 function sleep(ms) {
@@ -276,17 +276,17 @@ function shouldStop() {
 }
 
 function writePidFile(pid) {
-    try { writeFileSync(PID_FILE, String(pid)); } catch {}
+    try { writeFileSync(PID_FILE, String(pid)); } catch { }
 }
 
 function writeChildPids(runningChildren) {
     const pids = [...runningChildren.values()].map(c => c.pid).filter(Boolean).join('\n');
-    try { writeFileSync(CHILDREN_PID_FILE, pids); } catch {}
+    try { writeFileSync(CHILDREN_PID_FILE, pids); } catch { }
 }
 
 function cleanupPidFiles() {
     for (const f of [PID_FILE, CHILDREN_PID_FILE, STOP_FILE]) {
-        try { unlinkSync(f); } catch {}
+        try { unlinkSync(f); } catch { }
     }
 }
 
@@ -299,7 +299,7 @@ async function waitForChildren(runningChildren, timeoutMs) {
         if (runningChildren.size > 0) await sleep(1000);
     }
     for (const [jobId, child] of runningChildren) {
-        try { child.proc.kill('SIGTERM'); } catch {}
+        try { child.proc.kill('SIGTERM'); } catch { }
         logger.warn(`[scheduler] Force killed ${child.stepName || jobId} (PID ${child.pid})`);
         runningChildren.delete(jobId);
     }
@@ -322,8 +322,9 @@ async function fullPipelineReset() {
         if (r1.rowCount > 0) logger.info(`[cleanup] Reset ${r1.rowCount} raw_videos from processing → pending`);
 
         // 2. Delete unpublished videos and their relations
+        // IMPORTANT: preserve 'needs_review' videos — they are waiting for moderation
         const unpublished = await query(
-            `SELECT id FROM videos WHERE status NOT IN ('published','rejected','dmca_removed')`
+            `SELECT id FROM videos WHERE status NOT IN ('published','rejected','dmca_removed','needs_review')`
         );
         if (unpublished.rows.length > 0) {
             const ids = unpublished.rows.map(r => r.id);
@@ -334,7 +335,7 @@ async function fullPipelineReset() {
             await query(`DELETE FROM collection_videos WHERE video_id = ANY($1)`, [ids]);
             await query(`DELETE FROM processing_log WHERE video_id = ANY($1)`, [ids]);
             const r2 = await query(`DELETE FROM videos WHERE id = ANY($1)`, [ids]);
-            logger.info(`[cleanup] Deleted ${r2.rowCount} unpublished videos + relations`);
+            logger.info(`[cleanup] Deleted ${r2.rowCount} unpublished videos + relations (preserved needs_review)`);
         }
 
         // 3. Mark ALL non-published raw_videos as 'skipped' — DON'T re-process old data
@@ -371,7 +372,7 @@ async function cleanupStuckVideos() {
             WHERE status = 'processing'
             AND updated_at < NOW() - INTERVAL '10 minutes'
         `);
-    } catch {}
+    } catch { }
 }
 
 async function getWorkAvailability() {
@@ -492,20 +493,35 @@ async function buildVideoJourneys() {
 // ─────────────────────────────────────────────────
 
 async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
-    // TRUE CONVEYOR: each step processes 1 video at a time.
+    // TRUE CONVEYOR: each step processes up to 3 videos at a time.
     // Multiple steps run concurrently — DB state ensures ordering.
     // Video flows: scrape → AI → TMDB → watermark → thumbnails → CDN → publish
     // As soon as a video finishes one step, it becomes available for the next.
+    // EVENT-DRIVEN: when any child finishes, immediately re-check for new work.
+    const MAX_PER_STEP = 3; // 3 concurrent videos per step
     const runningChildren = new Map(); // key = unique jobId, value = {step, proc, ...}
     const stepStats = {};
     let jobCounter = 0;
 
+    const MAX_CONSECUTIVE_FAILURES = 3; // skip step after 3 consecutive failures
     for (const step of stepsToRun) {
-        stepStats[step.name] = { totalProcessed: 0, runs: 0, errors: [], lastDuration: 0 };
+        stepStats[step.name] = { totalProcessed: 0, runs: 0, errors: [], lastDuration: 0, consecutiveFailures: 0 };
+    }
+
+    // Event-driven wake: resolved when any child exits → scheduler re-checks immediately
+    let wakeResolve = null;
+    function wakeScheduler() {
+        if (wakeResolve) { wakeResolve(); wakeResolve = null; }
+    }
+    function sleepUntilWake(ms) {
+        return Promise.race([
+            sleep(ms),
+            new Promise(resolve => { wakeResolve = resolve; }),
+        ]);
     }
 
     writePidFile(process.pid);
-    logger.info(`\n🎯 CONVEYOR MODE — 1 video per step, concurrent steps, check every ${SCHEDULER_INTERVAL / 1000}s`);
+    logger.info(`\n🎯 CONVEYOR MODE — up to ${MAX_PER_STEP} videos per step, concurrent steps, instant re-spawn on child exit`);
     logger.info(`PID: ${process.pid}`);
 
     let consecutiveEmpty = 0;
@@ -527,8 +543,14 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
                 if (child.proc.exitCode !== 0) {
                     const errMsg = child.stderr.slice(-300).trim() || `exit code ${child.proc.exitCode}`;
                     stats.errors.push({ run: stats.runs, error: errMsg });
-                    logger.warn(`[conveyor] ${stepName} failed (exit ${child.proc.exitCode}): ${errMsg.slice(0, 100)}`);
+                    stats.consecutiveFailures++;
+                    if (stats.consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                        logger.error(`[conveyor] ✗ ${stepName} failed ${MAX_CONSECUTIVE_FAILURES}x in a row — SKIPPING this step`);
+                    } else {
+                        logger.warn(`[conveyor] ${stepName} failed (exit ${child.proc.exitCode}), attempt ${stats.consecutiveFailures}/${MAX_CONSECUTIVE_FAILURES}: ${errMsg.slice(0, 100)}`);
+                    }
                 } else {
+                    stats.consecutiveFailures = 0; // reset on success
                     logger.info(`[conveyor] ${stepName} done in ${(elapsed / 1000).toFixed(1)}s`);
                 }
 
@@ -540,7 +562,7 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
                 runningChildren.delete(jobId);
                 await logPipelineStep(stepName, child.proc.exitCode === 0 ? 'completed' : 'failed', {
                     duration: (elapsed / 1000).toFixed(1), processed,
-                }).catch(() => {});
+                }).catch(() => { });
             }
         }
 
@@ -560,9 +582,12 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
         }
 
         // 3. CONVEYOR: spawn steps based on DB state, no deps blocking
-        // Each step with --limit=1, one instance per step type at a time
+        // Each step with --limit=3 (up to 3 videos), one instance per step type
         // Scrape is special: runs once with full limit
         for (const step of stepsToRun) {
+            // Skip if this step exceeded max consecutive failures
+            if (stepStats[step.name].consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) continue;
+
             // Skip if this step type is already running
             const stepRunning = [...runningChildren.values()].some(c => c.stepName === step.name);
             if (stepRunning) continue;
@@ -571,11 +596,10 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
             if (available <= 0) continue;
 
             // Scrape: runs once, uses --limit from user args (default 10)
-            // Other steps: always --limit=1 (true conveyor — 1 video per step)
+            // Other steps: --limit=3 (3 videos per step, concurrent steps)
             const isScrapStep = step.name === 'scrape';
-            // For scrape, don't add --limit here — let extraArgs handle it
-            // For other steps, force --limit=1
-            const stepArgs = isScrapStep ? [...extraArgs] : [`--limit=1`, ...extraArgs];
+            const stepLimit = isScrapStep ? null : Math.min(available, MAX_PER_STEP);
+            const stepArgs = isScrapStep ? [...extraArgs] : [`--limit=${stepLimit}`, ...extraArgs];
             if (testMode && !stepArgs.includes('--test')) stepArgs.push('--test');
             if (isScrapStep) scrapeStarted = true;
 
@@ -585,6 +609,8 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
             proc.stdout.on('data', (d) => { child.stdout += d.toString(); });
             proc.stderr.on('data', (d) => { child.stderr += d.toString(); });
             proc.on('error', (err) => { child.stderr += err.message; });
+            // Wake scheduler immediately when this child exits → instant re-spawn
+            proc.on('exit', () => wakeScheduler());
 
             runningChildren.set(jobId, child);
             writeStepStatus(step.name, 'active', { stepLabel: step.label });
@@ -626,7 +652,8 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
             consecutiveEmpty = 0;
         }
 
-        await sleep(SCHEDULER_INTERVAL);
+        // Event-driven: wake immediately when any child exits, or after SCHEDULER_INTERVAL
+        await sleepUntilWake(SCHEDULER_INTERVAL);
     }
 
     // Wait for running children
@@ -943,6 +970,7 @@ async function main() {
     const extraArgs = [];
     if (args.limit) extraArgs.push(`--limit=${args.limit}`);
     if (args.autoPublish) extraArgs.push('--auto');
+    if (args.categories) extraArgs.push(`--categories=${args.categories}`);
 
     // Clear stale progress and initialize step panels
     clearAllProgress();
@@ -994,8 +1022,8 @@ async function main() {
         completedSteps: successful,
         currentStep: 'done',
         currentLabel: finalStatus === 'finished' ? 'Pipeline Complete ✓' :
-                      finalStatus === 'finished_with_errors' ? 'Pipeline Complete ⚠️ WITH ERRORS' :
-                      'Pipeline Complete (with warnings)',
+            finalStatus === 'finished_with_errors' ? 'Pipeline Complete ⚠️ WITH ERRORS' :
+                'Pipeline Complete (with warnings)',
         elapsedMs: Date.now() - pipelineStart,
         status: finalStatus,
         mode: isSequential ? 'sequential' : 'scheduler',
@@ -1097,7 +1125,7 @@ async function main() {
 }
 
 function parseArgs() {
-    const args = { test: false, step: null, only: null, skip: [], limit: null, autoPublish: false, sequential: false };
+    const args = { test: false, step: null, only: null, skip: [], limit: null, autoPublish: false, sequential: false, categories: null };
     for (const arg of process.argv.slice(2)) {
         if (arg === '--test') args.test = true;
         if (arg === '--sequential') args.sequential = true;
@@ -1106,6 +1134,7 @@ function parseArgs() {
         if (arg.startsWith('--only=')) args.only = arg.split('=')[1];
         if (arg.startsWith('--skip=')) args.skip.push(arg.split('=')[1]);
         if (arg.startsWith('--limit=')) args.limit = parseInt(arg.split('=')[1]);
+        if (arg.startsWith('--categories=')) args.categories = arg.split('=')[1];
     }
     return args;
 }

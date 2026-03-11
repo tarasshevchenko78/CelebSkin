@@ -173,20 +173,28 @@ export function validateVideoForPublish(video) {
         errors.push(`NO_CDN_THUMBNAIL: thumbnail_url=${(video.thumbnail_url || 'null').substring(0, 60)}`);
     }
 
-    // WARNING: Missing movie poster (cosmetic, not blocking)
+    // MODERATION: Missing movie poster → needs_review (user adds manually)
     if (!video.movie_poster_url && video.movie_title) {
-        warnings.push(`NO_MOVIE_POSTER: movie "${video.movie_title}" has no poster`);
+        needsReview.push(`NO_MOVIE_POSTER: movie "${video.movie_title}" has no poster`);
     }
 
-    // WARNING: Celebrity(s) without photo (cosmetic, not blocking)
+    // MODERATION: Celebrity(s) without photo → needs_review (user adds manually)
     const celebsNoPhoto = parseInt(video.celebs_no_photo) || 0;
     if (celebsNoPhoto > 0) {
-        warnings.push(`CELEBS_NO_PHOTO: ${celebsNoPhoto} celebrity(s) have no photo`);
+        needsReview.push(`CELEBS_NO_PHOTO: ${celebsNoPhoto} celebrity(s) have no photo`);
     }
 
-    // MODERATION: No celebrities linked → needs_review (this IS critical)
+    // MODERATION: No celebrities linked → needs_review
     if (video.celebrity_count === 0 || video.celebrity_count === undefined) {
         needsReview.push('NO_CELEBRITIES: no celebrities linked to this video');
+    }
+
+    // MODERATION: Missing description/review → needs_review
+    const hasDescription = video.title && (
+        (typeof video.title === 'string' ? JSON.parse(video.title) : video.title)?.en
+    );
+    if (!hasDescription) {
+        needsReview.push('NO_TITLE: video has no title/description');
     }
 
     // WARNING: Missing sprite/preview (not critical but bad UX)
@@ -368,7 +376,7 @@ async function main() {
             setActiveItem(video.id, { label: vTitle, subStep: 'Validating', pct: 0 });
             writeProgress({
                 step: 'publish', stepLabel: 'Publishing Videos',
-                videosTotal: videos.length, videosDone: published+skipped+failed+blocked,
+                videosTotal: videos.length, videosDone: published + skipped + failed + blocked,
                 currentVideo: { id: video.id, title: vTitle, subStep: 'Validating' },
                 completedVideos: _completed.slice(-10),
                 errors: _errors.slice(-10),

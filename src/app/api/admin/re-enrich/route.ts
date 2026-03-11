@@ -89,12 +89,21 @@ async function tmdbGet(path: string, params: Record<string, string> = {}) {
         return null;
     }
     const url = new URL(`${TMDB_BASE}${path}`);
-    url.searchParams.set('api_key', apiKey);
     for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+
+    // Support both v3 API key (short string) and v4 Bearer token (JWT starting with eyJ)
+    const isBearer = apiKey.startsWith('eyJ');
+    const headers: Record<string, string> = {};
+    if (isBearer) {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+    } else {
+        url.searchParams.set('api_key', apiKey);
+    }
+
     try {
-        const res = await fetch(url.toString());
+        const res = await fetch(url.toString(), { headers });
         if (!res.ok) {
-            logger.error('tmdbGet: HTTP error', { path, status: res.status });
+            logger.error('tmdbGet: HTTP error', { path, status: res.status, isBearer });
             return null;
         }
         return await res.json();

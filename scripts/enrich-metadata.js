@@ -25,6 +25,7 @@
 import pg from 'pg';
 const { Pool } = pg;
 import https from 'https';
+import { fileURLToPath } from 'url';
 import { config } from "./lib/config.js";
 import { writeProgress, clearProgress } from "./lib/progress.js";
 
@@ -34,6 +35,13 @@ import { writeProgress, clearProgress } from "./lib/progress.js";
 const TMDB_API_KEY = config.ai.tmdbApiKey;
 const TMDB_BASE = 'https://api.themoviedb.org/3';
 const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p';
+
+// Validate TMDB API key early — empty key causes silent failures
+if (!TMDB_API_KEY || TMDB_API_KEY.length < 10) {
+    console.error('❌ TMDB_API_KEY is not set or invalid in scripts/.env');
+    console.error('   Add TMDB_API_KEY=eyJhbG... (TMDB v4 Bearer token) to scripts/.env');
+    process.exit(1);
+}
 
 const pool = new Pool({
     host: config.db.host,
@@ -246,7 +254,7 @@ async function enrichMovieFromTmdb(tmdbResult, type, existingMovie) {
                 updated_at = NOW()
              WHERE id = $9`,
             [tmdbId, posterUrl, JSON.stringify(description), year ? parseInt(year) : null,
-             director, studio, genres, JSON.stringify(titleLocalized), existingMovie.id]
+                director, studio, genres, JSON.stringify(titleLocalized), existingMovie.id]
         );
         console.log(`  Updated movie: "${title}" (id=${existingMovie.id})`);
         return { ...existingMovie, tmdb_id: tmdbId };
@@ -265,7 +273,7 @@ async function enrichMovieFromTmdb(tmdbResult, type, existingMovie) {
                 genres = COALESCE(EXCLUDED.genres, movies.genres)
              RETURNING *`,
             [title, JSON.stringify(titleLocalized), slug, year ? parseInt(year) : null,
-             posterUrl, JSON.stringify(description), studio, director, genres, tmdbId]
+                posterUrl, JSON.stringify(description), studio, director, genres, tmdbId]
         );
         console.log(`  Created movie: "${title}" (id=${result.rows[0].id})`);
         return result.rows[0];
@@ -287,6 +295,11 @@ export async function enrichCelebrity(celebrity) {
 
     if (!searchResult.results || searchResult.results.length === 0) {
         console.log(`  TMDB: no person results for "${celebrity.name}"`);
+        // Mark as checked (tmdb_id = -1) to prevent re-checking every pipeline run
+        await pool.query(
+            `UPDATE celebrities SET tmdb_id = -1, updated_at = NOW() WHERE id = $1 AND tmdb_id IS NULL`,
+            [celebrity.id]
+        );
         await dbLog(null, 'tmdb-enrich-celebrity', 'not_found', `TMDB: no results for "${celebrity.name}"`, {
             celebrity_id: celebrity.id, name: celebrity.name,
         });
@@ -341,8 +354,8 @@ export async function enrichCelebrity(celebrity) {
             updated_at = NOW()
          WHERE id = $9`,
         [tmdbId, photoUrl, JSON.stringify(bio), birthDate, nationality, imdbId,
-         aliases.length > 0 ? aliases : null,
-         JSON.stringify(tmdbId), celebrity.id]
+            aliases.length > 0 ? aliases : null,
+            JSON.stringify(tmdbId), celebrity.id]
     );
 
     console.log(`  Enriched celebrity: "${celebrity.name}" (tmdb_id=${tmdbId})`);

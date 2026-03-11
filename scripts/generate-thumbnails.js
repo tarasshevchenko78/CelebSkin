@@ -192,9 +192,22 @@ export async function processVideo(video, config) {
                 videoPath = localPath;
                 logger.info(`  Using local file: ${videoUrl}`);
             } catch {
-                logger.error(`  Local file not found: ${localPath}`);
-                removeActiveItem(videoId);
-                return { status: 'error', reason: 'local_file_not_found' };
+                // Local file missing — try fallback to video_url or video_url_watermarked (CDN)
+                const fallbackUrl = video.video_url_watermarked || video.video_url;
+                if (fallbackUrl && (fallbackUrl.startsWith('http://') || fallbackUrl.startsWith('https://'))) {
+                    logger.warn(`  Local file not found: ${localPath}, falling back to download: ${fallbackUrl.substring(0, 80)}`);
+                    videoPath = join(workDir, 'video.mp4');
+                    setActiveItem(videoId, { label: vTitle, subStep: 'Downloading (fallback)', pct: 0 });
+                    const downloaded = await downloadVideo(fallbackUrl, videoPath);
+                    if (!downloaded) {
+                        removeActiveItem(videoId);
+                        return { status: 'error', reason: 'fallback_download_failed' };
+                    }
+                } else {
+                    logger.error(`  Local file not found and no HTTP fallback: ${localPath}`);
+                    removeActiveItem(videoId);
+                    return { status: 'error', reason: 'local_file_not_found' };
+                }
             }
         } else {
             videoPath = join(workDir, 'video.mp4');
@@ -304,8 +317,8 @@ export async function processVideo(video, config) {
         // Determine quality from resolution
         const quality = resolution.height >= 1080 ? '1080p'
             : resolution.height >= 720 ? '720p'
-            : resolution.height >= 480 ? '480p'
-            : '360p';
+                : resolution.height >= 480 ? '480p'
+                    : '360p';
 
         setActiveItem(videoId, { label: vTitle, subStep: 'Saving to DB', pct: 95 });
         // Update DB — store local paths (will be updated to CDN URLs by upload-to-cdn.js)
@@ -436,37 +449,37 @@ async function main() {
     for (let i = 0; i < videos.length; i += CONCURRENCY) {
         const batch = videos.slice(i, i + CONCURRENCY);
         await Promise.all(batch.map(async (video) => {
-        const num = ++processed;
-        logger.info(`\n[${num}/${videos.length}] Video: ${video.id}`);
-        const _start = Date.now();
-        const vTitle = video.display_title || video.id;
-        writeProgress({
-            step: 'thumbnails', stepLabel: 'Thumbnail Generation',
-            videosTotal: videos.length, videosDone: num - 1,
-            currentVideo: { id: video.id, title: vTitle, subStep: 'Generating thumbnails + sprites' },
-            completedVideos: _completed.slice(-10),
-            errors: _errors.slice(-10),
-            elapsedMs: Date.now() - startedAt,
-        });
+            const num = ++processed;
+            logger.info(`\n[${num}/${videos.length}] Video: ${video.id}`);
+            const _start = Date.now();
+            const vTitle = video.display_title || video.id;
+            writeProgress({
+                step: 'thumbnails', stepLabel: 'Thumbnail Generation',
+                videosTotal: videos.length, videosDone: num - 1,
+                currentVideo: { id: video.id, title: vTitle, subStep: 'Generating thumbnails + sprites' },
+                completedVideos: _completed.slice(-10),
+                errors: _errors.slice(-10),
+                elapsedMs: Date.now() - startedAt,
+            });
 
-        const result = await processVideo(video, config);
+            const result = await processVideo(video, config);
 
-        switch (result.status) {
-            case 'ok':
-                generated++;
-                _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
-                logger.info(`  ✓ ${result.frames} frames${result.hasGif ? ' + GIF' : ''}`);
-                break;
-            case 'skip':
-                skipped++;
-                logger.info(`  - Skipped: ${result.reason}`);
-                break;
-            case 'error':
-                errors++;
-                _errors.push({ id: video.id, title: vTitle, error: result.reason });
-                logger.error(`  ✗ Error: ${result.reason}`);
-                break;
-        }
+            switch (result.status) {
+                case 'ok':
+                    generated++;
+                    _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
+                    logger.info(`  ✓ ${result.frames} frames${result.hasGif ? ' + GIF' : ''}`);
+                    break;
+                case 'skip':
+                    skipped++;
+                    logger.info(`  - Skipped: ${result.reason}`);
+                    break;
+                case 'error':
+                    errors++;
+                    _errors.push({ id: video.id, title: vTitle, error: result.reason });
+                    logger.error(`  ✗ Error: ${result.reason}`);
+                    break;
+            }
         }));
     }
 

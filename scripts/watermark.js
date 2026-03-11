@@ -140,10 +140,10 @@ function buildTextFilter(config) {
         // Static position
         let x, y;
         switch (config.position) {
-            case 'bottom-left':  x = String(m); y = `h-th-${m}`; break;
-            case 'top-right':    x = `w-tw-${m}`; y = String(m); break;
-            case 'top-left':     x = String(m); y = String(m); break;
-            default:             x = `w-tw-${m}`; y = `h-th-${m}`;
+            case 'bottom-left': x = String(m); y = `h-th-${m}`; break;
+            case 'top-right': x = `w-tw-${m}`; y = String(m); break;
+            case 'top-left': x = String(m); y = String(m); break;
+            default: x = `w-tw-${m}`; y = `h-th-${m}`;
         }
         return [
             `drawtext=text='${WATERMARK_TEXT}'`,
@@ -189,12 +189,13 @@ async function addWatermark(inputPath, outputPath, config) {
                 '-filter_complex', filterComplex,
                 '-codec:a', 'copy',
                 '-c:v', 'libx264',
-                '-preset', 'fast',
+                '-preset', 'ultrafast',
                 '-crf', '23',
+                '-threads', '0',
                 '-movflags', '+faststart',
                 '-y',
                 outputPath,
-            ], { timeout: 600000 });
+            ], { timeout: 1800000 });
 
             return true;
         }
@@ -208,12 +209,13 @@ async function addWatermark(inputPath, outputPath, config) {
         '-vf', textFilter,
         '-codec:a', 'copy',
         '-c:v', 'libx264',
-        '-preset', 'fast',
+        '-preset', 'ultrafast',
         '-crf', '23',
+        '-threads', '0',
         '-movflags', '+faststart',
         '-y',
         outputPath,
-    ], { timeout: 600000 });
+    ], { timeout: 1800000 });
 
     return true;
 }
@@ -373,15 +375,18 @@ async function main() {
     // Get videos that need watermarking
     // Videos go through: new → enriched/auto_recognized → watermarked → thumbnails → CDN → published
     const statusFilter = config.force
-        ? `status IN ('new', 'enriched', 'auto_recognized', 'needs_review', 'watermarked')`
-        : `status IN ('enriched', 'auto_recognized') AND video_url_watermarked IS NULL`;
+        ? `v.status IN ('new', 'enriched', 'auto_recognized', 'needs_review', 'watermarked')`
+        : `v.status IN ('enriched', 'auto_recognized') AND v.video_url_watermarked IS NULL`;
 
     const { rows: videos } = await query(
-        `SELECT id, video_url, video_url_watermarked, status,
-                COALESCE(title->>'en', id::text) as display_title
-         FROM videos
-         WHERE ${statusFilter} AND video_url IS NOT NULL
-         ORDER BY created_at ASC
+        `SELECT v.id, COALESCE(v.video_url, rv.video_file_url) as video_url,
+                v.video_url_watermarked, v.status,
+                COALESCE(v.title->>'en', v.id::text) as display_title
+         FROM videos v
+         LEFT JOIN raw_videos rv ON rv.id = v.raw_video_id
+         WHERE ${statusFilter}
+           AND (v.video_url IS NOT NULL OR rv.video_file_url IS NOT NULL)
+         ORDER BY v.created_at ASC
          LIMIT $1`,
         [config.limit]
     );
@@ -402,38 +407,38 @@ async function main() {
     for (let i = 0; i < videos.length; i += CONCURRENCY) {
         const batch = videos.slice(i, i + CONCURRENCY);
         await Promise.all(batch.map(async (video) => {
-        const num = ++processed;
-        logger.info(`\n[${num}/${videos.length}] Video: ${video.id}`);
-        const _start = Date.now();
-        writeProgress({
-            step: 'watermark', stepLabel: 'Video Watermarking',
-            videosTotal: videos.length, videosDone: num - 1,
-            currentVideo: { id: video.id, title: video.id, subStep: 'Downloading + Watermarking' },
-            completedVideos: _completed.slice(-10),
-            errors: _errors.slice(-10),
-            elapsedMs: Date.now() - startedAt,
-        });
+            const num = ++processed;
+            logger.info(`\n[${num}/${videos.length}] Video: ${video.id}`);
+            const _start = Date.now();
+            writeProgress({
+                step: 'watermark', stepLabel: 'Video Watermarking',
+                videosTotal: videos.length, videosDone: num - 1,
+                currentVideo: { id: video.id, title: video.id, subStep: 'Downloading + Watermarking' },
+                completedVideos: _completed.slice(-10),
+                errors: _errors.slice(-10),
+                elapsedMs: Date.now() - startedAt,
+            });
 
-        const result = await processVideo(video, config);
+            const result = await processVideo(video, config);
 
-        switch (result.status) {
-            case 'ok':
-                watermarked++;
-                _completed.push({ id: video.id, title: video.id, status: 'ok', ms: Date.now() - _start });
-                totalOriginalSize += result.originalSize;
-                totalWatermarkedSize += result.watermarkedSize;
-                logger.info(`  ✓ Watermarked (${(result.originalSize/1024/1024).toFixed(1)}MB → ${(result.watermarkedSize/1024/1024).toFixed(1)}MB)`);
-                break;
-            case 'skip':
-                skipped++;
-                logger.info(`  - Skipped: ${result.reason}`);
-                break;
-            case 'error':
-                errors++;
-                _errors.push({ id: video.id, title: video.id, error: result.reason });
-                logger.error(`  ✗ Error: ${result.reason}`);
-                break;
-        }
+            switch (result.status) {
+                case 'ok':
+                    watermarked++;
+                    _completed.push({ id: video.id, title: video.id, status: 'ok', ms: Date.now() - _start });
+                    totalOriginalSize += result.originalSize;
+                    totalWatermarkedSize += result.watermarkedSize;
+                    logger.info(`  ✓ Watermarked (${(result.originalSize / 1024 / 1024).toFixed(1)}MB → ${(result.watermarkedSize / 1024 / 1024).toFixed(1)}MB)`);
+                    break;
+                case 'skip':
+                    skipped++;
+                    logger.info(`  - Skipped: ${result.reason}`);
+                    break;
+                case 'error':
+                    errors++;
+                    _errors.push({ id: video.id, title: video.id, error: result.reason });
+                    logger.error(`  ✗ Error: ${result.reason}`);
+                    break;
+            }
         }));
     }
 
@@ -459,7 +464,7 @@ async function main() {
         }
     }
     if (totalOriginalSize > 0) {
-        logger.info(`Total: ${(totalOriginalSize/1024/1024).toFixed(1)}MB → ${(totalWatermarkedSize/1024/1024).toFixed(1)}MB`);
+        logger.info(`Total: ${(totalOriginalSize / 1024 / 1024).toFixed(1)}MB → ${(totalWatermarkedSize / 1024 / 1024).toFixed(1)}MB`);
     }
 }
 

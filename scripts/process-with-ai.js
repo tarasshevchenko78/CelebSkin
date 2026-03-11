@@ -15,6 +15,7 @@
  *   node process-with-ai.js --skip-visual   # пропустить визуальное распознавание
  */
 
+import path from 'path';
 import slugify from "slugify";
 import { config } from "./lib/config.js";
 import {
@@ -126,12 +127,12 @@ async function downloadVideoForRecognition(url, videoId) {
   const videoPath = path.join(workDir, 'video.mp4');
 
   // Проверить если уже скачано
-  try { await access(videoPath); return videoPath; } catch {}
+  try { await access(videoPath); return videoPath; } catch { }
 
   // Локальный файл?
   if (!url.startsWith('http://') && !url.startsWith('https://')) {
     const localPath = path.join(__dirname, url);
-    try { await access(localPath); return localPath; } catch {}
+    try { await access(localPath); return localPath; } catch { }
     return null;
   }
 
@@ -175,7 +176,7 @@ async function processVideo(rawVideo) {
             // Обновить AI результат визуальными данными
             // ВАЖНО: используем только данные с высоким confidence, чтобы не создавать ложные связи
             ai = ai || {};
-            
+
             // Фильм — только если confidence >= 0.7 И TMDB верифицирован
             if (visualResult.movie && visualResult.movie.confidence >= 0.7 && visualResult.movie.tmdb_id) {
               // Не перезаписывать существующий фильм если он уже определён из метаданных
@@ -187,7 +188,7 @@ async function processVideo(rawVideo) {
                 logger.info(`[Visual] Keeping metadata movie "${ai.movie_title}", ignoring visual "${visualResult.movie.title}"`);
               }
             }
-            
+
             // Актёры — только с индивидуальным confidence >= 0.7
             if (visualResult.actors?.length > 0) {
               const highConfActors = visualResult.actors
@@ -200,12 +201,12 @@ async function processVideo(rawVideo) {
                 logger.info(`[Visual] Keeping metadata actors, ignoring visual: ${highConfActors.join(', ')}`);
               }
             }
-            
+
             ai.confidence = Math.max(ai.confidence || 0, visualResult.confidence);
           }
 
           // Очистить кадры
-          await cleanupFrames(rawVideo.id).catch(() => {});
+          await cleanupFrames(rawVideo.id).catch(() => { });
         }
       } catch (err) {
         logger.warn(`[Visual] Visual recognition failed: ${err.message}`);
@@ -262,7 +263,7 @@ async function processVideo(rawVideo) {
     quality: ai.quality || null,
     duration_seconds: rawVideo.duration_seconds,
     duration_formatted: ai.duration_formatted || null,
-    video_url: rawVideo.video_file_url,
+    video_url: rawVideo.video_file_url, // Source URL — replaced with CDN URL by upload-to-cdn.js
     thumbnail_url: rawVideo.thumbnail_url || null,
     ai_model: GEMINI_MODEL,
     ai_confidence: ai.confidence || 0,
@@ -366,54 +367,54 @@ const _completed = [];
 const _errors = [];
 
 for (let i = 0; i < pending.length; i += CONCURRENCY) {
-    const batch = pending.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(async (raw) => {
-  try {
-    const _start = Date.now();
-    setActiveItem(raw.id, { label: raw.raw_title || raw.id, subStep: 'Gemini API', pct: 0 });
-    writeProgress({
+  const batch = pending.slice(i, i + CONCURRENCY);
+  await Promise.all(batch.map(async (raw) => {
+    try {
+      const _start = Date.now();
+      setActiveItem(raw.id, { label: raw.raw_title || raw.id, subStep: 'Gemini API', pct: 0 });
+      writeProgress({
         step: 'ai-process', stepLabel: 'AI Processing (Gemini)',
         videosTotal: pending.length, videosDone: processed + failed,
         currentVideo: { id: raw.id, title: raw.raw_title, subStep: 'Processing' },
         completedVideos: _completed.slice(-10),
         errors: _errors.slice(-10),
         elapsedMs: Date.now() - startedAt,
-    });
-    const result = await processVideo(raw);
-    removeActiveItem(raw.id);
-    if (result === null) {
-      // Video skipped (no video_url) — already marked failed in processVideo
+      });
+      const result = await processVideo(raw);
+      removeActiveItem(raw.id);
+      if (result === null) {
+        // Video skipped (no video_url) — already marked failed in processVideo
+        failed++;
+        _errors.push({ id: raw.id, title: raw.raw_title, error: 'No video file URL' });
+        return;
+      }
+      processed++;
+      _completed.push({ id: raw.id, title: raw.raw_title, status: 'ok', ms: Date.now() - _start });
+      // Rate limit: ~2 sec between API calls
+      await new Promise(r => setTimeout(r, 2000));
+    } catch (err) {
+      removeActiveItem(raw.id);
+      logger.error(`Failed: ${raw.raw_title}`, { error: err.message });
+      await markRawVideoFailed(raw.id, err.message);
       failed++;
-      _errors.push({ id: raw.id, title: raw.raw_title, error: 'No video file URL' });
-      return;
+      _errors.push({ id: raw.id, title: raw.raw_title, error: err.message });
     }
-    processed++;
-    _completed.push({ id: raw.id, title: raw.raw_title, status: 'ok', ms: Date.now() - _start });
-    // Rate limit: ~2 sec between API calls
-    await new Promise(r => setTimeout(r, 2000));
-  } catch (err) {
-    removeActiveItem(raw.id);
-    logger.error(`Failed: ${raw.raw_title}`, { error: err.message });
-    await markRawVideoFailed(raw.id, err.message);
-    failed++;
-    _errors.push({ id: raw.id, title: raw.raw_title, error: err.message });
-  }
-    }));
+  }));
 }
 
 const elapsedMs = Date.now() - startedAt;
 completeStep({
-    videosDone: processed,
-    videosTotal: pending.length,
-    elapsedMs,
-    completedVideos: _completed.slice(-20),
-    errors: _errors.slice(-20),
-    errorCount: failed,
+  videosDone: processed,
+  videosTotal: pending.length,
+  elapsedMs,
+  completedVideos: _completed.slice(-20),
+  errors: _errors.slice(-20),
+  errorCount: failed,
 });
 logger.info(`=== Done: ${processed} processed, ${failed} failed ===`);
 if (failed > 0) {
-    logger.error(`⚠️  ${failed} video(s) failed AI processing:`);
-    for (const e of _errors) {
-        logger.error(`  - ${e.id} (${e.title}): ${e.error}`);
-    }
+  logger.error(`⚠️  ${failed} video(s) failed AI processing:`);
+  for (const e of _errors) {
+    logger.error(`  - ${e.id} (${e.title}): ${e.error}`);
+  }
 }
