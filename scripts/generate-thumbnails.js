@@ -40,10 +40,10 @@ const TMP_DIR = config.pipeline.tmpDir;
 
 export const DEFAULTS = {
     thumbCount: 8,
-    thumbWidth: 320,
+    thumbWidth: 1280,
     gifDuration: 4,
     gifFps: 8,
-    gifWidth: 320,
+    gifWidth: 480,
     limit: 50,
     force: false,
 };

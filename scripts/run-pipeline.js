@@ -336,9 +336,20 @@ async function getWorkAvailability() {
         const { rows } = await query(`
             SELECT
                 (SELECT COUNT(*) FROM raw_videos WHERE status='pending') AS ai_ready,
-                (SELECT COUNT(*) FROM videos WHERE status IN ('enriched','auto_recognized')
-                 AND video_url IS NOT NULL AND video_url != ''
-                 AND (video_url_watermarked IS NULL OR video_url_watermarked = '')) AS watermark_ready,
+                (SELECT COUNT(*) FROM videos v2
+                 WHERE v2.status IN ('enriched','auto_recognized')
+                 AND v2.video_url IS NOT NULL AND v2.video_url != ''
+                 AND (v2.video_url_watermarked IS NULL OR v2.video_url_watermarked = '')
+                 AND (
+                    -- All celebrities enriched by TMDB
+                    NOT EXISTS (
+                       SELECT 1 FROM video_celebrities vc
+                       JOIN celebrities c ON c.id = vc.celebrity_id
+                       WHERE vc.video_id = v2.id AND c.tmdb_id IS NULL
+                    )
+                    -- OR video waiting > 3 min (TMDB timeout fallback)
+                    OR v2.updated_at < NOW() - INTERVAL '3 minutes'
+                 )) AS watermark_ready,
                 (SELECT COUNT(*) FROM videos WHERE status='watermarked'
                  AND (thumbnail_url IS NULL OR thumbnail_url NOT LIKE '%b-cdn.net%')) AS thumbnail_ready,
                 (SELECT COUNT(*) FROM videos WHERE status='watermarked'
@@ -368,18 +379,26 @@ async function getWorkAvailability() {
     }
 }
 
-// TMDB enrich: triggered ONCE after each ai-process completion
-let _enrichTriggered = false; // set to true when ai-process finishes, reset after tmdb-enrich runs
+// TMDB enrich: check DB for un-enriched celebrities/movies linked to pipeline videos
 async function checkEnrichNeeded() {
-    if (!_enrichTriggered) return 0;
     try {
         const { rows } = await query(`
-            SELECT COUNT(DISTINCT c.id) AS cnt
-            FROM celebrities c
-            JOIN video_celebrities vc ON vc.celebrity_id = c.id
-            JOIN videos v ON v.id = vc.video_id
-            WHERE c.tmdb_id IS NULL
-              AND v.status IN ('enriched','auto_recognized')
+            SELECT
+                (SELECT COUNT(DISTINCT c.id)
+                 FROM celebrities c
+                 JOIN video_celebrities vc ON vc.celebrity_id = c.id
+                 JOIN videos v ON v.id = vc.video_id
+                 WHERE c.tmdb_id IS NULL
+                   AND v.status IN ('enriched','auto_recognized','watermarked')
+                ) +
+                (SELECT COUNT(DISTINCT m.id)
+                 FROM movies m
+                 WHERE m.tmdb_id IS NULL
+                   AND EXISTS (SELECT 1 FROM movie_scenes ms
+                               JOIN videos v ON v.id = ms.video_id
+                               WHERE ms.movie_id = m.id
+                                 AND v.status IN ('enriched','auto_recognized','watermarked'))
+                ) AS cnt
         `);
         return parseInt(rows[0].cnt) || 0;
     } catch { return 0; }
@@ -462,10 +481,6 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
                     logger.warn(`[scheduler] ${stepName} failed (exit ${child.proc.exitCode}): ${errMsg.slice(0, 100)}`);
                 } else {
                     logger.info(`[scheduler] ${stepName} done in ${(elapsed / 1000).toFixed(1)}s (processed: ${processed})`);
-                    // Trigger TMDB enrich after ai-process completes
-                    if (stepName === 'ai-process') _enrichTriggered = true;
-                    // Reset trigger after tmdb-enrich completes (don't re-run until next ai-process)
-                    if (stepName === 'tmdb-enrich') _enrichTriggered = false;
                 }
 
                 markStepDone(stepName, {
@@ -492,13 +507,11 @@ async function runScheduler(stepsToRun, extraArgs, testMode, pipelineStart) {
             work['scrape'] = 1;
         }
 
-        // tmdb-enrich: only runs once after ai-process finishes, then waits for next ai-process
-        if (_enrichTriggered && !runningChildren.has('tmdb-enrich')) {
+        // tmdb-enrich: DB-driven, runs whenever there are un-enriched celebrities/movies
+        if (!runningChildren.has('tmdb-enrich')) {
             const enrichNeeded = await checkEnrichNeeded();
             if (enrichNeeded > 0) {
                 work['tmdb-enrich'] = enrichNeeded;
-            } else {
-                _enrichTriggered = false; // no celebrities to enrich — skip
             }
         }
 
