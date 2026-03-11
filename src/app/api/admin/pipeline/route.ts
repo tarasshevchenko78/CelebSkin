@@ -149,11 +149,16 @@ export async function GET() {
             ORDER BY created_at DESC
         `);
 
-        // Get categories from DB
+        // Get categories with raw_videos count (how many on boobsradar, not just published)
         let categories: Array<{ slug: string; name: string; videos_count: number }> = [];
         try {
             const catResult = await pool.query(
-                `SELECT slug, name, videos_count FROM categories ORDER BY videos_count DESC`
+                `SELECT c.slug, c.name,
+                    (SELECT COUNT(*) FROM raw_videos rv
+                     WHERE c.name = ANY(rv.raw_categories)
+                    )::int AS videos_count
+                 FROM categories c
+                 ORDER BY videos_count DESC`
             );
             categories = catResult.rows;
         } catch {
