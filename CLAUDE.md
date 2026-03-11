@@ -98,10 +98,13 @@ db/
 ## Реализовано (март 2026)
 - Settings table: управление API ключами (Gemini, TMDB) из админки `/admin/settings`
 - AI re-enrich: динамические ключи из DB, логирование ошибок, детальные сообщения
-- Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback)
+- Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback), разрешение 1280px
 - Водяной знак: UI для загрузки PNG, выбор паттерна движения, настройка прозрачности/масштаба
-- Категории boobsradar: `sync-categories.js`, фильтр по категориям в pipeline UI, `--categories=` флаг
+- Категории boobsradar: `sync-categories.js` с реальными счётчиками (pagination × 20), фильтр в pipeline UI, `--categories=` флаг
 - XCadr: dropdown категорий, badges коллекций в таблице импорта
+- Pipeline reset: `fullPipelineReset()` при старте — удаляет ВСЕ незавершённые видео, каждый запуск с чистого листа
+- Pipeline ordering: scheduler проверяет deps (AI ждёт scrape, TMDB ждёт AI, watermark ждёт TMDB)
+- Publish: отсутствие постера/фото = warning, не блокирует публикацию
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
