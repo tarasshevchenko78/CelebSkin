@@ -309,25 +309,67 @@ async function waitForChildren(runningChildren, timeoutMs) {
 // Scheduler — DB-driven work availability
 // ─────────────────────────────────────────────────
 
-async function cleanupStuckVideos() {
+/**
+ * Full pipeline reset — delete ALL intermediate data from previous runs.
+ * Only published/rejected/dmca_removed videos survive.
+ * Called at pipeline START so every run begins fresh.
+ */
+async function fullPipelineReset() {
+    logger.info('[cleanup] Resetting pipeline state from previous runs...');
     try {
-        // Only transition statuses where needs_review is a valid target
-        const { rows } = await query(`
-            SELECT id, status FROM videos
-            WHERE status NOT IN ('published','rejected','needs_review','dmca_removed')
-              AND (video_url IS NULL OR video_url = '')
-              AND updated_at < NOW() - INTERVAL '5 minutes'
-        `);
-        let moved = 0;
-        for (const row of rows) {
-            if (!canTransition(row.status, 'needs_review')) {
-                logger.warn(`[scheduler] Cannot move video ${row.id} from "${row.status}" to "needs_review" — skipping`);
-                continue;
-            }
-            await query(`UPDATE videos SET status='needs_review', updated_at=NOW() WHERE id = $1`, [row.id]);
-            moved++;
+        // 1. Reset raw_videos stuck in 'processing' → 'pending'
+        const r1 = await query(`UPDATE raw_videos SET status = 'pending' WHERE status = 'processing'`);
+        if (r1.rowCount > 0) logger.info(`[cleanup] Reset ${r1.rowCount} raw_videos from processing → pending`);
+
+        // 2. Delete unpublished videos and their relations
+        const unpublished = await query(
+            `SELECT id FROM videos WHERE status NOT IN ('published','rejected','dmca_removed')`
+        );
+        if (unpublished.rows.length > 0) {
+            const ids = unpublished.rows.map(r => r.id);
+            await query(`DELETE FROM video_celebrities WHERE video_id = ANY($1)`, [ids]);
+            await query(`DELETE FROM video_tags WHERE video_id = ANY($1)`, [ids]);
+            await query(`DELETE FROM movie_scenes WHERE video_id = ANY($1)`, [ids]);
+            await query(`DELETE FROM video_categories WHERE video_id = ANY($1)`, [ids]);
+            await query(`DELETE FROM collection_videos WHERE video_id = ANY($1)`, [ids]);
+            await query(`DELETE FROM processing_log WHERE video_id = ANY($1)`, [ids]);
+            const r2 = await query(`DELETE FROM videos WHERE id = ANY($1)`, [ids]);
+            logger.info(`[cleanup] Deleted ${r2.rowCount} unpublished videos + relations`);
         }
-        if (moved > 0) logger.info(`[scheduler] Moved ${moved} video(s) without video_url to needs_review`);
+
+        // 3. Reset raw_videos whose video was just deleted → back to 'pending'
+        const r3 = await query(`
+            UPDATE raw_videos SET status = 'pending'
+            WHERE status = 'processed'
+            AND id NOT IN (SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL)
+        `);
+        if (r3.rowCount > 0) logger.info(`[cleanup] Reset ${r3.rowCount} raw_videos back to pending (orphaned)`);
+
+        // 4. Reset failed raw_videos with retry_count < 3 → give them another chance
+        const r4 = await query(`UPDATE raw_videos SET status = 'pending' WHERE status = 'failed' AND retry_count < 3`);
+        if (r4.rowCount > 0) logger.info(`[cleanup] Reset ${r4.rowCount} failed raw_videos for retry`);
+
+        // 5. Clean orphan celebrities/movies without published videos
+        const r5 = await query(`
+            DELETE FROM celebrities
+            WHERE id NOT IN (
+                SELECT DISTINCT vc.celebrity_id FROM video_celebrities vc
+                JOIN videos v ON v.id = vc.video_id
+                WHERE v.status = 'published'
+            ) AND created_at > NOW() - INTERVAL '1 day'
+        `);
+        if (r5.rowCount > 0) logger.info(`[cleanup] Deleted ${r5.rowCount} orphan celebrities`);
+
+        logger.info('[cleanup] Pipeline state reset complete ✓');
+    } catch (err) {
+        logger.error(`[cleanup] Reset failed: ${err.message}`);
+    }
+}
+
+async function cleanupStuckVideos() {
+    // Light cleanup during scheduler loop — just reset processing raw_videos
+    try {
+        await query(`UPDATE raw_videos SET status = 'pending' WHERE status = 'processing'`);
     } catch {}
 }
 
@@ -866,9 +908,12 @@ async function main() {
     logger.info(`Mode: ${isSequential ? 'SEQUENTIAL' : 'SCHEDULER'} ${testMode ? '(TEST)' : '(PRODUCTION)'}`);
     logger.info(`Time: ${new Date().toISOString()}`);
 
-    // Show initial stats
+    // FULL RESET: clean all intermediate state from previous runs
+    await fullPipelineReset();
+
+    // Show initial stats (after cleanup)
     const statsBefore = await getPipelineStats();
-    printStats(statsBefore, 'BEFORE PIPELINE');
+    printStats(statsBefore, 'BEFORE PIPELINE (after cleanup)');
 
     const pipelineStart = Date.now();
 

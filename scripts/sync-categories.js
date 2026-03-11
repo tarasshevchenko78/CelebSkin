@@ -2,19 +2,26 @@
 /**
  * sync-categories.js — Sync boobsradar categories to DB
  *
- * Fetches categories from boobsradar.com/categories/ and upserts them
- * into the `categories` table. Also links existing raw_videos
- * to their categories via `video_categories`.
+ * Fetches categories from boobsradar.com/categories/, gets REAL video counts
+ * from each category's first page (pagination), and upserts into `categories` table.
  *
  * Usage:
  *   node sync-categories.js
+ *   node sync-categories.js --fast   # skip video count fetching (just names)
  */
 
 import BoobsRadarAdapter from './adapters/boobsradar-adapter.js';
 import { query, pool } from './lib/db.js';
 import logger from './lib/logger.js';
 
+const VIDEOS_PER_PAGE = 20;
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
 async function main() {
+  const fast = process.argv.includes('--fast');
   const adapter = new BoobsRadarAdapter();
 
   logger.info('Fetching categories from boobsradar.com...');
@@ -30,12 +37,28 @@ async function main() {
   let updated = 0;
 
   for (const cat of categories) {
+    let totalVideos = 0;
+
+    if (!fast) {
+      // Fetch page 1 of category to get lastPage from pagination
+      try {
+        const { lastPage } = await adapter.getVideoList(cat.url, 1);
+        totalVideos = lastPage * VIDEOS_PER_PAGE;
+        logger.info(`  ${cat.title}: ~${totalVideos} videos (${lastPage} pages)`);
+        await sleep(500); // Be polite
+      } catch (err) {
+        logger.warn(`  ${cat.title}: failed to get count — ${err.message}`);
+      }
+    }
+
     const result = await query(
-      `INSERT INTO categories (name, slug, name_localized)
-       VALUES ($1, $2, $3::jsonb)
-       ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+      `INSERT INTO categories (name, slug, name_localized, videos_count)
+       VALUES ($1, $2, $3::jsonb, $4)
+       ON CONFLICT (slug) DO UPDATE SET
+         name = EXCLUDED.name,
+         videos_count = CASE WHEN EXCLUDED.videos_count > 0 THEN EXCLUDED.videos_count ELSE categories.videos_count END
        RETURNING (xmax = 0) AS is_new`,
-      [cat.title, cat.slug, JSON.stringify({ en: cat.title })]
+      [cat.title, cat.slug, JSON.stringify({ en: cat.title }), totalVideos]
     );
     if (result.rows[0]?.is_new) inserted++;
     else updated++;
@@ -43,22 +66,15 @@ async function main() {
 
   logger.info(`Categories: ${inserted} new, ${updated} updated`);
 
-  // Now link raw_videos → video_categories based on raw_categories
-  // raw_categories are stored as text[] in raw_videos
-  // We need to match them to category slugs/names
+  // Link raw_videos → video_categories
   logger.info('Linking videos to categories...');
-
-  // Get all category name→id mappings (case-insensitive)
-  const { rows: dbCats } = await query(
-    `SELECT id, name, slug FROM categories`
-  );
+  const { rows: dbCats } = await query(`SELECT id, name, slug FROM categories`);
   const catMap = new Map();
   for (const c of dbCats) {
     catMap.set(c.name.toLowerCase(), c.id);
     catMap.set(c.slug.toLowerCase(), c.id);
   }
 
-  // Find videos with raw_categories that match our categories
   const { rows: videos } = await query(
     `SELECT v.id as video_id, rv.raw_categories
      FROM videos v
@@ -69,37 +85,21 @@ async function main() {
 
   let linked = 0;
   for (const video of videos) {
-    const cats = video.raw_categories || [];
-    for (const rawCat of cats) {
+    for (const rawCat of (video.raw_categories || [])) {
       const catId = catMap.get(rawCat.toLowerCase());
       if (catId) {
         try {
           await query(
-            `INSERT INTO video_categories (video_id, category_id)
-             VALUES ($1, $2)
-             ON CONFLICT DO NOTHING`,
+            `INSERT INTO video_categories (video_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
             [video.video_id, catId]
           );
           linked++;
-        } catch {
-          // ignore duplicate
-        }
+        } catch { /* ignore */ }
       }
     }
   }
 
   logger.info(`Linked ${linked} video-category associations`);
-
-  // Update videos_count on categories
-  await query(`
-    UPDATE categories c SET videos_count = (
-      SELECT COUNT(DISTINCT vc.video_id)
-      FROM video_categories vc
-      JOIN videos v ON v.id = vc.video_id
-      WHERE vc.category_id = c.id AND v.status = 'published'
-    )
-  `);
-
   logger.info('Done!');
   await pool.end();
 }
