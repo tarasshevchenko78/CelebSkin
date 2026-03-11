@@ -22,6 +22,7 @@ import {
   getPendingVideos, markRawVideoProcessed, markRawVideoFailed,
   insertVideo, findOrCreateCelebrity, linkVideoCelebrity,
   findOrCreateTag, linkVideoTag, findOrCreateMovie,
+  findOrCreateCategory, linkVideoCategory,
   linkMovieScene, linkMovieCelebrity, log as dbLog,
   query,
 } from "./lib/db.js";
@@ -290,7 +291,7 @@ async function processVideo(rawVideo) {
     logger.info(`Linked celebrity: ${celName} (id=${celId})`);
   }
 
-  // 7. Link tags (auto-create with localized names)
+  // 7. Link AI tags (auto-create with localized names)
   const enTags = ai.tags?.en || [];
   for (const tag of enTags) {
     const tagSlug = makeSlug(tag);
@@ -303,6 +304,30 @@ async function processVideo(rawVideo) {
     }
     const tagId = await findOrCreateTag(tag, tagSlug, tagLocalized);
     await linkVideoTag(videoId, tagId);
+  }
+
+  // 7.5. Link source (Boobsradar) tags and categories
+  if (rawVideo.raw_tags && rawVideo.raw_tags.length > 0) {
+    for (const tag of rawVideo.raw_tags) {
+      if (!tag) continue;
+      const tagSlug = makeSlug(tag);
+      if (!tagSlug) continue;
+      // We don't have translations for source tags, just save them in 'en' or as is
+      const tagId = await findOrCreateTag(tag, tagSlug, { en: tag, ru: tag });
+      await linkVideoTag(videoId, tagId);
+    }
+    logger.info(`Linked ${rawVideo.raw_tags.length} source tags`);
+  }
+
+  if (rawVideo.raw_categories && rawVideo.raw_categories.length > 0) {
+    for (const cat of rawVideo.raw_categories) {
+      if (!cat) continue;
+      const catSlug = makeSlug(cat);
+      if (!catSlug) continue;
+      const catId = await findOrCreateCategory(cat, catSlug);
+      await linkVideoCategory(videoId, catId);
+    }
+    logger.info(`Linked ${rawVideo.raw_categories.length} source categories`);
   }
 
   // 8. Link movie if identified

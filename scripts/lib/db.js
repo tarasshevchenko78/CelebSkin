@@ -186,6 +186,28 @@ export async function linkVideoTag(videoId, tagId) {
 }
 
 // ============================================
+// Categories
+// ============================================
+
+export async function findOrCreateCategory(name, slug) {
+  const { rows } = await query(
+    `INSERT INTO categories (name, slug)
+     VALUES ($1, $2)
+     ON CONFLICT (slug) DO UPDATE SET name = EXCLUDED.name
+     RETURNING id`,
+    [name, slug]
+  );
+  return rows[0].id;
+}
+
+export async function linkVideoCategory(videoId, categoryId) {
+  await query(
+    `INSERT INTO video_categories (video_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [videoId, categoryId]
+  );
+}
+
+// ============================================
 // Movies (JSONB multilingual)
 // ============================================
 
