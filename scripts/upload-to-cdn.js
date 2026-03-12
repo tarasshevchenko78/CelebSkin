@@ -122,7 +122,7 @@ export async function uploadVideoMedia(video, force = false, cleanup = false) {
     // 3. Upload screenshots
     setActiveItem(videoId, { label: vTitle, subStep: 'Uploading screenshots', pct: 50 });
     const screenshotUrls = [];
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 20; i++) {
         const thumbName = `thumb_${String(i).padStart(3, '0')}.jpg`;
         const thumbPath = join(workDir, thumbName);
         if (await fileExists(thumbPath)) {
