@@ -15,13 +15,13 @@ export default function Header({ locale }: { locale: string }) {
 
     return (
         <header className="sticky top-0 z-50 border-b border-brand-border bg-brand-bg/95 backdrop-blur-md">
-            <nav className="mx-auto flex h-14 max-w-[1600px] items-center justify-between px-4">
+            <nav className="mx-auto flex h-16 md:h-20 max-w-[1600px] items-center justify-between px-4">
                 {/* Logo */}
                 <a href={`/${locale}`} className="flex items-center gap-2 font-bold text-xl tracking-tight">
                     <img
                         src="https://celebskin-cdn.b-cdn.net/watermarks/watermark-1773274037450.png"
                         alt="CelebSkin Logo"
-                        className="h-9 w-auto object-contain"
+                        className="h-12 md:h-14 w-auto object-contain"
                     />
                 </a>
 
@@ -31,20 +31,25 @@ export default function Header({ locale }: { locale: string }) {
                         <a
                             key={link.key}
                             href={`/${locale}${link.href}`}
-                            className="text-sm text-brand-secondary hover:text-brand-text transition-colors duration-200"
+                            className="text-sm text-brand-secondary hover:text-brand-text transition-colors duration-200 whitespace-nowrap"
                         >
                             {(link.labels as Record<string, string>)[locale] || link.labels.en}
                         </a>
                     ))}
-                    <a
-                        href={`/${locale}/search`}
-                        className="text-sm text-brand-secondary hover:text-brand-text transition-colors duration-200"
-                        aria-label="Search"
-                    >
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
-                    </a>
+
+                    <form action={`/${locale}/search`} className="relative ml-2 mr-2">
+                        <input
+                            type="text"
+                            name="q"
+                            placeholder={locale === 'ru' ? 'Поиск...' : 'Search...'}
+                            className="w-48 bg-brand-card border border-brand-border rounded-full py-1.5 pl-9 pr-4 text-sm text-brand-text placeholder-brand-muted focus:outline-none focus:ring-1 focus:ring-brand-accent focus:border-brand-accent transition-all"
+                        />
+                        <button type="submit" className="absolute left-3 top-1/2 -translate-y-1/2 text-brand-secondary hover:text-brand-text">
+                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                            </svg>
+                        </button>
+                    </form>
 
                     {/* Language Selector */}
                     <div className="relative">

@@ -129,6 +129,7 @@ export default async function VideoDetailPage({
                         src={video.video_url_watermarked || video.video_url}
                         poster={video.thumbnail_url}
                         title={title}
+                        durationSeconds={video.duration_seconds || undefined}
                     />
                 ) : video.embed_code ? (
                     <div
@@ -140,6 +141,7 @@ export default async function VideoDetailPage({
                         src={null}
                         poster={video.thumbnail_url}
                         title={title}
+                        durationSeconds={video.duration_seconds || undefined}
                     />
                 )}
             </div>

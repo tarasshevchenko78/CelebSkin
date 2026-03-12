@@ -121,7 +121,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
     try {
         [latestVideos, trendingCelebs, popularMovies, tags, featuredCollections] = await Promise.all([
-            getLatestVideos(16),
+            getLatestVideos(24),
             getTrendingCelebrities(12),
             getMovies(1, 12, 'scenes_count').then(r => r.data),
             getAllTags(25),

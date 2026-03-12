@@ -6,6 +6,7 @@ interface VideoPlayerProps {
     src?: string | null;
     poster?: string | null;
     title?: string;
+    durationSeconds?: number;
 }
 
 function formatTime(seconds: number): string {
@@ -14,14 +15,14 @@ function formatTime(seconds: number): string {
     return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
+export default function VideoPlayer({ src, poster, title, durationSeconds }: VideoPlayerProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
 
     const [playing, setPlaying] = useState(false);
     const [currentTime, setCurrentTime] = useState(0);
-    const [duration, setDuration] = useState(0);
+    const [duration, setDuration] = useState(durationSeconds || 0);
     const [volume, setVolume] = useState(1);
     const [muted, setMuted] = useState(false);
     const [showControls, setShowControls] = useState(true);
@@ -167,7 +168,14 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
                     className="w-full h-full object-contain"
                     onClick={togglePlay}
                     onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
-                    onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                    onLoadedMetadata={(e) => {
+                        const d = e.currentTarget.duration;
+                        if (d && !isNaN(d) && d !== Infinity) {
+                            setDuration(d);
+                        } else if (durationSeconds) {
+                            setDuration(durationSeconds);
+                        }
+                    }}
                     onEnded={() => setPlaying(false)}
                     onError={(e) => {
                         const v = e.currentTarget;
