@@ -34,7 +34,7 @@ export default async function TagPage({ params }: { params: { locale: string; sl
     const videos = videosResult?.data || [];
 
     return (
-        <div className="mx-auto max-w-7xl px-4 py-8">
+        <div className="mx-auto max-w-[1600px] px-4 py-8">
             <h1 className="mb-6 text-2xl sm:text-3xl font-bold text-white">
                 <span className="text-brand-secondary font-normal mr-2">#</span>{tagName}
             </h1>

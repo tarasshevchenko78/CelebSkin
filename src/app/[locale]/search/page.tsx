@@ -101,7 +101,7 @@ export default function SearchPage({ params, searchParams }: { params: { locale:
     const hasResults = results && (results.videos.length > 0 || results.celebrities.length > 0 || results.movies.length > 0);
 
     return (
-        <div className="mx-auto max-w-7xl px-4 py-8">
+        <div className="mx-auto max-w-[1600px] px-4 py-8">
             <h1 className="text-2xl sm:text-3xl font-bold text-white mb-6">
                 {titles[locale] || titles.en}
             </h1>

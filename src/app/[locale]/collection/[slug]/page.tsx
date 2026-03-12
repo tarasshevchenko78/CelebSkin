@@ -76,7 +76,7 @@ export default async function CollectionDetailPage({ params }: { params: { local
 
     if (!collection) {
         return (
-            <div className="mx-auto max-w-7xl px-4 py-20 text-center">
+            <div className="mx-auto max-w-[1600px] px-4 py-20 text-center">
                 <h1 className="text-2xl font-bold text-white mb-4">{notFoundLabels[locale] || notFoundLabels.en}</h1>
                 <a href={`/${locale}/collection`} className="text-red-400 hover:text-red-300 transition-colors">
                     {backLabel[locale] || backLabel.en}
@@ -120,7 +120,7 @@ export default async function CollectionDetailPage({ params }: { params: { local
     };
 
     return (
-        <div className="mx-auto max-w-7xl px-4 py-4 md:py-6">
+        <div className="mx-auto max-w-[1600px] px-4 py-4 md:py-6">
             <JsonLd data={collectionLd} />
 
             {/* Breadcrumb */}

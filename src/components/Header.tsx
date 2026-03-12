@@ -15,11 +15,14 @@ export default function Header({ locale }: { locale: string }) {
 
     return (
         <header className="sticky top-0 z-50 border-b border-brand-border bg-brand-bg/95 backdrop-blur-md">
-            <nav className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+            <nav className="mx-auto flex h-14 max-w-[1600px] items-center justify-between px-4">
                 {/* Logo */}
-                <a href={`/${locale}`} className="flex items-center gap-1.5 font-bold text-xl tracking-tight">
-                    <span className="text-brand-accent">Celeb</span>
-                    <span className="text-brand-text">Skin</span>
+                <a href={`/${locale}`} className="flex items-center gap-2 font-bold text-xl tracking-tight">
+                    <img
+                        src="https://celebskin-cdn.b-cdn.net/watermarks/watermark-1773274037450.png"
+                        alt="CelebSkin Logo"
+                        className="h-9 w-auto object-contain"
+                    />
                 </a>
 
                 {/* Desktop Nav */}
@@ -61,8 +64,8 @@ export default function Header({ locale }: { locale: string }) {
                                         key={loc}
                                         href={`/${loc}`}
                                         className={`block px-3 py-1.5 text-sm transition-colors ${loc === locale
-                                                ? 'text-brand-accent bg-brand-hover'
-                                                : 'text-brand-secondary hover:text-brand-text hover:bg-brand-hover'
+                                            ? 'text-brand-accent bg-brand-hover'
+                                            : 'text-brand-secondary hover:text-brand-text hover:bg-brand-hover'
                                             }`}
                                         onClick={() => setLangOpen(false)}
                                     >
@@ -102,8 +105,8 @@ export default function Header({ locale }: { locale: string }) {
                                         key={loc}
                                         href={`/${loc}`}
                                         className={`block px-3 py-1.5 text-sm transition-colors ${loc === locale
-                                                ? 'text-brand-accent bg-brand-hover'
-                                                : 'text-brand-secondary hover:text-brand-text hover:bg-brand-hover'
+                                            ? 'text-brand-accent bg-brand-hover'
+                                            : 'text-brand-secondary hover:text-brand-text hover:bg-brand-hover'
                                             }`}
                                         onClick={() => setLangOpen(false)}
                                     >

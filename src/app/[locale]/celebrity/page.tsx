@@ -53,7 +53,7 @@ export default async function CelebritiesPage({
     const totalPages = result.totalPages;
 
     return (
-        <div className="mx-auto max-w-7xl px-4 py-8">
+        <div className="mx-auto max-w-[1600px] px-4 py-8">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
                 <h1 className="text-2xl sm:text-3xl font-bold text-white">
                     {titles[locale] || titles.en}

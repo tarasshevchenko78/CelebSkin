@@ -100,7 +100,7 @@ export default function CookieConsent() {
 
     return (
         <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-brand-border bg-brand-card">
-            <div className="mx-auto flex max-w-7xl flex-col items-center gap-4 px-4 py-4 sm:flex-row sm:justify-between">
+            <div className="mx-auto flex max-w-[1600px] flex-col items-center gap-4 px-4 py-4 sm:flex-row sm:justify-between">
                 <p className="text-sm text-brand-secondary">
                     {t.message}
                 </p>

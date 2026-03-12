@@ -154,7 +154,7 @@ export default function TestVideoPage() {
     if (loading) return <div className="p-8 text-white">Loading...</div>;
 
     return (
-        <div className="p-6 max-w-7xl mx-auto">
+        <div className="p-6 max-w-[1600px] mx-auto">
             <h1 className="text-xl font-bold text-white mb-4">🎬 Video Playback Test</h1>
 
             {/* Summary */}

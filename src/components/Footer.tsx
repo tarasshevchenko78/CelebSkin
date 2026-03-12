@@ -11,14 +11,17 @@ const footerLinks = [
 export default function Footer({ locale }: { locale: string }) {
     return (
         <footer className="mt-auto border-t border-brand-border bg-brand-bg">
-            <div className="mx-auto max-w-7xl px-4 py-10">
+            <div className="mx-auto max-w-[1600px] px-4 py-10">
                 {/* Top section */}
                 <div className="flex flex-col gap-8 md:flex-row md:justify-between">
                     {/* Brand */}
                     <div className="shrink-0">
-                        <a href={`/${locale}`} className="inline-flex items-center gap-1.5 font-bold text-lg tracking-tight mb-3">
-                            <span className="text-brand-accent">Celeb</span>
-                            <span className="text-brand-text">Skin</span>
+                        <a href={`/${locale}`} className="inline-flex items-center gap-2 font-bold text-lg tracking-tight mb-3">
+                            <img
+                                src="https://celebskin-cdn.b-cdn.net/watermarks/watermark-1773274037450.png"
+                                alt="CelebSkin Logo"
+                                className="h-8 w-auto object-contain grayscale opacity-70 hover:grayscale-0 hover:opacity-100 transition-all"
+                            />
                         </a>
                         <p className="text-xs text-brand-muted max-w-xs leading-relaxed">
                             Celebrity nude scenes from movies and TV shows. All content is sourced from publicly available materials.

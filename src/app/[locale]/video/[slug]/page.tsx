@@ -68,7 +68,7 @@ export default async function VideoDetailPage({
 
     if (!video) {
         return (
-            <div className="mx-auto max-w-7xl px-4 py-20 text-center">
+            <div className="mx-auto max-w-[1600px] px-4 py-20 text-center">
                 <h1 className="text-2xl font-bold text-white mb-4">Video not found</h1>
                 <a href={`/${locale}/video`} className="text-red-400 hover:underline">← Back to videos</a>
             </div>

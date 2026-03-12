@@ -143,14 +143,14 @@ export default async function HomePage({ params }: { params: { locale: string } 
     return (
         <div>
             {/* SEO heading — minimal, hidden on mobile (mobile search replaces it) */}
-            <div className="mx-auto max-w-7xl px-4 pt-6 md:pt-8">
+            <div className="mx-auto max-w-[1600px] px-4 pt-6 md:pt-8">
                 <h1 className="hidden md:block text-lg font-semibold text-gray-400">
                     {heading}
                 </h1>
             </div>
 
             {/* Mobile search + quick tag chips */}
-            <div className="mx-auto max-w-7xl px-4 pt-3">
+            <div className="mx-auto max-w-[1600px] px-4 pt-3">
                 <MobileSearch
                     locale={locale}
                     placeholder={sections.searchPlaceholder}
@@ -160,7 +160,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── New Scenes — 4 featured cards ── */}
             {featuredVideos.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
                     <SectionHeader
                         title={sections.newScenes}
                         viewAllHref={`/${locale}/video`}
@@ -176,7 +176,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── Latest Videos — responsive grid ── */}
             {gridVideos.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
                     <SectionHeader
                         title={sections.latest}
                         viewAllHref={`/${locale}/video`}
@@ -192,7 +192,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── Browse by Tag — horizontal scroll on mobile, wrapping on desktop ── */}
             {tags.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
                     <h2 className="text-lg font-semibold text-white mb-4">{sections.tags}</h2>
                     <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap md:overflow-visible">
                         {tags.map((tag) => (
@@ -210,7 +210,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── Featured Collections — curated playlists ── */}
             {featuredCollections.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
                     <SectionHeader
                         title={collectionsLabel[locale] || collectionsLabel.en}
                         viewAllHref={`/${locale}/collection`}
@@ -259,7 +259,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── Trending Celebrities — mobile scroll, desktop grid ── */}
             {trendingCelebs.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
                     <SectionHeader
                         title={sections.trending}
                         viewAllHref={`/${locale}/celebrity`}
@@ -275,7 +275,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── Popular Movies — compact grid with hover overlay ── */}
             {popularMovies.length > 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-6 md:py-8">
+                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
                     <SectionHeader
                         title={sections.movies}
                         viewAllHref={`/${locale}/movie`}
@@ -333,7 +333,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* Empty state when no data */}
             {latestVideos.length === 0 && trendingCelebs.length === 0 && (
-                <section className="mx-auto max-w-7xl px-4 py-16 text-center">
+                <section className="mx-auto max-w-[1600px] px-4 py-16 text-center">
                     <p className="text-gray-500 text-lg">Content is being prepared. Check back soon!</p>
                 </section>
             )}

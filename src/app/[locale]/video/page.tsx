@@ -118,7 +118,7 @@ export default async function VideosPage({
     };
 
     return (
-        <div className="mx-auto max-w-7xl px-4 py-4 md:py-6">
+        <div className="mx-auto max-w-[1600px] px-4 py-4 md:py-6">
 
             {/* ── Header ── */}
             <div className="mb-4">
