@@ -15,13 +15,13 @@ export default function Header({ locale }: { locale: string }) {
 
     return (
         <header className="sticky top-0 z-50 border-b border-brand-border bg-brand-bg/95 backdrop-blur-md">
-            <nav className="mx-auto flex h-16 md:h-20 max-w-[1600px] items-center justify-between px-4">
+            <nav className="mx-auto flex h-[88px] md:h-[104px] max-w-[1600px] items-center justify-between px-4">
                 {/* Logo */}
                 <a href={`/${locale}`} className="flex items-center gap-2 font-bold text-xl tracking-tight">
                     <img
                         src="https://celebskin-cdn.b-cdn.net/watermarks/watermark-1773274037450.png"
                         alt="CelebSkin Logo"
-                        className="h-12 md:h-14 w-auto object-contain"
+                        className="h-16 md:h-[72px] w-auto object-contain"
                     />
                 </a>
 

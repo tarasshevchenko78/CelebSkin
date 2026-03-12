@@ -52,27 +52,28 @@ async function main() {
     }
 
     const result = await query(
-      `INSERT INTO categories (name, slug, name_localized, videos_count)
-       VALUES ($1, $2, $3::jsonb, $4)
+      `INSERT INTO collections (title, slug, videos_count, is_auto)
+       VALUES ($1::jsonb, $2, $3, true)
        ON CONFLICT (slug) DO UPDATE SET
-         name = EXCLUDED.name,
-         videos_count = CASE WHEN EXCLUDED.videos_count > 0 THEN EXCLUDED.videos_count ELSE categories.videos_count END
+         title = COALESCE(EXCLUDED.title, collections.title),
+         videos_count = CASE WHEN EXCLUDED.videos_count > 0 THEN EXCLUDED.videos_count ELSE collections.videos_count END
        RETURNING (xmax = 0) AS is_new`,
-      [cat.title, cat.slug, JSON.stringify({ en: cat.title }), totalVideos]
+      [JSON.stringify({ en: cat.title, ru: cat.title }), cat.slug, totalVideos]
     );
     if (result.rows[0]?.is_new) inserted++;
     else updated++;
   }
 
-  logger.info(`Categories: ${inserted} new, ${updated} updated`);
+  logger.info(`Collections: ${inserted} new, ${updated} updated`);
 
-  // Link raw_videos → video_categories
-  logger.info('Linking videos to categories...');
-  const { rows: dbCats } = await query(`SELECT id, name, slug FROM categories`);
+  // Link raw_videos → collection_videos
+  logger.info('Linking videos to collections...');
+  const { rows: dbCats } = await query(`SELECT id, title, slug FROM collections`);
   const catMap = new Map();
   for (const c of dbCats) {
-    catMap.set(c.name.toLowerCase(), c.id);
-    catMap.set(c.slug.toLowerCase(), c.id);
+    if (c.title && c.title.en) catMap.set(c.title.en.toLowerCase(), c.id);
+    if (c.title && c.title.ru) catMap.set(c.title.ru.toLowerCase(), c.id);
+    if (c.slug) catMap.set(c.slug.toLowerCase(), c.id);
   }
 
   const { rows: videos } = await query(
@@ -90,7 +91,7 @@ async function main() {
       if (catId) {
         try {
           await query(
-            `INSERT INTO video_categories (video_id, category_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            `INSERT INTO collection_videos (video_id, collection_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
             [video.video_id, catId]
           );
           linked++;
@@ -99,7 +100,7 @@ async function main() {
     }
   }
 
-  logger.info(`Linked ${linked} video-category associations`);
+  logger.info(`Linked ${linked} video-collection associations`);
   logger.info('Done!');
   await pool.end();
 }

@@ -1,4 +1,4 @@
-import { pool, findOrCreateTag, linkVideoTag, findOrCreateCategory, linkVideoCategory } from './lib/db.js';
+import { pool, findOrCreateTag, linkVideoTag, findOrCreateCollection, linkVideoCollection } from './lib/db.js';
 import slugify from 'slugify';
 
 function makeSlug(text) {
@@ -38,15 +38,15 @@ async function main() {
             }
         }
 
-        // Categories
+        // Categories -> Collections
         if (raw_categories && raw_categories.length > 0) {
             for (const cat of raw_categories) {
                 if (!cat) continue;
                 const catSlug = makeSlug(cat);
                 if (!catSlug) continue;
 
-                const catId = await findOrCreateCategory(cat, catSlug);
-                await linkVideoCategory(video_id, catId);
+                const collId = await findOrCreateCollection(cat, catSlug, { en: cat, ru: cat });
+                await linkVideoCollection(video_id, collId);
                 catsCount++;
             }
         }

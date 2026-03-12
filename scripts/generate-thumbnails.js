@@ -29,7 +29,6 @@ import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { config } from './lib/config.js';
 import { query } from './lib/db.js';
-import logger from './lib/logger.js'; dbLog } from './lib/db.js';
 import logger from './lib/logger.js';
 import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
 import { withRetry } from './lib/retry.js';

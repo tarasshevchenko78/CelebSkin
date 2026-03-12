@@ -9,22 +9,6 @@ import VideoCard from '@/components/VideoCard';
 import CelebrityCard from '@/components/CelebrityCard';
 import MobileSearch from '@/components/MobileSearch';
 
-// ============================================
-// SEO heading (minimal, replaces big hero)
-// ============================================
-
-const seoHeading: Record<string, string> = {
-    en: 'Celebrity Nude Scenes from Movies & TV Shows',
-    ru: 'Откровенные сцены знаменитостей из фильмов и сериалов',
-    de: 'Nacktszenen von Prominenten aus Filmen & Serien',
-    fr: 'Scènes nues de célébrités dans les films et séries',
-    es: 'Escenas de desnudos de celebridades en películas y series',
-    pt: 'Cenas de nudez de celebridades em filmes e séries',
-    it: 'Scene di nudo di celebrità da film e serie TV',
-    pl: 'Nagie sceny celebrytów z filmów i seriali',
-    nl: 'Naaktscènes van beroemdheden uit films en series',
-    tr: 'Film ve dizilerden ünlülerin çıplak sahneleri',
-};
 
 // ============================================
 // Section titles (localized)
@@ -110,7 +94,6 @@ function SectionHeader({ title, viewAllHref, viewAllLabel }: {
 
 export default async function HomePage({ params }: { params: { locale: string } }) {
     const locale = params.locale;
-    const heading = seoHeading[locale] || seoHeading.en;
     const sections = sectionTitles[locale] || sectionTitles.en;
 
     let latestVideos: Video[] = [];
@@ -142,12 +125,6 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
     return (
         <div>
-            {/* SEO heading — minimal, hidden on mobile (mobile search replaces it) */}
-            <div className="mx-auto max-w-[1600px] px-4 pt-6 md:pt-8">
-                <h1 className="hidden md:block text-lg font-semibold text-gray-400">
-                    {heading}
-                </h1>
-            </div>
 
             {/* Mobile search + quick tag chips */}
             <div className="mx-auto max-w-[1600px] px-4 pt-3">

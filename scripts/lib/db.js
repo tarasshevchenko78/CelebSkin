@@ -208,6 +208,29 @@ export async function linkVideoCategory(videoId, categoryId) {
 }
 
 // ============================================
+// Collections
+// ============================================
+
+export async function findOrCreateCollection(titleRaw, slug, localizedTitle = null) {
+  const { rows } = await query(
+    `INSERT INTO collections (title, slug, is_auto)
+     VALUES ($1::jsonb, $2, true)
+     ON CONFLICT (slug) DO UPDATE SET
+       title = COALESCE(EXCLUDED.title, collections.title)
+     RETURNING id`,
+    [localizedTitle ? JSON.stringify(localizedTitle) : JSON.stringify({ en: titleRaw, ru: titleRaw }), slug]
+  );
+  return rows[0].id;
+}
+
+export async function linkVideoCollection(videoId, collectionId) {
+  await query(
+    `INSERT INTO collection_videos (video_id, collection_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [videoId, collectionId]
+  );
+}
+
+// ============================================
 // Movies (JSONB multilingual)
 // ============================================
 

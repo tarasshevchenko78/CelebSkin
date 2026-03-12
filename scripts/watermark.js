@@ -226,7 +226,8 @@ async function addWatermark(inputPath, outputPath, config, onProgress) {
             await runFFmpeg([
                 '-i', inputPath, '-i', wmPath,
                 '-filter_complex', filterComplex,
-                '-c:a', 'aac', '-b:a', '128k', '-c:v', 'libx264',
+                '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
                 '-preset', 'veryfast', '-crf', '20',
                 '-g', '48', '-bf', '2', '-threads', '0',
                 '-movflags', '+faststart',
@@ -242,7 +243,8 @@ async function addWatermark(inputPath, outputPath, config, onProgress) {
 
     await runFFmpeg([
         '-i', inputPath, '-vf', textFilter,
-        '-c:a', 'aac', '-b:a', '128k', '-c:v', 'libx264',
+        '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
         '-preset', 'veryfast', '-crf', '20',
         '-g', '48', '-bf', '2', '-threads', '0',
         '-movflags', '+faststart',

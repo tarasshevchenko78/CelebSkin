@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import { pool } from '@/lib/db';
-import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -149,11 +148,14 @@ export async function GET() {
             ORDER BY created_at DESC
         `);
 
-        // Get categories with real boobsradar video counts (from sync-categories.js)
+        // Get categories from our new collections mapping (is_auto=true are from sync-categories)
         let categories: Array<{ slug: string; name: string; videos_count: number }> = [];
         try {
             const catResult = await pool.query(
-                `SELECT slug, name, videos_count FROM categories ORDER BY videos_count DESC`
+                `SELECT slug, COALESCE(title->>'ru', title->>'en', slug) as name, videos_count 
+                 FROM collections 
+                 WHERE is_auto = true 
+                 ORDER BY videos_count DESC`
             );
             categories = catResult.rows;
         } catch {
@@ -209,7 +211,7 @@ export async function GET() {
             })),
         });
     } catch (error) {
-        logger.error('Pipeline stats fetch failed', { route: '/api/admin/pipeline', error: error instanceof Error ? error.message : String(error) });
+        console.error('Pipeline stats fetch failed', { route: '/api/admin/pipeline', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json({ error: 'Failed to fetch pipeline stats' }, { status: 500 });
     }
 }
@@ -271,7 +273,7 @@ export async function POST(request: NextRequest) {
             message: `${pipelineAction.label} started on Contabo`,
         });
     } catch (error) {
-        logger.error('Pipeline action start failed', { route: '/api/admin/pipeline', action: 'POST', error: error instanceof Error ? error.message : String(error) });
+        console.error('Pipeline action start failed', { route: '/api/admin/pipeline', action: 'POST', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
             { error: `Failed to start pipeline: ${error instanceof Error ? error.message : 'Unknown error'}` },
             { status: 500 }
@@ -393,7 +395,7 @@ export async function DELETE(request: NextRequest) {
                 ) AND created_at > NOW() - INTERVAL '1 day'
             `);
         } catch (cleanErr) {
-            logger.error('Pipeline stop DB cleanup failed', { error: cleanErr instanceof Error ? cleanErr.message : String(cleanErr) });
+            console.error('Pipeline stop DB cleanup failed', { error: cleanErr instanceof Error ? cleanErr.message : String(cleanErr) });
         }
 
         await pool.query(
@@ -406,7 +408,7 @@ export async function DELETE(request: NextRequest) {
             message: `Остановлено. Удалено ${cleanedVideos} незавершённых видео, ${cleanedRaw} raw_videos помечены как skipped`,
         });
     } catch (error) {
-        logger.error('Pipeline stop failed', { route: '/api/admin/pipeline', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
+        console.error('Pipeline stop failed', { route: '/api/admin/pipeline', action: 'DELETE', error: error instanceof Error ? error.message : String(error) });
         return NextResponse.json(
             { error: `Failed to stop pipeline: ${error instanceof Error ? error.message : 'Unknown error'}` },
             { status: 500 }

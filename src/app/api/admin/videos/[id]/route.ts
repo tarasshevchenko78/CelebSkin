@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { pool } from '@/lib/db';
-import { invalidateAfterEdit, invalidateAfterPublish, invalidateAfterDelete } from '@/lib/cache';
-import { logger } from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,7 +21,7 @@ export async function GET(
 
         const video = videoResult.rows[0];
 
-        const [celebResult, tagResult, movieResult, rawResult, collResult] = await Promise.all([
+        const [celebResult, tagResult, movieResult, rawResult] = await Promise.all([
             pool.query(
                 `SELECT c.* FROM celebrities c
                  JOIN video_celebrities vc ON vc.celebrity_id = c.id
@@ -45,29 +43,21 @@ export async function GET(
             ),
             video.raw_video_id
                 ? pool.query(
-                      `SELECT * FROM raw_videos WHERE id = $1`,
-                      [video.raw_video_id]
-                  )
+                    `SELECT * FROM raw_videos WHERE id = $1`,
+                    [video.raw_video_id]
+                )
                 : Promise.resolve({ rows: [] }),
-            pool.query(
-                `SELECT c.* FROM collections c
-                 JOIN collection_videos cv ON cv.collection_id = c.id
-                 WHERE cv.video_id = $1
-                 ORDER BY c.sort_order ASC`,
-                [id]
-            ),
         ]);
 
         return NextResponse.json({
             video,
             celebrities: celebResult.rows,
             tags: tagResult.rows,
-            collections: collResult.rows,
             movie: movieResult.rows[0] || null,
             rawVideo: rawResult.rows[0] || null,
         });
     } catch (error) {
-        logger.error('Admin video GET failed', { route: '/api/admin/videos/[id]', videoId: id, error: error instanceof Error ? error.message : String(error) });
+        console.error('[API AdminVideo GET] error:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -109,8 +99,9 @@ export async function PUT(
         addField('video_url_watermarked', video_url_watermarked);
 
         const hasTagUpdate = Array.isArray(body.tags);
+        const hasCollectionUpdate = Array.isArray(body.collections);
 
-        if (updates.length === 0 && !hasTagUpdate) {
+        if (updates.length === 0 && !hasTagUpdate && !hasCollectionUpdate) {
             return NextResponse.json({ error: 'No fields to update' }, { status: 400 });
         }
 
@@ -145,29 +136,16 @@ export async function PUT(
             }
         }
 
-        // Auto-promote celebrities and movies to published when video is published
-        if (status === 'published') {
-            await Promise.all([
-                pool.query(
-                    `UPDATE celebrities SET status = 'published'
-                     WHERE status = 'draft'
-                       AND id IN (SELECT celebrity_id FROM video_celebrities WHERE video_id = $1)`,
-                    [id]
-                ),
-                pool.query(
-                    `UPDATE movies SET status = 'published'
-                     WHERE status = 'draft'
-                       AND id IN (SELECT movie_id FROM movie_scenes WHERE video_id = $1)`,
-                    [id]
-                ),
-            ]);
-        }
-
-        // Invalidate caches
-        if (status === 'published') {
-            await invalidateAfterPublish();
-        } else {
-            await invalidateAfterEdit();
+        if (hasCollectionUpdate) {
+            const collIds: number[] = body.collections;
+            await pool.query('DELETE FROM collection_videos WHERE video_id = $1', [id]);
+            if (collIds.length > 0) {
+                const collValues = collIds.map((collId, i) => `($1, $${i + 2})`).join(', ');
+                await pool.query(
+                    `INSERT INTO collection_videos (video_id, collection_id) VALUES ${collValues}`,
+                    [id, ...collIds]
+                );
+            }
         }
 
         if (result) {
@@ -177,7 +155,7 @@ export async function PUT(
         const videoResult = await pool.query('SELECT * FROM videos WHERE id = $1', [id]);
         return NextResponse.json(videoResult.rows[0]);
     } catch (error) {
-        logger.error('Admin video PUT failed', { route: '/api/admin/videos/[id]', videoId: id, error: error instanceof Error ? error.message : String(error) });
+        console.error('[API AdminVideo PUT] error:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }
@@ -189,15 +167,6 @@ export async function DELETE(
     const { id } = params;
 
     try {
-        // Cascade delete FK-dependent rows first
-        await Promise.all([
-            pool.query('DELETE FROM video_tags WHERE video_id = $1', [id]),
-            pool.query('DELETE FROM video_celebrities WHERE video_id = $1', [id]),
-            pool.query('DELETE FROM movie_scenes WHERE video_id = $1', [id]),
-            pool.query('DELETE FROM collection_videos WHERE video_id = $1', [id]),
-            pool.query('UPDATE xcadr_imports SET matched_video_id = NULL WHERE matched_video_id = $1', [id]),
-        ]);
-
         const result = await pool.query(
             `DELETE FROM videos WHERE id = $1 RETURNING id`,
             [id]
@@ -207,10 +176,9 @@ export async function DELETE(
             return NextResponse.json({ error: 'Video not found' }, { status: 404 });
         }
 
-        await invalidateAfterDelete();
         return NextResponse.json({ deleted: true, id });
     } catch (error) {
-        logger.error('Admin video DELETE failed', { route: '/api/admin/videos/[id]', videoId: id, error: error instanceof Error ? error.message : String(error) });
+        console.error('[API AdminVideo DELETE] error:', error);
         return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
     }
 }

@@ -23,6 +23,7 @@ import {
   insertVideo, findOrCreateCelebrity, linkVideoCelebrity,
   findOrCreateTag, linkVideoTag, findOrCreateMovie,
   findOrCreateCategory, linkVideoCategory,
+  findOrCreateCollection, linkVideoCollection,
   linkMovieScene, linkMovieCelebrity, log as dbLog,
   query,
 } from "./lib/db.js";
@@ -324,10 +325,10 @@ async function processVideo(rawVideo) {
       if (!cat) continue;
       const catSlug = makeSlug(cat);
       if (!catSlug) continue;
-      const catId = await findOrCreateCategory(cat, catSlug);
-      await linkVideoCategory(videoId, catId);
+      const collId = await findOrCreateCollection(cat, catSlug, { en: cat, ru: cat });
+      await linkVideoCollection(videoId, collId);
     }
-    logger.info(`Linked ${rawVideo.raw_categories.length} source categories`);
+    logger.info(`Linked ${rawVideo.raw_categories.length} source categories to collections`);
   }
 
   // 8. Link movie if identified
