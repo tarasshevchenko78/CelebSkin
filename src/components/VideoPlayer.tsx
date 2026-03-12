@@ -10,9 +10,12 @@ interface VideoPlayerProps {
 }
 
 function formatTime(seconds: number): string {
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
+    const s = Math.round(seconds);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
 export default function VideoPlayer({ src, poster, title, durationSeconds }: VideoPlayerProps) {
@@ -29,6 +32,13 @@ export default function VideoPlayer({ src, poster, title, durationSeconds }: Vid
     const [isFullscreen, setIsFullscreen] = useState(false);
     const [videoError, setVideoError] = useState<string | null>(null);
     const hideTimeout = useRef<NodeJS.Timeout | null>(null);
+
+    // Sync prop changes
+    useEffect(() => {
+        if (durationSeconds && duration === 0) {
+            setDuration(durationSeconds);
+        }
+    }, [durationSeconds, duration]);
 
     const togglePlay = useCallback(() => {
         const v = videoRef.current;
