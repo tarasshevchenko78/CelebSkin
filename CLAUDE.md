@@ -126,11 +126,13 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - AI re-enrich: динамические ключи из DB, логирование ошибок, детальные сообщения
 - Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback), разрешение 1280px
 - Водяной знак: UI для загрузки PNG, выбор паттерна движения, настройка прозрачности/масштаба
-- Категории boobsradar: `sync-categories.js` с реальными счётчиками (pagination × 20), фильтр в pipeline UI, `--categories=` флаг
+- Категории boobsradar: `sync-categories.js` с реальными счётчиками (pagination × 20) напрямую в таблицу `collections`, фильтр в pipeline UI
 - XCadr: dropdown категорий, badges коллекций в таблице импорта
 - Pipeline reset: `fullPipelineReset()` при старте — сохраняет needs_review видео
 - Pipeline конвейер: event-driven scheduler, мгновенный re-spawn, parallel steps
 - Publish автомодерация: полные → published, неполные → needs_review
+- Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
+- Документация деплоя: выяснено, что Web App задеплоен на Vercel (push в `master` обновляет UI админки на `celeb.skin`).
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
