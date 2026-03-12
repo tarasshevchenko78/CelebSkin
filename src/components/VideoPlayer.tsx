@@ -101,21 +101,7 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
         }, 3000);
     }, [playing]);
 
-    useEffect(() => {
-        const v = videoRef.current;
-        if (!v) return;
-        const onTime = () => setCurrentTime(v.currentTime);
-        const onMeta = () => setDuration(v.duration);
-        const onEnd = () => setPlaying(false);
-        v.addEventListener('timeupdate', onTime);
-        v.addEventListener('loadedmetadata', onMeta);
-        v.addEventListener('ended', onEnd);
-        return () => {
-            v.removeEventListener('timeupdate', onTime);
-            v.removeEventListener('loadedmetadata', onMeta);
-            v.removeEventListener('ended', onEnd);
-        };
-    }, []);
+
 
     useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
@@ -172,23 +158,26 @@ export default function VideoPlayer({ src, poster, title }: VideoPlayerProps) {
                     <p className="text-gray-600 text-xs mt-1">{videoError}</p>
                 </div>
             ) : (
-            <video
-                ref={videoRef}
-                src={src}
-                poster={poster || undefined}
-                preload="metadata"
-                crossOrigin="anonymous"
-                className="w-full h-full object-contain"
-                onClick={togglePlay}
-                onError={(e) => {
-                    const v = e.currentTarget;
-                    const err = v.error;
-                    const msg = err ? `${err.code}: ${err.message || 'Unknown error'}` : 'Load failed';
-                    console.error('[VideoPlayer] error:', msg, 'src:', src);
-                    setVideoError(msg);
-                }}
-                playsInline
-            />
+                <video
+                    ref={videoRef}
+                    src={src}
+                    poster={poster || undefined}
+                    preload="metadata"
+                    crossOrigin="anonymous"
+                    className="w-full h-full object-contain"
+                    onClick={togglePlay}
+                    onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                    onLoadedMetadata={(e) => setDuration(e.currentTarget.duration)}
+                    onEnded={() => setPlaying(false)}
+                    onError={(e) => {
+                        const v = e.currentTarget;
+                        const err = v.error;
+                        const msg = err ? `${err.code}: ${err.message || 'Unknown error'}` : 'Load failed';
+                        console.error('[VideoPlayer] error:', msg, 'src:', src);
+                        setVideoError(msg);
+                    }}
+                    playsInline
+                />
             )}
 
             {/* Center play/pause overlay */}

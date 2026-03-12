@@ -226,7 +226,7 @@ async function addWatermark(inputPath, outputPath, config, onProgress) {
             await runFFmpeg([
                 '-i', inputPath, '-i', wmPath,
                 '-filter_complex', filterComplex,
-                '-codec:a', 'copy', '-c:v', 'libx264',
+                '-c:a', 'aac', '-b:a', '128k', '-c:v', 'libx264',
                 '-preset', 'veryfast', '-crf', '20',
                 '-g', '48', '-bf', '2', '-threads', '0',
                 '-movflags', '+faststart',
@@ -242,7 +242,7 @@ async function addWatermark(inputPath, outputPath, config, onProgress) {
 
     await runFFmpeg([
         '-i', inputPath, '-vf', textFilter,
-        '-codec:a', 'copy', '-c:v', 'libx264',
+        '-c:a', 'aac', '-b:a', '128k', '-c:v', 'libx264',
         '-preset', 'veryfast', '-crf', '20',
         '-g', '48', '-bf', '2', '-threads', '0',
         '-movflags', '+faststart',
