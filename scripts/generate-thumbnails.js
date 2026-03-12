@@ -28,7 +28,8 @@ import axios from 'axios';
 import { createWriteStream } from 'fs';
 import { pipeline } from 'stream/promises';
 import { config } from './lib/config.js';
-import { query, log as dbLog } from './lib/db.js';
+import { query } from './lib/db.js';
+import logger from './lib/logger.js'; dbLog } from './lib/db.js';
 import logger from './lib/logger.js';
 import { writeProgress, completeStep, setActiveItem, removeActiveItem } from './lib/progress.js';
 import { withRetry } from './lib/retry.js';
@@ -231,6 +232,17 @@ export async function processVideo(video, config) {
 
         // Format duration
         const durationFormatted = formatDuration(duration);
+
+        // Update DB with actual duration (scraped duration is often the full movie length)
+        try {
+            await query(
+                `UPDATE videos SET duration_seconds = $2, duration_formatted = $3 WHERE id = $1`,
+                [videoId, Math.round(duration), durationFormatted]
+            );
+            logger.info(`  Updated DB duration to actual: ${durationFormatted} (${Math.round(duration)}s)`);
+        } catch (err) {
+            logger.warn(`  Failed to update DB duration: ${err.message}`);
+        }
 
         setActiveItem(videoId, { label: vTitle, subStep: 'Extracting frames', pct: 10 });
         // Extract frames at evenly spaced intervals
