@@ -124,7 +124,7 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 ## Реализовано (март 2026)
 - Settings table: управление API ключами (Gemini, TMDB) из админки `/admin/settings`
 - AI re-enrich: динамические ключи из DB, логирование ошибок, детальные сообщения
-- Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback), разрешение 1280px
+- Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback), разрешение 1280px, восстановлен ScreenshotPicker в админке
 - Водяной знак: UI для загрузки PNG, выбор паттерна движения, настройка прозрачности/масштаба
 - Категории boobsradar: `sync-categories.js` с реальными счётчиками (pagination × 20) напрямую в таблицу `collections`, фильтр в pipeline UI
 - XCadr: dropdown категорий, badges коллекций в таблице импорта
@@ -133,6 +133,7 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - Publish автомодерация: полные → published, неполные → needs_review
 - Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
 - Документация деплоя: выяснено, что Web App задеплоен на Vercel (push в `master` обновляет UI админки на `celeb.skin`).
+- Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса

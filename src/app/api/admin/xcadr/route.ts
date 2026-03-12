@@ -29,8 +29,8 @@ export async function GET(request: NextRequest) {
     const { searchParams } = request.nextUrl;
     const status = searchParams.get('status') || null;
     const search = searchParams.get('search') || null;
-    const page   = Math.max(1, parseInt(searchParams.get('page')  || '1'));
-    const limit  = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')));
+    const page = Math.max(1, parseInt(searchParams.get('page') || '1'));
+    const limit = Math.min(100, Math.max(1, parseInt(searchParams.get('limit') || '20')));
     const offset = (page - 1) * limit;
 
     try {
@@ -198,25 +198,35 @@ export async function POST(request: NextRequest) {
                     // STEP 2: Movie
                     let movieId: number | null = row.matched_movie_id || null;
                     if (!movieId && row.movie_title_en) {
-                        const yearSuffix = row.movie_year ? `-${row.movie_year}` : '';
-                        const movieSlug = toSlug(row.movie_title_en) + yearSuffix;
-                        const titleLocalizedJson = buildJsonb(allLocalesOf(row.movie_title_en));
-
-                        const movieRes = await client.query(
-                            `INSERT INTO movies (title, title_localized, slug, year, status)
-                             VALUES ($1, $2::jsonb, $3, $4, 'draft')
-                             ON CONFLICT (slug) DO NOTHING
-                             RETURNING id`,
-                            [row.movie_title_en, titleLocalizedJson, movieSlug, row.movie_year || null]
+                        // Check if movie exist by title first (to prevent duplicate slugs with different suffixes)
+                        const existingByTitle = await client.query(
+                            'SELECT id FROM movies WHERE title = $1 LIMIT 1',
+                            [row.movie_title_en]
                         );
-                        if (movieRes.rows.length > 0) {
-                            movieId = movieRes.rows[0].id;
+
+                        if (existingByTitle.rows.length > 0) {
+                            movieId = existingByTitle.rows[0].id;
                         } else {
-                            const existing = await client.query(
-                                'SELECT id FROM movies WHERE slug = $1',
-                                [movieSlug]
+                            const yearSuffix = row.movie_year ? `-${row.movie_year}` : '';
+                            const movieSlug = toSlug(row.movie_title_en) + yearSuffix;
+                            const titleLocalizedJson = buildJsonb(allLocalesOf(row.movie_title_en));
+
+                            const movieRes = await client.query(
+                                `INSERT INTO movies (title, title_localized, slug, year, status)
+                                 VALUES ($1, $2::jsonb, $3, $4, 'draft')
+                                 ON CONFLICT (slug) DO NOTHING
+                                 RETURNING id`,
+                                [row.movie_title_en, titleLocalizedJson, movieSlug, row.movie_year || null]
                             );
-                            movieId = existing.rows[0]?.id ?? null;
+                            if (movieRes.rows.length > 0) {
+                                movieId = movieRes.rows[0].id;
+                            } else {
+                                const existing = await client.query(
+                                    'SELECT id FROM movies WHERE slug = $1',
+                                    [movieSlug]
+                                );
+                                movieId = existing.rows[0]?.id ?? null;
+                            }
                         }
                     }
 
@@ -225,8 +235,8 @@ export async function POST(request: NextRequest) {
                         row.celebrity_name_en && row.movie_title_en
                             ? `${row.celebrity_name_en} nude scene - ${row.movie_title_en}${row.movie_year ? ` (${row.movie_year})` : ''}`
                             : row.celebrity_name_en
-                            ? `${row.celebrity_name_en} nude scene`
-                            : row.title_ru
+                                ? `${row.celebrity_name_en} nude scene`
+                                : row.title_ru
                     );
 
                     const videoTitle = buildJsonb({ ...allLocalesOf(titleEn), ru: row.title_ru || titleEn });

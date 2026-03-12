@@ -12,10 +12,10 @@ interface Props {
 }
 
 export default function ScreenshotPicker({ videoId, currentThumbnail, screenshots, videoUrl }: Props) {
-    const [active, setActive]         = useState<string | null>(currentThumbnail);
-    const [loading, setLoading]       = useState<string | null>(null);
-    const [error, setError]           = useState<string | null>(null);
-    const [success, setSuccess]       = useState(false);
+    const [active, setActive] = useState<string | null>(currentThumbnail);
+    const [loading, setLoading] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [success, setSuccess] = useState(false);
     const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
     const [allScreenshots, setAllScreenshots] = useState<string[]>(
         Array.isArray(screenshots) ? screenshots : []
@@ -77,22 +77,22 @@ export default function ScreenshotPicker({ videoId, currentThumbnail, screenshot
 
                     <div className="grid grid-cols-4 gap-2 sm:grid-cols-5 lg:grid-cols-6">
                         {allScreenshots.map((url, i) => {
-                            const isActive  = url === active;
+                            const isActive = url === active;
                             const isLoading = url === loading;
+                            const displayUrl = url.startsWith('http') ? url : `https://celebskin-cdn.b-cdn.net/${url.replace(/^\//, '')}`;
                             return (
                                 <div key={i} className="relative group">
                                     <button
                                         onClick={() => setLightboxIndex(i)}
-                                        className={`relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all ${
-                                            isActive
+                                        className={`relative aspect-video w-full overflow-hidden rounded-lg border-2 transition-all ${isActive
                                                 ? 'border-green-500 ring-2 ring-green-500/30'
                                                 : 'border-transparent hover:border-gray-500'
-                                        }`}
+                                            }`}
                                         title="Открыть полный размер"
                                     >
                                         {/* eslint-disable-next-line @next/next/no-img-element */}
                                         <img
-                                            src={url}
+                                            src={displayUrl}
                                             alt={`Скриншот ${i + 1}`}
                                             className={`h-full w-full object-cover ${isLoading ? 'opacity-40' : ''}`}
                                             loading="lazy"

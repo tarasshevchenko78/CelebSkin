@@ -8,6 +8,7 @@ import type { Video, Celebrity, Movie, Tag, Collection } from '@/lib/types';
 import VideoCard from '@/components/VideoCard';
 import CelebrityCard from '@/components/CelebrityCard';
 import MobileSearch from '@/components/MobileSearch';
+import GoldDivider from '@/components/GoldDivider';
 
 
 // ============================================
@@ -74,12 +75,12 @@ function SectionHeader({ title, viewAllHref, viewAllLabel }: {
     viewAllLabel?: string;
 }) {
     return (
-        <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-semibold text-white">{title}</h2>
+        <div className="flex items-center justify-between mb-4 md:mb-6 mt-2">
+            <h2 className="text-xl md:text-2xl font-bold text-gold-gradient tracking-wide uppercase">{title}</h2>
             {viewAllHref && viewAllLabel && (
                 <a
                     href={viewAllHref}
-                    className="text-sm text-red-400 hover:text-red-300 transition-colors"
+                    className="text-sm font-medium text-brand-secondary hover:text-brand-gold-light transition-colors uppercase tracking-wider"
                 >
                     {viewAllLabel} →
                 </a>
@@ -153,159 +154,174 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
             {/* ── Latest Videos — responsive grid ── */}
             {gridVideos.length > 0 && (
-                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
-                    <SectionHeader
-                        title={sections.latest}
-                        viewAllHref={`/${locale}/video`}
-                        viewAllLabel={sections.viewAll}
-                    />
-                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                        {gridVideos.map((video) => (
-                            <VideoCard key={video.id} video={video} locale={locale} />
-                        ))}
-                    </div>
-                </section>
+                <>
+                    <GoldDivider />
+                    <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
+                        <SectionHeader
+                            title={sections.latest}
+                            viewAllHref={`/${locale}/video`}
+                            viewAllLabel={sections.viewAll}
+                        />
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                            {gridVideos.map((video) => (
+                                <VideoCard key={video.id} video={video} locale={locale} />
+                            ))}
+                        </div>
+                    </section>
+                </>
             )}
 
             {/* ── Browse by Tag — horizontal scroll on mobile, wrapping on desktop ── */}
             {tags.length > 0 && (
-                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
-                    <h2 className="text-lg font-semibold text-white mb-4">{sections.tags}</h2>
-                    <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap md:overflow-visible">
-                        {tags.map((tag) => (
-                            <a
-                                key={tag.id}
-                                href={`/${locale}/tag/${tag.slug}`}
-                                className="shrink-0 md:shrink px-3.5 py-1.5 rounded-full bg-gray-800/50 border border-gray-700 text-sm text-gray-300 hover:border-red-600 hover:text-red-400 hover:bg-red-600/10 transition-colors"
-                            >
-                                {getLocalizedField(tag.name_localized, locale) || tag.name}
-                            </a>
-                        ))}
-                    </div>
-                </section>
+                <>
+                    <GoldDivider />
+                    <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
+                        <h2 className="text-xl md:text-2xl font-bold text-gold-gradient tracking-wide uppercase mb-4 mt-2">{sections.tags}</h2>
+                        <div className="flex gap-2 overflow-x-auto scrollbar-hide pb-1 -mx-4 px-4 md:mx-0 md:px-0 md:flex-wrap md:overflow-visible">
+                            {tags.map((tag) => (
+                                <a
+                                    key={tag.id}
+                                    href={`/${locale}/tag/${tag.slug}`}
+                                    className="shrink-0 md:shrink px-3.5 py-1.5 rounded-full bg-gray-800/50 border border-gray-700 text-sm text-gray-300 hover:border-red-600 hover:text-red-400 hover:bg-red-600/10 transition-colors"
+                                >
+                                    {getLocalizedField(tag.name_localized, locale) || tag.name}
+                                </a>
+                            ))}
+                        </div>
+                    </section>
+                </>
             )}
 
             {/* ── Featured Collections — curated playlists ── */}
             {featuredCollections.length > 0 && (
-                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
-                    <SectionHeader
-                        title={collectionsLabel[locale] || collectionsLabel.en}
-                        viewAllHref={`/${locale}/collection`}
-                        viewAllLabel={sections.viewAll}
-                    />
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                        {featuredCollections.map((col) => {
-                            const colTitle = getLocalizedField(col.title, locale) || col.slug;
-                            return (
-                                <a
-                                    key={col.id}
-                                    href={`/${locale}/collection/${col.slug}`}
-                                    className="group relative rounded-xl overflow-hidden bg-gray-800/30 border border-gray-800 hover:border-gray-600 transition-all duration-300"
-                                >
-                                    <div className="aspect-[16/9] relative overflow-hidden">
-                                        {col.cover_url ? (
-                                            <img
-                                                src={col.cover_url}
-                                                alt={colTitle}
-                                                loading="lazy"
-                                                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                                            />
-                                        ) : (
-                                            <div className="w-full h-full bg-gradient-to-br from-red-900/30 to-gray-800 flex items-center justify-center">
-                                                <svg className="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
-                                                </svg>
-                                            </div>
-                                        )}
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
-                                        <div className="absolute bottom-0 left-0 right-0 p-2.5">
-                                            <h3 className="text-sm font-semibold text-white line-clamp-1 group-hover:text-red-400 transition-colors">
-                                                {colTitle}
-                                            </h3>
-                                            {col.videos_count > 0 && (
-                                                <span className="text-[11px] text-gray-400">{col.videos_count} scenes</span>
+                <>
+                    <GoldDivider />
+                    <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
+                        <SectionHeader
+                            title={collectionsLabel[locale] || collectionsLabel.en}
+                            viewAllHref={`/${locale}/collection`}
+                            viewAllLabel={sections.viewAll}
+                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                            {featuredCollections.map((col) => {
+                                const colTitle = getLocalizedField(col.title, locale) || col.slug;
+                                return (
+                                    <a
+                                        key={col.id}
+                                        href={`/${locale}/collection/${col.slug}`}
+                                        className="group relative rounded-xl overflow-hidden bg-gray-800/30 border border-gray-800 hover:border-gray-600 transition-all duration-300"
+                                    >
+                                        <div className="aspect-[16/9] relative overflow-hidden">
+                                            {col.cover_url ? (
+                                                <img
+                                                    src={col.cover_url}
+                                                    alt={colTitle}
+                                                    loading="lazy"
+                                                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full bg-gradient-to-br from-red-900/30 to-gray-800 flex items-center justify-center">
+                                                    <svg className="w-8 h-8 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                                                    </svg>
+                                                </div>
                                             )}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent" />
+                                            <div className="absolute bottom-0 left-0 right-0 p-2.5">
+                                                <h3 className="text-sm font-semibold text-white line-clamp-1 group-hover:text-red-400 transition-colors">
+                                                    {colTitle}
+                                                </h3>
+                                                {col.videos_count > 0 && (
+                                                    <span className="text-[11px] text-gray-400">{col.videos_count} scenes</span>
+                                                )}
+                                            </div>
                                         </div>
-                                    </div>
-                                </a>
-                            );
-                        })}
-                    </div>
-                </section>
+                                    </a>
+                                );
+                            })}
+                        </div>
+                    </section>
+                </>
             )}
 
             {/* ── Trending Celebrities — mobile scroll, desktop grid ── */}
             {trendingCelebs.length > 0 && (
-                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
-                    <SectionHeader
-                        title={sections.trending}
-                        viewAllHref={`/${locale}/celebrity`}
-                        viewAllLabel={sections.viewAll}
-                    />
-                    <div className="flex gap-4 overflow-x-auto md:grid md:grid-cols-4 lg:grid-cols-6 md:overflow-visible md:gap-6 scrollbar-hide pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:justify-items-center">
-                        {trendingCelebs.map((celeb) => (
-                            <CelebrityCard key={celeb.id} celebrity={celeb} locale={locale} />
-                        ))}
-                    </div>
-                </section>
+                <>
+                    <GoldDivider />
+                    <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
+                        <SectionHeader
+                            title={sections.trending}
+                            viewAllHref={`/${locale}/celebrity`}
+                            viewAllLabel={sections.viewAll}
+                        />
+                        <div className="flex gap-4 overflow-x-auto md:grid md:grid-cols-4 lg:grid-cols-6 md:overflow-visible md:gap-6 scrollbar-hide pb-2 -mx-4 px-4 md:mx-0 md:px-0 md:justify-items-center">
+                            {trendingCelebs.map((celeb) => (
+                                <CelebrityCard key={celeb.id} celebrity={celeb} locale={locale} />
+                            ))}
+                        </div>
+                    </section>
+                </>
             )}
 
             {/* ── Popular Movies — compact grid with hover overlay ── */}
             {popularMovies.length > 0 && (
-                <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
-                    <SectionHeader
-                        title={sections.movies}
-                        viewAllHref={`/${locale}/movie`}
-                        viewAllLabel={sections.viewAll}
-                    />
-                    <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-                        {popularMovies.map((movie) => {
-                            const movieTitle = getLocalizedField(movie.title_localized, locale) || movie.title;
-                            return (
-                                <a
-                                    key={movie.id}
-                                    href={`/${locale}/movie/${movie.slug}`}
-                                    className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.03]"
-                                >
-                                    <div className="relative aspect-[2/3] bg-[#111113] rounded-lg overflow-hidden">
-                                        {movie.poster_url ? (
-                                            <img
-                                                src={movie.poster_url}
-                                                alt={movieTitle}
-                                                loading="lazy"
-                                                className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
-                                            />
-                                        ) : (
-                                            <div className="w-full h-full bg-gradient-to-br from-[#111113] to-[#1a1a1e] flex flex-col items-center justify-center p-2">
-                                                <svg className="w-6 h-6 text-gray-600 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
-                                                </svg>
-                                                <span className="text-[10px] text-gray-600 text-center leading-tight line-clamp-2">{movieTitle}</span>
-                                            </div>
-                                        )}
+                <>
+                    <GoldDivider />
+                    <section className="mx-auto max-w-[1600px] px-4 py-6 md:py-8">
+                        <SectionHeader
+                            title={sections.movies}
+                            viewAllHref={`/${locale}/movie`}
+                            viewAllLabel={sections.viewAll}
+                        />
+                        <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+                            {popularMovies.map((movie) => {
+                                const movieTitle = getLocalizedField(movie.title_localized, locale) || movie.title;
+                                return (
+                                    <a
+                                        key={movie.id}
+                                        href={`/${locale}/movie/${movie.slug}`}
+                                        className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.03]"
+                                    >
+                                        <div className="relative aspect-[2/3] bg-[#111113] rounded-lg overflow-hidden">
+                                            {movie.poster_url ? (
+                                                <img
+                                                    src={movie.poster_url}
+                                                    alt={movieTitle}
+                                                    loading="lazy"
+                                                    className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105"
+                                                />
+                                            ) : (
+                                                <div className="w-full h-full bg-gradient-to-br from-[#111113] to-[#1a1a1e] flex flex-col items-center justify-center p-2">
+                                                    <svg className="w-6 h-6 text-gray-600 mb-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" />
+                                                    </svg>
+                                                    <span className="text-[10px] text-gray-600 text-center leading-tight line-clamp-2">{movieTitle}</span>
+                                                </div>
+                                            )}
 
-                                        {/* Hover gradient overlay */}
-                                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                                            {/* Hover gradient overlay */}
+                                            <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
 
-                                        {movie.year && (
-                                            <span className="absolute top-1 left-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                                {movie.year}
+                                            {movie.year && (
+                                                <span className="absolute top-1 left-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                                    {movie.year}
+                                                </span>
+                                            )}
+                                            <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
+                                                {movie.scenes_count}
                                             </span>
-                                        )}
-                                        <span className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] font-medium px-1.5 py-0.5 rounded">
-                                            {movie.scenes_count}
-                                        </span>
-                                    </div>
-                                    <div className="mt-1.5 px-0.5">
-                                        <h3 className="text-xs font-medium text-gray-300 line-clamp-1 group-hover:text-white transition-colors">
-                                            {movieTitle}
-                                        </h3>
-                                    </div>
-                                </a>
-                            );
-                        })}
-                    </div>
-                </section>
+                                        </div>
+                                        <div className="mt-1.5 px-0.5">
+                                            <h3 className="text-xs font-medium text-gray-300 line-clamp-1 group-hover:text-white transition-colors">
+                                                {movieTitle}
+                                            </h3>
+                                        </div>
+                                    </a>
+                                );
+                            })}
+                        </div>
+                    </section>
+                </>
             )}
 
             {/* Empty state when no data */}

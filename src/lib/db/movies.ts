@@ -52,10 +52,11 @@ export async function getMovies(
 
 export async function getMoviesForCelebrity(celebrityId: number): Promise<Movie[]> {
     const result = await pool.query(
-        `SELECT DISTINCT m.* FROM movies m
+        `SELECT m.* FROM movies m
          JOIN movie_celebrities mc ON mc.movie_id = m.id
          WHERE mc.celebrity_id = $1 AND m.status = 'published'
-         ORDER BY m.year DESC NULLS LAST`,
+         GROUP BY m.id
+         ORDER BY MAX(m.year) DESC NULLS LAST`,
         [celebrityId]
     );
     return result.rows;

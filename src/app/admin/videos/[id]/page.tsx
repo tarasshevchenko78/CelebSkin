@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import LocalizedTabs from '@/components/admin/LocalizedTabs';
 import JsonViewer from '@/components/admin/JsonViewer';
 import VideoPlayer from '@/components/VideoPlayer';
+import ReEnrichButton from '@/components/admin/ReEnrichButton';
+import ScreenshotPicker from '@/components/admin/ScreenshotPicker';
 import { getLocalizedField } from '@/lib/i18n';
 import type { LocalizedField } from '@/lib/types';
 
@@ -198,8 +200,11 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
         );
     }
 
-    const videoSrc = video.video_url_watermarked || video.video_url;
-    const thumbSrc = video.thumbnail_url || rawVideo?.thumbnail_url;
+    const rawVideoSrc = video.video_url_watermarked || video.video_url;
+    const videoSrc = rawVideoSrc ? (rawVideoSrc.startsWith('http') ? rawVideoSrc : `https://celebskin-cdn.b-cdn.net/${rawVideoSrc.replace(/^\//, '')}`) : null;
+
+    const rawThumbSrc = video.thumbnail_url || rawVideo?.thumbnail_url;
+    const thumbSrc = rawThumbSrc ? (rawThumbSrc.startsWith('http') ? rawThumbSrc : `https://celebskin-cdn.b-cdn.net/${rawThumbSrc.replace(/^\//, '')}`) : null;
     const confidence = video.ai_confidence ? Math.round(video.ai_confidence * 100) : null;
 
     return (
@@ -213,6 +218,7 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                     </h1>
                 </div>
                 <div className="flex gap-2">
+                    <ReEnrichButton type="video" id={video.id} />
                     <button onClick={() => save({ status: 'published' })} disabled={saving}
                         className="px-3 py-1.5 text-xs rounded-lg bg-green-700 text-white hover:bg-green-600 disabled:opacity-50">
                         Publish
@@ -324,6 +330,9 @@ export default function AdminVideoDetailPage({ params }: { params: { id: string 
                     </div>
                 </div>
             </div>
+
+            {/* Screenshot Picker */}
+            <ScreenshotPicker videoId={video.id} currentThumbnail={video.thumbnail_url} screenshots={video.screenshots} videoUrl={video.video_url_watermarked || video.video_url} />
 
             {/* AI Raw Response */}
             <JsonViewer data={video.ai_raw_response} />

@@ -47,7 +47,7 @@ export default function ScreenshotGallery({ screenshots }: ScreenshotGalleryProp
                         className="rounded-md overflow-hidden cursor-pointer hover:brightness-125 transition-all ring-1 ring-gray-800 hover:ring-red-600"
                     >
                         <img
-                            src={url}
+                            src={url.startsWith('http') ? url : `https://celebskin-cdn.b-cdn.net/${url.replace(/^\//, '')}`}
                             alt={`Screenshot ${i + 1}`}
                             loading="lazy"
                             className="aspect-video w-full object-cover"
@@ -99,7 +99,7 @@ export default function ScreenshotGallery({ screenshots }: ScreenshotGalleryProp
 
                     {/* Main image */}
                     <img
-                        src={screenshots[openIndex]}
+                        src={screenshots[openIndex].startsWith('http') ? screenshots[openIndex] : `https://celebskin-cdn.b-cdn.net/${screenshots[openIndex].replace(/^\//, '')}`}
                         alt={`Screenshot ${openIndex + 1}`}
                         className="max-w-[90vw] max-h-[75vh] object-contain rounded-lg"
                     />
@@ -115,14 +115,13 @@ export default function ScreenshotGallery({ screenshots }: ScreenshotGalleryProp
                             <button
                                 key={i}
                                 onClick={() => setOpenIndex(i)}
-                                className={`shrink-0 w-16 rounded overflow-hidden transition-all ${
-                                    i === openIndex
+                                className={`shrink-0 w-16 rounded overflow-hidden transition-all ${i === openIndex
                                         ? 'ring-2 ring-brand-accent brightness-110'
                                         : 'opacity-50 hover:opacity-80'
-                                }`}
+                                    }`}
                             >
                                 <img
-                                    src={url}
+                                    src={url.startsWith('http') ? url : `https://celebskin-cdn.b-cdn.net/${url.replace(/^\//, '')}`}
                                     alt={`Thumbnail ${i + 1}`}
                                     className="aspect-video w-full object-cover"
                                 />

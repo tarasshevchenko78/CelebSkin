@@ -94,14 +94,18 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                                 </td>
                                 <td className="p-3">
                                     {video.thumbnail_url ? (
-                                        <img src={video.thumbnail_url} alt="" className="w-14 h-9 rounded object-cover" />
+                                        <img
+                                            src={video.thumbnail_url.startsWith('http') ? video.thumbnail_url : `https://celebskin-cdn.b-cdn.net/${video.thumbnail_url.replace(/^\//, '')}`}
+                                            alt=""
+                                            className="w-14 h-9 rounded object-cover"
+                                        />
                                     ) : (
                                         <div className="w-14 h-9 rounded bg-gray-800 flex items-center justify-center text-[10px] text-gray-600">?</div>
                                     )}
                                 </td>
                                 <td className="p-3 max-w-xs">
                                     <a href={`/admin/videos/${video.id}`}
-                                       className="text-gray-200 font-medium hover:text-white hover:underline truncate block">
+                                        className="text-gray-200 font-medium hover:text-white hover:underline truncate block">
                                         {getLocalizedField(video.title, 'en') || video.original_title || 'Untitled'}
                                     </a>
                                 </td>
@@ -123,10 +127,9 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                                         <div className="flex items-center gap-1.5">
                                             <div className="w-12 h-1.5 rounded-full bg-gray-800 overflow-hidden">
                                                 <div
-                                                    className={`h-full rounded-full ${
-                                                        video.ai_confidence >= 0.8 ? 'bg-green-500' :
-                                                        video.ai_confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'
-                                                    }`}
+                                                    className={`h-full rounded-full ${video.ai_confidence >= 0.8 ? 'bg-green-500' :
+                                                            video.ai_confidence >= 0.5 ? 'bg-yellow-500' : 'bg-red-500'
+                                                        }`}
                                                     style={{ width: `${Math.round(video.ai_confidence * 100)}%` }}
                                                 />
                                             </div>
