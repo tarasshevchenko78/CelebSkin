@@ -15,13 +15,13 @@ export default function Header({ locale }: { locale: string }) {
 
     return (
         <header className="sticky top-0 z-50 pt-2 pb-2 px-2 md:px-6 lg:px-10 bg-transparent w-full">
-            {/* Desktop Full-Width Header Pill */}
-            <div className="hidden md:flex relative items-center justify-between h-[64px] rounded-full border border-brand-accent/40 bg-brand-bg/95 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.5)] px-6 mt-4 w-full">
+            {/* Desktop Split Header */}
+            <div className="hidden md:flex relative items-center justify-between h-[64px] mt-4 w-full">
 
-                {/* Left: Navigation Links */}
-                <nav className="flex items-center gap-6 h-full flex-1 justify-start">
+                {/* Left: Navigation Island */}
+                <nav className="flex items-center gap-4 lg:gap-8 h-full px-8 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                     {navLinks.map((link, index) => (
-                        <div key={link.key} className="flex items-center gap-6 h-full">
+                        <div key={link.key} className="flex items-center gap-4 lg:gap-8 h-full">
                             <a
                                 href={`/${locale}${link.href}`}
                                 className="text-[16px] font-semibold text-[#c0bba8] hover:text-brand-gold-light transition-all duration-300 block py-2 whitespace-nowrap"
@@ -46,15 +46,15 @@ export default function Header({ locale }: { locale: string }) {
                     </a>
                 </div>
 
-                {/* Right: Search & Language */}
-                <div className="flex items-center gap-4 lg:gap-6 h-full flex-1 justify-end">
+                {/* Right: Search & Language Island */}
+                <div className="flex items-center gap-3 lg:gap-5 h-full px-4 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                     {/* Large Search Input */}
-                    <form action={`/${locale}/search`} className="relative w-full max-w-[320px]">
+                    <form action={`/${locale}/search`} className="relative w-full max-w-[280px] lg:max-w-[320px]">
                         <input
                             type="text"
                             name="q"
                             placeholder={locale === 'ru' ? 'Поиск...' : 'Search actors, movies...'}
-                            className="w-full bg-[#161411] border border-brand-accent/40 rounded-full py-2 pl-12 pr-4 text-[15px] text-brand-gold-light placeholder-brand-secondary/60 focus:outline-none focus:ring-1 focus:ring-brand-accent/80 focus:border-brand-accent/80 transition-all shadow-inner"
+                            className="w-full bg-[#161411]/80 border border-brand-accent/30 rounded-full py-2 pl-11 pr-4 text-[15px] text-brand-gold-light placeholder-brand-secondary/60 focus:outline-none focus:ring-1 focus:ring-brand-accent/80 focus:border-brand-accent/80 transition-all shadow-inner"
                         />
                         <button type="submit" className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-secondary hover:text-brand-gold-light transition-colors">
                             <svg className="w-[20px] h-[20px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -98,11 +98,11 @@ export default function Header({ locale }: { locale: string }) {
                 </div>
             </div>
 
-            {/* Mobile Header (adjusted to support larger center logo if needed) */}
-            <div className="flex md:hidden relative items-center justify-between h-16 mt-2 rounded-full border border-brand-accent/40 bg-brand-bg/95 backdrop-blur-md shadow-sm px-4">
+            {/* Mobile Split Header */}
+            <div className="flex md:hidden relative items-center justify-between h-14 mt-3 px-2">
                 {/* Left side: Search trigger for mobile */}
-                <div className="flex-1 flex justify-start">
-                    <a href={`/${locale}/search`} className="w-10 h-10 rounded-full flex items-center justify-center bg-[#1a1815] text-brand-secondary hover:text-brand-gold-light border border-brand-accent/20">
+                <div className="flex-1 flex justify-start relative z-20">
+                    <a href={`/${locale}/search`} className="w-12 h-12 rounded-full flex items-center justify-center bg-brand-bg/90 backdrop-blur-md text-brand-secondary hover:text-brand-gold-light border border-brand-accent/40 shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
@@ -121,9 +121,9 @@ export default function Header({ locale }: { locale: string }) {
                 </div>
 
                 {/* Right side: Language selection */}
-                <div className="flex-1 flex justify-end">
-                    <div className="relative z-20">
-                        <button onClick={() => setLangOpen(!langOpen)} className="h-10 px-3 rounded-full bg-[#1a1815] border border-brand-accent/20 text-[#e8e6df] flex items-center gap-1.5 focus:outline-none">
+                <div className="flex-1 flex justify-end relative z-20">
+                    <div className="relative">
+                        <button onClick={() => setLangOpen(!langOpen)} className="h-12 px-4 rounded-full bg-brand-bg/90 backdrop-blur-md border border-brand-accent/40 text-[#e8e6df] flex items-center gap-1.5 focus:outline-none shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
                             <span className="text-sm font-semibold">{(locale as string).toUpperCase()}</span>
                             <svg className={`w-3.5 h-3.5 text-brand-secondary transition-transform duration-200 ${langOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                         </button>
