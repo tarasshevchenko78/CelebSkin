@@ -19,7 +19,7 @@ export default function Header({ locale }: { locale: string }) {
             <div className="hidden md:flex relative items-center justify-between h-[64px] mt-4 w-full">
 
                 {/* Left: Navigation Island */}
-                <nav className="flex-1 mr-[65px] lg:mr-[75px] flex items-center justify-between h-full px-6 lg:px-10 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+                <nav className="flex-1 mr-[90px] lg:mr-[140px] flex items-center justify-between h-full px-4 lg:px-10 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                     {navLinks.map((link, index) => (
                         <div key={link.key} className="flex items-center justify-between h-full flex-1">
                             <div className="flex-1 flex justify-center">
@@ -49,7 +49,7 @@ export default function Header({ locale }: { locale: string }) {
                 </div>
 
                 {/* Right: Search & Language Island */}
-                <div className="flex-1 ml-[65px] lg:ml-[75px] flex items-center gap-4 lg:gap-6 h-full px-4 lg:px-6 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+                <div className="flex-1 ml-[90px] lg:ml-[140px] flex items-center gap-2 lg:gap-6 h-full px-4 lg:px-6 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                     {/* Large Search Input */}
                     <form action={`/${locale}/search`} className="relative w-full flex-1">
                         <input
