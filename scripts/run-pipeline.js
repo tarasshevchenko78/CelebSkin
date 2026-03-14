@@ -373,6 +373,21 @@ async function cleanupStuckVideos() {
             AND updated_at < NOW() - INTERVAL '10 minutes'
         `);
     } catch { }
+
+    // Auto-skip videos stuck in intermediate states for > 30 min (download failures, etc.)
+    try {
+        const stuck = await query(`
+            UPDATE videos SET status = 'needs_review', updated_at = NOW()
+            WHERE status IN ('enriched', 'auto_recognized', 'new')
+            AND updated_at < NOW() - INTERVAL '30 minutes'
+            RETURNING id, title->>'en' as title, status
+        `);
+        if (stuck.rowCount > 0) {
+            for (const v of stuck.rows) {
+                logger.warn(`[cleanup] Stuck video → needs_review: "${v.title}" (was ${v.status}, >30min)`);
+            }
+        }
+    } catch { }
 }
 
 async function getWorkAvailability() {

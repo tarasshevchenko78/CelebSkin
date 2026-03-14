@@ -121,13 +121,9 @@ export async function findOrCreateMovie(movieTitle, year) {
 
     const cleanTitle = movieTitle.trim();
 
-    // Check if movie already exists in DB (fuzzy match)
+    // Check if movie already exists in DB (exact match only — fuzzy causes duplicates)
     const existing = await pool.query(
-        `SELECT * FROM movies WHERE
-            LOWER(title) = LOWER($1)
-            OR similarity(title, $1) > 0.6
-         ORDER BY similarity(title, $1) DESC
-         LIMIT 1`,
+        `SELECT * FROM movies WHERE LOWER(title) = LOWER($1) LIMIT 1`,
         [cleanTitle]
     );
 
@@ -405,10 +401,12 @@ async function main() {
           AND v.status NOT IN ('rejected', 'dmca_removed')
           ${FORCE ? '' : `AND (
               NOT EXISTS (SELECT 1 FROM movie_scenes ms WHERE ms.video_id = v.id)
-              OR EXISTS (
-                  SELECT 1 FROM movie_scenes ms
-                  JOIN movies m ON m.id = ms.movie_id
-                  WHERE ms.video_id = v.id AND m.tmdb_id IS NULL
+              OR (
+                  NOT EXISTS (
+                      SELECT 1 FROM movie_scenes ms
+                      JOIN movies m ON m.id = ms.movie_id
+                      WHERE ms.video_id = v.id AND m.tmdb_id IS NOT NULL
+                  )
               )
           )`}
         ORDER BY v.created_at DESC
@@ -452,6 +450,11 @@ async function main() {
             const movie = await findOrCreateMovie(movieTitle, movieYear);
 
             if (movie) {
+                // Remove old movie links (prevent duplicates — only 1 movie per video)
+                await pool.query(
+                    `DELETE FROM movie_scenes WHERE video_id = $1 AND movie_id != $2`,
+                    [video.id, movie.id]
+                );
                 // Link video → movie via movie_scenes
                 await pool.query(
                     `INSERT INTO movie_scenes (movie_id, video_id, scene_number)

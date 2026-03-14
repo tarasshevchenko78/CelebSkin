@@ -224,12 +224,16 @@ async function addWatermark(inputPath, outputPath, config, onProgress) {
             );
 
             await runFFmpeg([
+                '-fflags', '+genpts+discardcorrupt',
                 '-i', inputPath, '-i', wmPath,
                 '-filter_complex', filterComplex,
                 '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
-                '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+                '-af', 'aresample=async=1:first_pts=0',
+                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-sar', '1:1',
                 '-preset', 'veryfast', '-crf', '20',
-                '-g', '48', '-bf', '2', '-threads', '0',
+                '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
+                '-bf', '2', '-threads', '0',
+                '-max_muxing_queue_size', '4096',
                 '-movflags', '+faststart',
                 '-progress', 'pipe:1',
                 '-y', outputPath,
@@ -242,11 +246,15 @@ async function addWatermark(inputPath, outputPath, config, onProgress) {
     const textFilter = buildTextFilter(config);
 
     await runFFmpeg([
+        '-fflags', '+genpts+discardcorrupt',
         '-i', inputPath, '-vf', textFilter,
         '-c:a', 'aac', '-b:a', '128k', '-ar', '44100', '-ac', '2',
-        '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+        '-af', 'aresample=async=1:first_pts=0',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-sar', '1:1',
         '-preset', 'veryfast', '-crf', '20',
-        '-g', '48', '-bf', '2', '-threads', '0',
+        '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
+        '-bf', '2', '-threads', '0',
+        '-max_muxing_queue_size', '4096',
         '-movflags', '+faststart',
         '-progress', 'pipe:1',
         '-y', outputPath,
@@ -285,6 +293,17 @@ async function processVideo(video, config) {
         const downloaded = await downloadVideo(videoUrl, inputPath);
         if (!downloaded) {
             removeActiveItem(videoId);
+            // Move to needs_review so it doesn't block the conveyor
+            await query(
+                `UPDATE videos SET status = 'needs_review', updated_at = NOW() WHERE id = $1`,
+                [videoId]
+            );
+            await query(
+                `INSERT INTO processing_log (video_id, step, status, message, metadata)
+                 VALUES ($1, 'watermark', 'failed', 'Download failed (404/timeout)', $2::jsonb)`,
+                [videoId, JSON.stringify({ reason: 'download_failed', url: videoUrl.substring(0, 100) })]
+            );
+            logger.warn(`  Video ${videoId} → needs_review (download failed)`);
             return { status: 'error', reason: 'download_failed' };
         }
 

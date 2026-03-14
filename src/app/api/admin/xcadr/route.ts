@@ -184,6 +184,9 @@ export async function POST(request: NextRequest) {
                     // STEP 1: Celebrity
                     let celebrityId: number | null = row.matched_celebrity_id || null;
                     if (!celebrityId && row.celebrity_name_en) {
+                        // Advisory lock to serialize parallel imports for the same celebrity
+                        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [row.celebrity_name_en]);
+
                         const celebSlug = toSlug(row.celebrity_name_en);
                         const celebRes = await client.query(
                             `INSERT INTO celebrities (name, slug, status)
@@ -198,6 +201,9 @@ export async function POST(request: NextRequest) {
                     // STEP 2: Movie
                     let movieId: number | null = row.matched_movie_id || null;
                     if (!movieId && row.movie_title_en) {
+                        // Advisory lock to serialize parallel imports for the same movie
+                        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [row.movie_title_en]);
+
                         // Check if movie exist by title first (to prevent duplicate slugs with different suffixes)
                         const existingByTitle = await client.query(
                             'SELECT id FROM movies WHERE title = $1 LIMIT 1',

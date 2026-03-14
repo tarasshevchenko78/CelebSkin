@@ -120,6 +120,8 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 6. AI описание — промт не обновлён на эротический стиль
 7. Удаление видео из админки может не работать
 8. Часть админки всё ещё на английском
+9. ~~PIPELINE_ERROR_DECODE при перемотке видео в Chrome~~ — ИСПРАВЛЕНО в watermark.js (SAR=1:1, фиксированные keyframes, audio resample). Старые 303 видео всё ещё имеют нестандартный SAR — нужна перекодировка через `reprocess-broken-videos.js`
+10. 53 видео привязаны к 2+ фильмам (дубли: оригинал + перевод названия) — AI/TMDB создают дубликаты фильмов
 
 ## Реализовано (март 2026)
 - Settings table: управление API ключами (Gemini, TMDB) из админки `/admin/settings`
@@ -134,6 +136,8 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
 - Документация деплоя: выяснено, что Web App задеплоен на Vercel (push в `master` обновляет UI админки на `celeb.skin`).
 - Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
+- **Watermark fix (13.03.2026)**: `-sar 1:1`, `-keyint_min 48 -sc_threshold 0`, `-af aresample=async=1:first_pts=0`, `-fflags +genpts+discardcorrupt`, `-max_muxing_queue_size 4096` — исправляет PIPELINE_ERROR_DECODE при seek в Chrome
+- Новые скрипты: `scan-broken-videos.js` (сканирование SAR), `reprocess-broken-videos.js` (перекодировка старых видео)
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
