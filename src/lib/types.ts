@@ -41,6 +41,7 @@ export interface Video {
     screenshots: string[];
     sprite_url: string | null;
     sprite_data: Record<string, unknown> | null;
+    hot_moments: { timestamp_sec: number; intensity: number; label: string }[];
     ai_model: string | null;
     ai_confidence: number | null;
     ai_raw_response: Record<string, unknown> | null;

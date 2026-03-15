@@ -150,29 +150,29 @@ async function main() {
   );
   results.push({ step: 'watermark', ...wmResult });
 
-  // ── STEP 5: CDN Upload ──
+  // ── STEP 5: CDN Upload (video + screenshots) ──
   const cdnResult = await runScript(
-    '5. CDN Upload (BunnyCDN)',
-    join(SCRIPTS_DIR, 'upload-to-cdn.js'),
+    '5. CDN Upload (video + screenshots → BunnyCDN)',
+    join(__dirname, 'cdn-upload.js'),
     [`--limit=${limit}`],
     1800000 // 30 min
   );
   results.push({ step: 'cdn', ...cdnResult });
 
-  // ── STEP 6: Preview Generation ──
+  // ── STEP 6: Generate Previews (GIF + clip) ──
   const previewResult = await runScript(
-    '6. Preview Clip',
-    join(SCRIPTS_DIR, 'generate-preview.js'),
+    '6. Generate Previews (GIF + MP4 clip)',
+    join(__dirname, 'generate-preview.js'),
     [`--limit=${limit}`],
-    1800000 // 30 min
+    600000 // 10 min
   );
   results.push({ step: 'preview', ...previewResult });
 
   // ── STEP 7: Publish ──
   const pubResult = await runScript(
     '7. Publish',
-    join(SCRIPTS_DIR, 'publish-to-site.js'),
-    ['--auto', `--limit=${limit}`],
+    join(__dirname, 'publish.js'),
+    [`--limit=${limit}`],
     300000 // 5 min
   );
   results.push({ step: 'publish', ...pubResult });

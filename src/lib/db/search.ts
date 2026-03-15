@@ -32,6 +32,10 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
                 similarity(COALESCE(c.name_localized->>'de', ''), $1),
                 similarity(COALESCE(c.name_localized->>'fr', ''), $1),
                 similarity(COALESCE(c.name_localized->>'es', ''), $1),
+                similarity(COALESCE(c.name_localized->>'pt', ''), $1),
+                similarity(COALESCE(c.name_localized->>'it', ''), $1),
+                similarity(COALESCE(c.name_localized->>'pl', ''), $1),
+                similarity(COALESCE(c.name_localized->>'nl', ''), $1),
                 similarity(COALESCE(c.name_localized->>'tr', ''), $1)
               ) AS sim
        FROM celebrities c
@@ -42,6 +46,10 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
            OR similarity(COALESCE(c.name_localized->>'de', ''), $1) > 0.2
            OR similarity(COALESCE(c.name_localized->>'fr', ''), $1) > 0.2
            OR similarity(COALESCE(c.name_localized->>'es', ''), $1) > 0.2
+           OR similarity(COALESCE(c.name_localized->>'pt', ''), $1) > 0.2
+           OR similarity(COALESCE(c.name_localized->>'it', ''), $1) > 0.2
+           OR similarity(COALESCE(c.name_localized->>'pl', ''), $1) > 0.2
+           OR similarity(COALESCE(c.name_localized->>'nl', ''), $1) > 0.2
            OR similarity(COALESCE(c.name_localized->>'tr', ''), $1) > 0.2
            OR $1 = ANY(c.aliases)
          )
@@ -57,6 +65,10 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
                 similarity(COALESCE(m.title_localized->>'de', ''), $1),
                 similarity(COALESCE(m.title_localized->>'fr', ''), $1),
                 similarity(COALESCE(m.title_localized->>'es', ''), $1),
+                similarity(COALESCE(m.title_localized->>'pt', ''), $1),
+                similarity(COALESCE(m.title_localized->>'it', ''), $1),
+                similarity(COALESCE(m.title_localized->>'pl', ''), $1),
+                similarity(COALESCE(m.title_localized->>'nl', ''), $1),
                 similarity(COALESCE(m.title_localized->>'tr', ''), $1)
               ) AS sim
        FROM movies m
@@ -67,6 +79,10 @@ export async function searchAll(query: string, limit: number = 10): Promise<Sear
            OR similarity(COALESCE(m.title_localized->>'de', ''), $1) > 0.2
            OR similarity(COALESCE(m.title_localized->>'fr', ''), $1) > 0.2
            OR similarity(COALESCE(m.title_localized->>'es', ''), $1) > 0.2
+           OR similarity(COALESCE(m.title_localized->>'pt', ''), $1) > 0.2
+           OR similarity(COALESCE(m.title_localized->>'it', ''), $1) > 0.2
+           OR similarity(COALESCE(m.title_localized->>'pl', ''), $1) > 0.2
+           OR similarity(COALESCE(m.title_localized->>'nl', ''), $1) > 0.2
            OR similarity(COALESCE(m.title_localized->>'tr', ''), $1) > 0.2
          )
        ORDER BY sim DESC

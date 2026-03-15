@@ -7,13 +7,17 @@ export const dynamic = 'force-dynamic';
 const LOCALES = ['en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'nl', 'tr', 'ru'] as const;
 
 function toSlug(text: string): string {
-    return text
+    const slug = text
         .toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')   // strip accents
         .replace(/[^\w\s-]/g, '')
         .replace(/[\s_]+/g, '-')
-        .replace(/^-+|-+$/g, '')
-        .substring(0, 190);
+        .replace(/^-+|-+$/g, '');
+    // Limit to 60 chars, cut at last whole word boundary
+    if (slug.length <= 60) return slug;
+    const trimmed = slug.substring(0, 60);
+    const lastDash = trimmed.lastIndexOf('-');
+    return lastDash > 10 ? trimmed.substring(0, lastDash) : trimmed;
 }
 
 function buildJsonb(values: Record<string, string>): string {

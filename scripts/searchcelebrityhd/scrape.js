@@ -156,17 +156,37 @@ function parseVideoPage(html, url) {
     } catch {}
   });
 
-  // Screenshot URLs — images inside entry-content gallery
+  // Screenshot URLs — extract from full HTML (WPBakery wraps images in deep VC structures)
+  // Strategy: find all full-size jpg URLs matching the page title pattern
   const screenshots = [];
-  $('.entry-content img, .entry-content a[href$=".jpg"]').each((_, el) => {
-    const src = $(el).attr('href') || $(el).attr('src') || $(el).attr('data-src');
-    if (src && src.includes('wp-content/uploads') && src.includes('.jpg')) {
-      // Get full-size URL (remove size suffix like -480x270)
-      const fullUrl = src.replace(/-\d+x\d+\.jpg$/, '.jpg');
+  const pageHtml = $.html();
+
+  // Build a filename prefix from the title (e.g. "Melissa Sagemiller Nude - Love Object (2003)"
+  // → "Melissa-Sagemiller-Nude-Love-Object-2003")
+  const titleSlug = title
+    .replace(/[()]/g, '')      // remove parens
+    .replace(/[^a-zA-Z0-9]+/g, '-')  // non-alphanum → dash
+    .replace(/-+/g, '-')       // collapse dashes
+    .replace(/^-|-$/g, '');    // trim dashes
+
+  // Find all full-resolution jpg URLs from wp-content/uploads
+  const imgRegex = /https?:\/\/[^"'\s]+wp-content\/uploads\/[^"'\s]+\.jpg/g;
+  const allJpgUrls = pageHtml.match(imgRegex) || [];
+  for (const rawUrl of allJpgUrls) {
+    // Normalize: strip size suffixes to get full-res URL
+    const fullUrl = rawUrl.replace(/-\d+x\d+\.jpg$/, '.jpg');
+    // Only include images that match this video's title pattern
+    const filename = fullUrl.split('/').pop() || '';
+    if (filename.toLowerCase().startsWith(titleSlug.toLowerCase().substring(0, 20))) {
       screenshots.push(fullUrl);
     }
-  });
-  const uniqueScreenshots = [...new Set(screenshots)];
+  }
+  const uniqueScreenshots = [...new Set(screenshots)]
+    .sort((a, b) => {
+      const numA = parseInt(a.match(/-(\d+)\.jpg$/)?.[1] || '0');
+      const numB = parseInt(b.match(/-(\d+)\.jpg$/)?.[1] || '0');
+      return numA - numB;
+    });
 
   // Thumbnail — last screenshot or og:image
   const thumbnail = $('meta[property="og:image"]').attr('content') ||

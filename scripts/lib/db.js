@@ -92,6 +92,16 @@ export async function insertVideo(video) {
        video_url, thumbnail_url, ai_model, ai_confidence, ai_raw_response,
        status)
      VALUES ($1,$2::jsonb,$3::jsonb,$4::jsonb,$5::jsonb,$6::jsonb,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16)
+     ON CONFLICT (raw_video_id) DO UPDATE SET
+       title = EXCLUDED.title,
+       slug = EXCLUDED.slug,
+       review = EXCLUDED.review,
+       seo_title = EXCLUDED.seo_title,
+       seo_description = EXCLUDED.seo_description,
+       ai_model = EXCLUDED.ai_model,
+       ai_confidence = EXCLUDED.ai_confidence,
+       ai_raw_response = EXCLUDED.ai_raw_response,
+       updated_at = NOW()
      RETURNING id`,
     [
       video.raw_video_id, video.title, video.slug,

@@ -2,11 +2,18 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react';
 
+interface HotMoment {
+    timestamp_sec: number;
+    intensity: number;
+    label: string;
+}
+
 interface VideoPlayerProps {
     src?: string | null;
     poster?: string | null;
     title?: string;
     durationSeconds?: number;
+    hotMoments?: HotMoment[];
 }
 
 function formatTime(seconds: number): string {
@@ -18,7 +25,7 @@ function formatTime(seconds: number): string {
     return `${m}:${String(sec).padStart(2, '0')}`;
 }
 
-export default function VideoPlayer({ src, poster, title, durationSeconds }: VideoPlayerProps) {
+export default function VideoPlayer({ src, poster, title, durationSeconds, hotMoments = [] }: VideoPlayerProps) {
     const videoRef = useRef<HTMLVideoElement>(null);
     const containerRef = useRef<HTMLDivElement>(null);
     const progressRef = useRef<HTMLDivElement>(null);
@@ -217,9 +224,44 @@ export default function VideoPlayer({ src, poster, title, durationSeconds }: Vid
                 {/* Progress bar */}
                 <div
                     ref={progressRef}
-                    className="w-full h-1 bg-white/20 rounded-full cursor-pointer mb-2 group/progress hover:h-1.5 transition-all"
+                    className="w-full h-1 bg-white/20 rounded-full cursor-pointer mb-2 group/progress hover:h-1.5 transition-all relative"
                     onClick={handleSeek}
                 >
+                    {/* Hot moment fire markers */}
+                    {duration > 0 && hotMoments.map((moment, i) => {
+                        const pos = (moment.timestamp_sec / duration) * 100;
+                        if (pos < 0 || pos > 100) return null;
+                        return (
+                            <div
+                                key={i}
+                                className="absolute -top-3 -translate-x-1/2 z-10 pointer-events-none group-hover/progress:opacity-100 opacity-70 transition-opacity"
+                                style={{ left: `${pos}%` }}
+                                title={moment.label}
+                            >
+                                <span className="text-[10px] drop-shadow-lg" style={{ filter: `brightness(${0.6 + moment.intensity * 0.08})` }}>
+                                    🔥
+                                </span>
+                            </div>
+                        );
+                    })}
+                    {/* Hot moment dots on the bar */}
+                    {duration > 0 && hotMoments.map((moment, i) => {
+                        const pos = (moment.timestamp_sec / duration) * 100;
+                        if (pos < 0 || pos > 100) return null;
+                        return (
+                            <div
+                                key={`dot-${i}`}
+                                className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 rounded-full z-[1]"
+                                style={{
+                                    left: `${pos}%`,
+                                    width: `${4 + moment.intensity}px`,
+                                    height: `${4 + moment.intensity}px`,
+                                    backgroundColor: '#f97316',
+                                    boxShadow: `0 0 ${moment.intensity * 2}px #f97316`,
+                                }}
+                            />
+                        );
+                    })}
                     <div
                         className="h-full bg-brand-accent rounded-full relative"
                         style={{ width: `${progress}%` }}

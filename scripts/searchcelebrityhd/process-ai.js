@@ -22,7 +22,7 @@ import { mkdir, writeFile, readFile } from 'fs/promises';
 import slugify from 'slugify';
 import axios from 'axios';
 import { config } from '../lib/config.js';
-import { query, getPendingVideos, markRawVideoProcessed, markRawVideoFailed,
+import { query, markRawVideoProcessed, markRawVideoFailed,
   insertVideo, findOrCreateCelebrity, linkVideoCelebrity,
   findOrCreateTag, linkVideoTag, findOrCreateMovie,
   linkMovieScene, linkMovieCelebrity, log as dbLog,
@@ -33,7 +33,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const GEMINI_API_KEY = config.ai.geminiApiKey;
 const _cliModel = process.argv.find(a => a.startsWith('--model='));
-const GEMINI_MODEL = _cliModel ? _cliModel.split('=')[1] : config.ai.geminiModel;
+const GEMINI_MODEL = _cliModel ? _cliModel.split('=')[1] : 'gemini-3-flash-preview';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const LOCALES = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
@@ -41,6 +41,26 @@ const MAX_SCREENSHOTS_FOR_AI = 6; // send up to 6 screenshots to Gemini
 
 function makeSlug(text) {
   return slugify(text, { lower: true, strict: true, locale: 'en' });
+}
+
+// Get pending videos from searchcelebrityhd source only (with screenshots)
+async function getSearchCelebPending(limit) {
+  const { rows } = await query(
+    `UPDATE raw_videos
+     SET status = 'processing', updated_at = NOW()
+     WHERE id IN (
+       SELECT id FROM raw_videos
+       WHERE status = 'pending'
+         AND extra_data->>'source' = 'searchcelebrityhd'
+         AND (extra_data->>'screenshot_count')::int > 0
+       ORDER BY created_at ASC
+       LIMIT $1
+       FOR UPDATE SKIP LOCKED
+     )
+     RETURNING *`,
+    [limit]
+  );
+  return rows;
 }
 
 // ============================================
@@ -166,7 +186,6 @@ Generate multilingual content for celeb.skin.`;
       generationConfig: {
         temperature: 0.3,
         maxOutputTokens: 32768,
-        responseMimeType: 'application/json',
       },
       safetySettings: [
         { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_NONE' },
@@ -187,15 +206,21 @@ Generate multilingual content for celeb.skin.`;
 
   if (!text) {
     const reason = data.candidates?.[0]?.finishReason || data.promptFeedback?.blockReason || 'unknown';
+    logger.error(`  Gemini full response: ${JSON.stringify(data).substring(0, 500)}`);
     throw new Error(`Gemini returned empty response (reason: ${reason})`);
   }
 
   let result;
+  // Strip markdown code block wrapper if present
+  let cleanText = text.trim();
+  if (cleanText.startsWith('```')) {
+    cleanText = cleanText.replace(/^```(?:json)?\s*\n?/, '').replace(/\n?```\s*$/, '');
+  }
   try {
-    result = JSON.parse(text);
+    result = JSON.parse(cleanText);
   } catch (err) {
     // Try to fix common JSON issues
-    let fixed = text.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+    let fixed = cleanText.replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
     try {
       result = JSON.parse(fixed);
     } catch {
@@ -366,7 +391,7 @@ if (!GEMINI_API_KEY) {
   process.exit(1);
 }
 
-const pending = await getPendingVideos(limit);
+const pending = await getSearchCelebPending(limit);
 logger.info(`Found ${pending.length} pending videos`);
 
 let processed = 0, failed = 0;

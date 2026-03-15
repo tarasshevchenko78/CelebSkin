@@ -118,8 +118,8 @@ async function createPreviewGif(videoPath, outputPath, config) {
     const duration = await getVideoDuration(videoPath);
     if (duration < 3) return false;
 
-    // Start from 15% into the video for more interesting content
-    const startTime = Math.max(1, duration * 0.15);
+    // Start from AI hot moment if available, otherwise 15% into video
+    const startTime = config._startOverride || Math.max(1, duration * 0.15);
     const gifDuration = Math.min(config.gifDuration, duration - startTime);
 
     await execFileAsync('ffmpeg', [
@@ -244,17 +244,54 @@ export async function processVideo(video, config) {
         }
 
         setActiveItem(videoId, { label: vTitle, subStep: 'Extracting frames', pct: 10 });
-        // Extract frames at evenly spaced intervals
+
+        // Determine timestamps: prefer AI-selected timestamps, fallback to evenly spaced
         const thumbCount = config.thumbCount;
         const width = config.thumbWidth;
         const timestamps = [];
         const framePaths = [];
         const screenshotFiles = [];
 
-        for (let i = 0; i < thumbCount; i++) {
-            const percent = (i + 1) / (thumbCount + 1);
-            const ts = Math.max(0.5, duration * percent);
-            timestamps.push(ts);
+        const aiResponse = video.ai_raw_response;
+        const aiScreenshotTimestamps = aiResponse?.screenshot_timestamps;
+        const bestThumbnailSec = aiResponse?.best_thumbnail_sec;
+
+        if (aiScreenshotTimestamps && aiScreenshotTimestamps.length >= 4) {
+            // Use AI-selected timestamps (hot moments + context shots)
+            // Filter to valid timestamps within video duration
+            const validTs = aiScreenshotTimestamps
+                .filter(t => typeof t === 'number' && t >= 0 && t < duration)
+                .sort((a, b) => a - b);
+
+            // Ensure best_thumbnail_sec is included
+            if (bestThumbnailSec && !validTs.includes(bestThumbnailSec) && bestThumbnailSec < duration) {
+                validTs.push(bestThumbnailSec);
+                validTs.sort((a, b) => a - b);
+            }
+
+            // Pad with evenly spaced if AI gave too few
+            if (validTs.length < thumbCount) {
+                const existing = new Set(validTs.map(t => Math.round(t)));
+                for (let i = 0; i < thumbCount && validTs.length < thumbCount; i++) {
+                    const ts = Math.max(0.5, duration * (i + 1) / (thumbCount + 1));
+                    if (!existing.has(Math.round(ts))) {
+                        validTs.push(ts);
+                        existing.add(Math.round(ts));
+                    }
+                }
+                validTs.sort((a, b) => a - b);
+            }
+
+            timestamps.push(...validTs.slice(0, thumbCount));
+            logger.info(`  Using ${aiScreenshotTimestamps.length} AI-selected timestamps (best thumbnail at ${bestThumbnailSec}s)`);
+        } else {
+            // Fallback: evenly spaced intervals
+            for (let i = 0; i < thumbCount; i++) {
+                const percent = (i + 1) / (thumbCount + 1);
+                const ts = Math.max(0.5, duration * percent);
+                timestamps.push(ts);
+            }
+            logger.info(`  Using ${thumbCount} evenly-spaced timestamps (no AI data)`);
         }
 
         for (let i = 0; i < timestamps.length; i++) {
@@ -290,13 +327,18 @@ export async function processVideo(video, config) {
             logger.warn(`  Sprite creation failed: ${err.message}`);
         }
 
-        // Create preview GIF
+        // Create preview GIF — start from hottest moment if available
         setActiveItem(videoId, { label: vTitle, subStep: 'Creating GIF', pct: 75 });
         const gifPath = join(workDir, 'preview.gif');
         let hasGif = false;
         try {
-            hasGif = await createPreviewGif(videoPath, gifPath, config);
-            if (hasGif) logger.info(`  Preview GIF created`);
+            // Override GIF start time to hottest moment
+            const gifConfig = { ...config };
+            if (bestThumbnailSec && bestThumbnailSec > 2 && bestThumbnailSec < duration - 4) {
+                gifConfig._startOverride = Math.max(0, bestThumbnailSec - 1); // start 1s before peak
+            }
+            hasGif = await createPreviewGif(videoPath, gifPath, gifConfig);
+            if (hasGif) logger.info(`  Preview GIF created${gifConfig._startOverride ? ` (from hot moment at ${bestThumbnailSec}s)` : ''}`);
         } catch (err) {
             logger.warn(`  GIF creation failed: ${err.message}`);
         }
@@ -350,7 +392,19 @@ export async function processVideo(video, config) {
                 videoId,
                 JSON.stringify(screenshotPaths),
                 JSON.stringify(spriteData),
-                `tmp/${videoId}/${screenshotFiles[0]}`, // first frame as thumbnail
+                (() => {
+                    // Pick thumbnail closest to AI's best_thumbnail_sec
+                    if (bestThumbnailSec && timestamps.length > 0) {
+                        let bestIdx = 0;
+                        let bestDiff = Infinity;
+                        for (let i = 0; i < timestamps.length && i < screenshotFiles.length; i++) {
+                            const diff = Math.abs(timestamps[i] - bestThumbnailSec);
+                            if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
+                        }
+                        return `tmp/${videoId}/${screenshotFiles[bestIdx]}`;
+                    }
+                    return `tmp/${videoId}/${screenshotFiles[0]}`;
+                })(),
                 Math.round(duration),
                 durationFormatted,
                 quality,
@@ -438,7 +492,8 @@ async function main() {
 
     const { rows: videos } = await query(
         `SELECT v.id, v.video_url, v.video_url_watermarked, v.screenshots, v.duration_seconds,
-                COALESCE(v.title->>'en', v.id::text) as display_title
+                COALESCE(v.title->>'en', v.id::text) as display_title,
+                v.ai_raw_response, v.hot_moments
          FROM videos v
          WHERE ${statusFilter} AND (v.video_url IS NOT NULL OR v.video_url_watermarked IS NOT NULL)
          ORDER BY v.created_at DESC

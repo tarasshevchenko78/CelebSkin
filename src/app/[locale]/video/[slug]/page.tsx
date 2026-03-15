@@ -130,6 +130,7 @@ export default async function VideoDetailPage({
                         poster={video.thumbnail_url}
                         title={title}
                         durationSeconds={video.duration_seconds || undefined}
+                        hotMoments={video.hot_moments || []}
                     />
                 ) : video.embed_code ? (
                     <div
