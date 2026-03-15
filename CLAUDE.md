@@ -2,7 +2,7 @@
 
 ## Архитектура
 - **AbeloHost** (185.224.82.214): Next.js 14 App Router + TypeScript, PostgreSQL 16, Redis, Nginx, PM2
-- **Contabo** (161.97.142.117): Pipeline scripts, FFmpeg, Playwright, AI processing (Gemini 2.5 Flash)
+- **Contabo** (161.97.142.117): Pipeline scripts, FFmpeg, Playwright, AI processing (Gemini 3-flash-preview)
 - **Bunny CDN** (celebskin-cdn.b-cdn.net): Видео, скриншоты, фото, постеры
 - **Домен**: celeb.skin (Namecheap)
 - **GitHub**: tarasshevchenko78/CelebSkin
@@ -12,7 +12,8 @@
 - PostgreSQL 16 с JSONB для 10 языков (ru, en, de, fr, es, pt, it, pl, nl, tr)
 - Redis — кэширование (TTL 60-300с)
 - BunnyCDN — медиа хранилище и доставка
-- Gemini 2.5 Flash — AI обработка, переводы, описания
+- Gemini 3-flash-preview — AI Vision анализ видео (без цензуры на explicit контент)
+- Gemini 2.5 Flash — AI переводы, описания (legacy)
 - TMDB API — метаданные фильмов и актрис
 - PM2 — процесс менеджер
 - FFmpeg — обработка видео
@@ -46,6 +47,9 @@ scripts/
     dead-letter.js     — очередь ошибок
     state-machine.js   — state machine видео
     gemini.js          — Gemini API хелперы
+    tags.js            — Tag system v3: 32 тега, 4 измерения, COUNTRY_GROUPS, normalizeTags()
+  run-pipeline-v2.js   — Pipeline v2.0 оркестратор (8 in-memory queues, auto-resume)
+  ai-vision-analyze.js — AI Vision анализ видео (Gemini 3-flash-preview, File API)
   xcadr/
     parse-xcadr.js     — парсер xcadr.online
     translate-xcadr.js — перевод через TMDB + Gemini
@@ -65,7 +69,7 @@ scripts/
   deploy-pipeline.sh
   backup-db.sh
 db/
-  migrations/          — SQL миграции (001-009, 009 = settings table)
+  migrations/          — SQL миграции (001-012, 012 = pipeline v2)
 ```
 
 ## Два сервера — строгое разделение
@@ -111,12 +115,76 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - import: создаёт записи video/celebrity/movie в БД (из админки)
 - download: скачивает видео, обрабатывает FFmpeg, заливает на CDN
 
+## Pipeline v2.0 (Contabo) — НОВЫЙ
+
+### Оркестратор: `run-pipeline-v2.js`
+In-memory очереди (PipelineQueue + WorkerPool). Видео проходит все 8 шагов последовательно, между шагами 0ms задержки (нет DB-polling).
+
+### 8 шагов
+| # | Шаг | Workers | Описание |
+|---|------|---------|----------|
+| 1 | download | 3 | axios stream, 10min timeout, .downloading tmp file |
+| 2 | tmdb_enrich | 3 | TMDB API (Bearer JWT), nationality (ISO 2-letter), countries, draft статус |
+| 3 | ai_vision | 3 | subprocess ai-vision-analyze.js, 120s timeout, censored fallback на donor tags |
+| 4 | watermark | 1 | FFmpeg, настройки из DB (settings), image/text, rotating_corners |
+| 5 | media | 3 | Screenshots (1280px), preview.mp4 (6s, 480px), preview.gif (4s) |
+| 6 | cdn_upload | 3 | uploadFile() → Bunny Storage, все файлы → videos/{videoId}/ |
+| 7 | publish | 3 | CDN verify → status='published', celebrities/movies → published, counts update |
+| 8 | cleanup | 3 | rm workdir (только если published), raw_videos → processed |
+
+### AI Vision
+- **Модель**: gemini-3-flash-preview (primary) → gemini-3.1-pro-preview → gemini-2.5-pro (fallback)
+- **Gemini 3.x не имеет цензуры** на explicit контент (проверено)
+- File API для видео >18MB (resumable upload)
+- Fallback на donor tags через mapDonorTags() если все модели отказали
+
+### Tag System v3 (`lib/tags.js`)
+- **32 тега** в 4 измерениях: nudity_level (8), scene_type (12), context (7), media_type (5)
+- `normalizeTags()`: 1 nudity + [bush] + 0-1 scene + 0-2 context + 1 media
+- `mapDonorTags(donorTags)`: маппинг тегов донора → наша система
+- `tag_mapping` таблица в DB (72 маппинга, migration 012)
+
+### Страны и национальность
+- `celebrities.nationality` → ISO 2-letter код (из TMDB place_of_birth через `extractNationality()`)
+- `movies.countries` → VARCHAR(2)[] массив ISO кодов (из TMDB production_countries)
+- `COUNTRY_GROUPS` в tags.js: asian, scandinavian, latin, eastern-european, western-european
+- `BIRTH_COUNTRY_MAP`: 54 маппинга для парсинга "Springfield, Illinois, USA" → "US"
+
+### Draft статус
+- Celebrities и movies создаются со `status = 'draft'` в шаге tmdb_enrich
+- Публикуются в шаге publish только вместе с видео
+- Если CDN URLs отсутствуют → video → `needs_review` (не publish)
+
+### Auto-resume при рестарте
+- Сканирует `/opt/celebskin/pipeline-work/` при каждом старте (не нужен --resume)
+- Определяет шаг по файлам + DB: original.mp4, metadata.json, watermarked.mp4, thumb_*.jpg, preview.mp4, CDN URLs
+- Пустые/orphan workdirs удаляются автоматически
+- Published workdirs очищаются
+
+### Retry и dead-letter
+- 3 retry на каждый шаг (5s, 15s, 45s delays)
+- При исчерпании retries → dead_letter через `recordFailure()`
+- Graceful shutdown: SIGINT/SIGTERM → workers завершают текущую работу
+
+### CLI
+```bash
+node run-pipeline-v2.js                    # полный pipeline + auto-resume
+node run-pipeline-v2.js --limit=10         # макс 10 новых видео
+node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug)
+```
+
+### Миграция 012 (pipeline v2)
+Новые колонки videos: `ai_vision_status`, `ai_vision_model`, `best_thumbnail_sec`, `preview_start_sec`, `donor_tags`, `pipeline_step`, `pipeline_error`
+Новые статусы: downloading, downloaded, tmdb_enriching, tmdb_enriched, ai_analyzing, ai_analyzed, watermarking, media_generating, media_generated, cdn_uploading, cdn_uploaded, publishing, failed, draft
+Таблица `tag_mapping`: donor_tag → our_tag_slug (72 записи)
+`movies.countries`: VARCHAR(2)[] массив ISO кодов
+
 ## Известные баги (март 2026)
 1. ~~Import пишет boobsradar URL в video_url — должен быть NULL~~ — video_url используется watermark шагом, перезаписывается CDN upload
 2. Скачивается 480p вместо максимального качества
 3. Водяной знак xcadr.online не убирается — delogo не реализован
 4. ~~Коллекции не привязываются к видео при Import~~ — ИСПРАВЛЕНО
-5. Draft статус для актрис/фильмов не реализован
+5. ~~Draft статус для актрис/фильмов не реализован~~ — РЕАЛИЗОВАНО в Pipeline v2 (tmdb_enrich → draft, publish → published)
 6. AI описание — промт не обновлён на эротический стиль
 7. Удаление видео из админки может не работать
 8. Часть админки всё ещё на английском
@@ -138,12 +206,26 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
 - **Watermark fix (13.03.2026)**: `-sar 1:1`, `-keyint_min 48 -sc_threshold 0`, `-af aresample=async=1:first_pts=0`, `-fflags +genpts+discardcorrupt`, `-max_muxing_queue_size 4096` — исправляет PIPELINE_ERROR_DECODE при seek в Chrome
 - Новые скрипты: `scan-broken-videos.js` (сканирование SAR), `reprocess-broken-videos.js` (перекодировка старых видео)
+- **Pipeline v2.0 (15.03.2026)**: `run-pipeline-v2.js` — 8-шаговый оркестратор с in-memory очередями, AI Vision (Gemini 3-flash-preview), Tag System v3 (32 тега), auto-resume, draft статус для celebrities/movies, миграция 012
+- **Теги и UI (16.03.2026)**:
+  - 32 канонических тега с `is_canonical=true`, `name_localized` (10 языков), `videos_count`
+  - `backfill-tags.js` — бэкфил тегов для 613 старых видео через `tag_mapping` + `DONOR_MAP`
+  - Публичный сайт: только canonical теги из `video_tags JOIN tags WHERE is_canonical=true`; categories не показываются
+  - Панель тегов `/video`: sticky, золотая тема (`brand-accent`), drag-scroll, sort dropdown отдельно
+  - `getAllTags()`: фильтр `is_canonical=true AND videos_count > 0`
+- **Pipeline fixes (16.03.2026)**:
+  - Дедупликация: скрапер проверяет `videos JOIN raw_videos` вместо только `raw_videos`
+  - `resumeFromWorkdirs()`: удаляет orphan raw_videos + сбрасывает stuck `processing` → `processed`
+  - `fetchPendingVideos()`: fix `$2::text` cast для PostgreSQL type inference
+  - Early stop: скрапер прекращает сканирование при достижении limit новых видео (`earlyStop` flag)
+  - Stop endpoint: `SIGTERM` → 5s timeout → `SIGKILL` fallback
+  - SIGTERM kills scraper subprocess immediately (`scraperChild.kill("SIGKILL")`)
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
 - НИКОГДА не запускать pipeline на AbeloHost — только на Contabo
 - НИКОГДА не записывать boobsradar search URL в video_url
 - Промты для Sonnet давать КОРОТКИЕ — по 1 багу, иначе пропускает
-- Gemini модель: gemini-2.5-flash (с thinking tokens — использовать extractGeminiJSON)
-- video_url при создании = NULL, заполняется только download-and-process.js
+- Gemini AI Vision: gemini-3-flash-preview (pipeline v2). Legacy: gemini-2.5-flash (extractGeminiJSON)
+- video_url при создании = NULL, заполняется pipeline (cdn_upload шаг)
 - Админка на русском языке

@@ -128,7 +128,7 @@ export default async function VideosPage({
             </div>
 
             {/* ── Sticky Filter Bar ── */}
-            <div className="sticky top-14 z-10 -mx-4 px-4 py-2.5 bg-[#08060a]/95 backdrop-blur-sm border-b border-gray-800/50">
+            <div className="sticky top-[84px] md:top-[96px] z-40 -mx-4 px-4 py-3 bg-brand-bg/95 backdrop-blur-sm border-b border-brand-accent/20 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
                 <VideoCatalogFilters
                     tags={tagChips}
                     sortOptions={sortOptions}

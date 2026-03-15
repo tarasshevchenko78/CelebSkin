@@ -376,7 +376,8 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
         pool.query(
             `SELECT t.* FROM tags t
        JOIN video_tags vt ON vt.tag_id = t.id
-       WHERE vt.video_id = $1`,
+       WHERE vt.video_id = $1
+         AND t.is_canonical = true`,
             [video.id]
         ),
         pool.query(

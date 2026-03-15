@@ -238,21 +238,10 @@ export default async function VideoDetailPage({
                         />
                     </div>
 
-                    {/* ── 3. Categories & Tags ── */}
-                    {(video.categories && video.categories.length > 0) || (video.tags && video.tags.length > 0) ? (
+                    {/* ── 3. Tags (canonical only) ── */}
+                    {video.tags && video.tags.length > 0 ? (
                         <div className="flex flex-wrap gap-1.5 mt-5 pt-5 border-t border-gray-800/50">
-                            {/* Categories */}
-                            {video.categories?.map((cat) => (
-                                <a
-                                    key={`cat-${cat.id}`}
-                                    href={`/${locale}/category/${cat.slug}`}
-                                    className="px-2 py-0.5 rounded-full text-xs bg-red-900/40 text-red-200 border border-red-800 hover:border-red-500 hover:text-white transition-colors"
-                                >
-                                    {getLocalizedField(cat.name_localized, locale) || cat.name}
-                                </a>
-                            ))}
-                            {/* Tags */}
-                            {video.tags?.map((tag) => (
+                            {video.tags.map((tag) => (
                                 <a
                                     key={`tag-${tag.id}`}
                                     href={`/${locale}/tag/${tag.slug}`}

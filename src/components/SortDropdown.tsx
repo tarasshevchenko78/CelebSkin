@@ -46,11 +46,11 @@ export default function SortDropdown({ options, selected, onChange }: SortDropdo
         <div ref={containerRef} className="relative">
             <button
                 onClick={() => setOpen(!open)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gray-800 text-sm text-gray-300 border border-gray-700 hover:border-gray-500 transition-colors whitespace-nowrap"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-brand-card text-sm text-[#c0bba8] border border-brand-accent/30 hover:border-brand-accent/60 hover:text-brand-gold-light transition-all duration-200 whitespace-nowrap"
             >
                 {selectedLabel}
                 <svg
-                    className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`}
+                    className={`w-3 h-3 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -60,13 +60,13 @@ export default function SortDropdown({ options, selected, onChange }: SortDropdo
             </button>
 
             {open && (
-                <div className="absolute right-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-20 min-w-[150px] py-1">
+                <div className="absolute right-0 top-full mt-1 bg-brand-card border border-brand-accent/30 rounded-xl shadow-[0_10px_40px_rgba(0,0,0,0.6)] z-20 min-w-[150px] py-1 backdrop-blur-xl">
                     {options.map((option) => (
                         <button
                             key={option.value}
                             onClick={() => handleSelect(option.value)}
-                            className={`block w-full text-left px-3 py-2 text-sm transition-colors hover:bg-gray-700 ${
-                                option.value === selected ? 'text-red-400' : 'text-gray-300'
+                            className={`block w-full text-left px-3 py-2 text-sm transition-colors hover:bg-brand-accent/10 ${
+                                option.value === selected ? 'text-brand-gold-light' : 'text-[#c0bba8]'
                             }`}
                         >
                             {option.label}
