@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { SUPPORTED_LOCALES, LOCALE_NAMES, type SupportedLocale } from '@/lib/i18n';
+import { useAuth } from './AuthProvider';
 
 const navLinks = [
     { key: 'videos', href: '/video', labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Videos', pt: 'Vídeos', it: 'Video', pl: 'Filmy', nl: "Video's", tr: 'Videolar' } },
@@ -12,6 +13,7 @@ const navLinks = [
 
 export default function Header({ locale }: { locale: string }) {
     const [langOpen, setLangOpen] = useState(false);
+    const { user, loading, openAuthModal } = useAuth();
 
     return (
         <header className="sticky top-0 z-50 pt-2 pb-2 px-2 md:px-6 lg:px-10 bg-transparent w-full">
@@ -48,8 +50,8 @@ export default function Header({ locale }: { locale: string }) {
                     </a>
                 </div>
 
-                {/* Right: Search & Language Island */}
-                <div className="flex-1 ml-[90px] lg:ml-[140px] flex items-center gap-2 lg:gap-6 h-full px-4 lg:px-6 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
+                {/* Right: Search, User & Language Island */}
+                <div className="flex-1 ml-[90px] lg:ml-[140px] flex items-center gap-2 lg:gap-4 h-full px-4 lg:px-6 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
                     {/* Large Search Input */}
                     <form action={`/${locale}/search`} className="relative w-full flex-1">
                         <input
@@ -64,6 +66,31 @@ export default function Header({ locale }: { locale: string }) {
                             </svg>
                         </button>
                     </form>
+
+                    {/* User Button */}
+                    {!loading && (
+                        user ? (
+                            <a
+                                href={`/${locale}/profile`}
+                                title={user.username}
+                                className="shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-brand-accent/15 border border-brand-accent/40 hover:bg-brand-accent/25 transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-brand-gold-light" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
+                                </svg>
+                            </a>
+                        ) : (
+                            <button
+                                onClick={() => openAuthModal()}
+                                title="Sign In"
+                                className="shrink-0 flex items-center justify-center w-10 h-10 rounded-full bg-[#1a1815] border border-brand-accent/30 hover:bg-[#25221d] hover:border-brand-accent/60 transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-brand-secondary hover:text-brand-gold-light" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                            </button>
+                        )
+                    )}
 
                     {/* Language Selector */}
                     <div className="relative z-20 shrink-0">
@@ -122,10 +149,34 @@ export default function Header({ locale }: { locale: string }) {
                     </a>
                 </div>
 
-                {/* Right side: Language selection */}
-                <div className="flex-1 flex justify-end relative z-20">
+                {/* Right side: User + Language */}
+                <div className="flex-1 flex justify-end items-center gap-2 relative z-20">
+                    {/* User icon (mobile) */}
+                    {!loading && (
+                        user ? (
+                            <a
+                                href={`/${locale}/profile`}
+                                className="w-10 h-10 rounded-full flex items-center justify-center bg-brand-accent/15 border border-brand-accent/40"
+                            >
+                                <svg className="w-5 h-5 text-brand-gold-light" fill="currentColor" viewBox="0 0 24 24">
+                                    <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z" />
+                                </svg>
+                            </a>
+                        ) : (
+                            <button
+                                onClick={() => openAuthModal()}
+                                className="w-10 h-10 rounded-full flex items-center justify-center bg-brand-bg/90 backdrop-blur-md border border-brand-accent/40"
+                            >
+                                <svg className="w-5 h-5 text-brand-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                </svg>
+                            </button>
+                        )
+                    )}
+
+                    {/* Language */}
                     <div className="relative">
-                        <button onClick={() => setLangOpen(!langOpen)} className="h-12 px-4 rounded-full bg-brand-bg/90 backdrop-blur-md border border-brand-accent/40 text-[#e8e6df] flex items-center gap-1.5 focus:outline-none shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
+                        <button onClick={() => setLangOpen(!langOpen)} className="h-10 px-3 rounded-full bg-brand-bg/90 backdrop-blur-md border border-brand-accent/40 text-[#e8e6df] flex items-center gap-1 focus:outline-none shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
                             <span className="text-sm font-semibold">{(locale as string).toUpperCase()}</span>
                             <svg className={`w-3.5 h-3.5 text-brand-secondary transition-transform duration-200 ${langOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                         </button>

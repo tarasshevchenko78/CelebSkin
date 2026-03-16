@@ -36,7 +36,6 @@ export default function VideoActions({
         if (viewTracked.current) return;
         viewTracked.current = true;
 
-        // Check if already viewed in this session
         const viewedKey = `viewed_${videoId}`;
         if (sessionStorage.getItem(viewedKey)) return;
 
@@ -49,17 +48,13 @@ export default function VideoActions({
             .catch(() => {});
     }, [videoId]);
 
-    // Check localStorage for previous like/dislike
+    // Load saved vote from localStorage
     useEffect(() => {
         const stored = localStorage.getItem(`vote_${videoId}`);
-        if (stored === 'like' || stored === 'dislike') {
-            setUserAction(stored);
-        }
+        if (stored === 'like' || stored === 'dislike') setUserAction(stored);
     }, [videoId]);
 
     const handleVote = async (action: 'like' | 'dislike') => {
-        if (userAction === action) return; // Already voted this way
-
         try {
             const res = await fetch(`/api/videos/${videoId}/like`, {
                 method: 'POST',
@@ -70,8 +65,12 @@ export default function VideoActions({
             if (data.likes !== undefined) {
                 setLikes(data.likes);
                 setDislikes(data.dislikes);
-                setUserAction(action);
-                localStorage.setItem(`vote_${videoId}`, action);
+                setUserAction(data.userVote);
+                if (data.userVote) {
+                    localStorage.setItem(`vote_${videoId}`, data.userVote);
+                } else {
+                    localStorage.removeItem(`vote_${videoId}`);
+                }
             }
         } catch {
             // silently fail

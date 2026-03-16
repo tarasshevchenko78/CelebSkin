@@ -58,9 +58,12 @@ export async function getVideos(
     orderBy: string = 'published_at',
     tagSlug?: string
 ): Promise<PaginatedResult<Video>> {
-    const allowedOrder = ['published_at', 'views_count', 'created_at', 'duration_seconds', 'likes_count'];
+    const allowedOrder = ['published_at', 'views_count', 'created_at', 'duration_seconds', 'likes_count', 'rated'];
     const order = allowedOrder.includes(orderBy) ? orderBy : 'published_at';
     const cacheKey = `videos:${page}:${limit}:${order}:${tagSlug || 'all'}`;
+    const orderClause = order === 'rated'
+        ? `(v.likes_count - v.dislikes_count) DESC NULLS LAST, v.views_count DESC NULLS LAST`
+        : `v.${order} DESC NULLS LAST`;
 
     return cached(cacheKey, async () => {
         const offset = (page - 1) * limit;
@@ -81,7 +84,7 @@ export async function getVideos(
             SELECT v.* FROM videos v
             ${tagJoin}
             WHERE v.status = 'published' ${dataTagWhere}
-            ORDER BY v.${order} DESC NULLS LAST
+            ORDER BY ${orderClause}
             LIMIT $1 OFFSET $2`;
 
         const countQuery = `
@@ -118,6 +121,20 @@ export async function getLatestVideos(limit: number = 12): Promise<Video[]> {
         );
         return result.rows;
     }, 120);
+}
+
+export async function getPopularVideos(limit: number = 10): Promise<Video[]> {
+    return cached(`popular_videos:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT * FROM videos
+         WHERE status = 'published'
+           AND published_at < NOW() - INTERVAL '3 days'
+         ORDER BY likes_count DESC NULLS LAST, views_count DESC NULLS LAST, published_at DESC
+         LIMIT $1`,
+            [limit]
+        );
+        return result.rows;
+    }, 300);
 }
 
 export async function getFeaturedVideo(): Promise<Video | null> {
@@ -428,4 +445,43 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
         movie: movieResult.rows[0] || null,
         embed_code: raw?.embed_code || null,
     } as Video;
+}
+
+export async function getAdjacentVideos(
+    publishedAt: string,
+    locale: string
+): Promise<{ prevSlug: string | null; nextSlug: string | null }> {
+    const [prevRes, nextRes] = await Promise.all([
+        pool.query(
+            `SELECT slug->>'en' as en, slug->>$2 as loc FROM videos
+             WHERE published_at < $1 AND status = 'published'
+             ORDER BY published_at DESC LIMIT 1`,
+            [publishedAt, locale]
+        ),
+        pool.query(
+            `SELECT slug->>'en' as en, slug->>$2 as loc FROM videos
+             WHERE published_at > $1 AND status = 'published'
+             ORDER BY published_at ASC LIMIT 1`,
+            [publishedAt, locale]
+        ),
+    ]);
+    const slug = (row: { loc: string; en: string } | undefined) =>
+        row ? (row.loc || row.en || null) : null;
+
+    let nextSlug = slug(nextRes.rows[0]);
+    // Cyclic: if this is the newest video, wrap around to oldest
+    if (!nextSlug) {
+        const oldestRes = await pool.query(
+            `SELECT slug->>'en' as en, slug->>$1 as loc FROM videos
+             WHERE status = 'published'
+             ORDER BY published_at ASC LIMIT 1`,
+            [locale]
+        );
+        nextSlug = slug(oldestRes.rows[0]);
+    }
+
+    return {
+        prevSlug: slug(prevRes.rows[0]),
+        nextSlug,
+    };
 }

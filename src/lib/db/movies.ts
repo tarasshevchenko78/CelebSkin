@@ -48,6 +48,19 @@ export async function getMovies(
     }, 120);
 }
 
+export async function getNewMovies(limit: number = 12): Promise<Movie[]> {
+    return cached(`new_movies:${limit}`, async () => {
+        const result = await pool.query(
+            `SELECT * FROM movies
+             WHERE status = 'published' AND poster_url IS NOT NULL
+             ORDER BY year DESC NULLS LAST, scenes_count DESC NULLS LAST
+             LIMIT $1`,
+            [limit]
+        );
+        return result.rows;
+    }, 300);
+}
+
 // Movies — celebrity relations
 
 export async function getMoviesForCelebrity(celebrityId: number): Promise<Movie[]> {

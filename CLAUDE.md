@@ -3,6 +3,7 @@
 ## Архитектура
 - **AbeloHost** (185.224.82.214): Next.js 14 App Router + TypeScript, PostgreSQL 16, Redis, Nginx, PM2
 - **Contabo** (161.97.142.117): Pipeline scripts, FFmpeg, Playwright, AI processing (Gemini 3-flash-preview)
+- **Home PC** (92.209.206.116): Windows, parallel watermark worker (`watermark_worker.py`), web dashboard :8585
 - **Bunny CDN** (celebskin-cdn.b-cdn.net): Видео, скриншоты, фото, постеры
 - **Домен**: celeb.skin (Namecheap)
 - **GitHub**: tarasshevchenko78/CelebSkin
@@ -89,7 +90,7 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - **Event-driven scheduler**: child exit → wakeScheduler() → мгновенный re-spawn (0мс вместо 3с)
 - **3 параллельных видео**: каждый шаг обрабатывает до 3 видео одновременно
 - **Конкурентные шаги**: AI + Watermark + CDN работают одновременно для разных видео
-- **Водяной знак**: preset `ultrafast` + `-threads 0` + timeout 30мин
+- **Водяной знак**: preset `veryfast` CRF 22, shared DB queue с Home Worker
 - **CDN upload**: graceful skip если workdir удалён но CDN watermark уже есть
 - **Thumbnails**: fallback на CDN URL если локальный tmp/ файл удалён
 
@@ -118,7 +119,7 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 ## Pipeline v2.0 (Contabo) — НОВЫЙ
 
 ### Оркестратор: `run-pipeline-v2.js`
-In-memory очереди (PipelineQueue + WorkerPool). Видео проходит все 8 шагов последовательно, между шагами 0ms задержки (нет DB-polling).
+PipelineQueue + WorkerPool. Шаги download→ai_vision используют in-memory очереди. Watermark опрашивает БД (`watermark_ready`) через `FOR UPDATE SKIP LOCKED` — конкурирует с Home Worker.
 
 ### 8 шагов
 | # | Шаг | Workers | Описание |
@@ -126,7 +127,7 @@ In-memory очереди (PipelineQueue + WorkerPool). Видео проходи
 | 1 | download | 3 | axios stream, 10min timeout, .downloading tmp file |
 | 2 | tmdb_enrich | 3 | TMDB API (Bearer JWT), nationality (ISO 2-letter), countries, draft статус |
 | 3 | ai_vision | 3 | subprocess ai-vision-analyze.js, 120s timeout, censored fallback на donor tags |
-| 4 | watermark | 1 | FFmpeg, настройки из DB (settings), image/text, rotating_corners |
+| 4 | watermark | 2 | FFmpeg veryfast CRF22, DB poll (shared queue with Home Worker), image/text, rotating_corners |
 | 5 | media | 3 | Screenshots (1280px), preview.mp4 (6s, 480px), preview.gif (4s) |
 | 6 | cdn_upload | 3 | uploadFile() → Bunny Storage, все файлы → videos/{videoId}/ |
 | 7 | publish | 3 | CDN verify → status='published', celebrities/movies → published, counts update |
@@ -220,6 +221,20 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - Early stop: скрапер прекращает сканирование при достижении limit новых видео (`earlyStop` flag)
   - Stop endpoint: `SIGTERM` → 5s timeout → `SIGKILL` fallback
   - SIGTERM kills scraper subprocess immediately (`scraperChild.kill("SIGKILL")`)
+- **Pipeline v2 fixes (16.03.2026)**:
+  - AI Vision: fixed `bestResult.model` → `model` in saveResults() (was crashing all saves)
+  - maxOutputTokens: 2048 → 8192 (prevent JSON truncation)
+  - Detached child process: file-based stdio, survives `pm2 restart pipeline-api`
+  - File size limit: `maxSizeMb` param, HEAD request check before download
+  - Start button: source default `''` → `'boobsradar'`
+  - Category counts: query fix `collections WHERE is_auto = true` → `collections`
+- **Home Watermark Worker (16.03.2026)**:
+  - Python script on user's Windows PC, web dashboard on `:8585`
+  - Shared DB queue: both Contabo (2 slots) and home worker poll `watermark_ready` with `FOR UPDATE SKIP LOCKED`
+  - Flow: SCP download → FFmpeg veryfast CRF22 → BunnyCDN upload → SCP back → DB update
+  - Pipeline polls for `watermarked` videos from home worker → enqueues to `media` step
+  - Error retry: 3 attempts, then `watermark_failed`. CDN upload: 3 retries with 10s delay
+  - Pipeline completion waits for `watermarking_home` videos in DB
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса

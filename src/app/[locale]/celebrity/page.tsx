@@ -12,6 +12,12 @@ const titles: Record<string, string> = {
     pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler',
 };
 
+const sortLabels: Record<string, Record<string, string>> = {
+    popular: { en: 'Popular', ru: 'Популярные', de: 'Beliebt', fr: 'Populaires', es: 'Populares', pt: 'Populares', it: 'Popolari', pl: 'Popularne', nl: 'Populair', tr: 'Popüler' },
+    az:      { en: 'A–Z',     ru: 'А–Я',        de: 'A–Z',    fr: 'A–Z',         es: 'A–Z',       pt: 'A–Z',       it: 'A–Z',       pl: 'A–Z',       nl: 'A–Z',      tr: 'A–Z' },
+    videos:  { en: 'Most Scenes', ru: 'Больше сцен', de: 'Meiste', fr: 'Plus de scènes', es: 'Más escenas', pt: 'Mais cenas', it: 'Più scene', pl: 'Więcej scen', nl: 'Meeste', tr: 'En çok' },
+};
+
 export async function generateMetadata({ params }: { params: { locale: string } }): Promise<Metadata> {
     const locale = params.locale as SupportedLocale;
     return {
@@ -33,14 +39,14 @@ export default async function CelebritiesPage({
     const sort = searchParams.sort || 'popular';
     const letter = searchParams.letter || '';
     const page = parseInt(searchParams.page || '1');
-    const perPage = 24;
+    const perPage = 56;
 
     const sortMap: Record<string, string> = {
-        popular: 'total_views',
-        az: 'name',
-        videos: 'videos_count',
+        popular: 'videos_count',
+        az:      'name',
+        videos:  'videos_count',
     };
-    const orderBy = sortMap[sort] || 'total_views';
+    const orderBy = sortMap[sort] || 'videos_count';
 
     let result: PaginatedResult<Celebrity> = { data: [], total: 0, page: 1, limit: perPage, totalPages: 0 };
     try {
@@ -53,37 +59,34 @@ export default async function CelebritiesPage({
     const totalPages = result.totalPages;
 
     return (
-        <div className="mx-auto max-w-[1600px] px-4 py-8">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-                <h1 className="text-2xl sm:text-3xl font-bold text-white">
-                    {titles[locale] || titles.en}
-                </h1>
-                <div className="flex gap-1.5">
-                    {[
-                        { key: 'popular', label: 'Popular' },
-                        { key: 'az', label: 'A-Z' },
-                        { key: 'videos', label: 'Most Videos' },
-                    ].map(({ key, label }) => (
-                        <a
-                            key={key}
-                            href={`/${locale}/celebrity?sort=${key}${letter ? `&letter=${letter}` : ''}`}
-                            className={`text-xs px-3 py-1.5 rounded-lg transition-colors ${sort === key
-                                    ? 'bg-brand-accent text-white'
-                                    : 'bg-brand-card text-brand-secondary border border-brand-border hover:bg-brand-hover'
-                                }`}
-                        >
-                            {label}
-                        </a>
-                    ))}
-                </div>
+        <div className="mx-auto max-w-[1600px] px-4 pt-3 pb-8">
+
+            {/* Sort tabs */}
+            <div className="flex items-center gap-0 border-b border-gray-800 mb-4">
+                {(['popular', 'az', 'videos'] as const).map((key) => (
+                    <a
+                        key={key}
+                        href={`/${locale}/celebrity?sort=${key}${letter ? `&letter=${letter}` : ''}`}
+                        className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
+                            sort === key
+                                ? 'border-brand-accent text-brand-gold-light'
+                                : 'border-transparent text-gray-500 hover:text-gray-300'
+                        }`}
+                    >
+                        {sortLabels[key][locale] || sortLabels[key].en}
+                    </a>
+                ))}
             </div>
 
             {/* Alphabet filter */}
-            <div className="flex flex-wrap gap-1 mb-6">
+            <div className="flex flex-wrap gap-1 mb-5">
                 <a
                     href={`/${locale}/celebrity?sort=${sort}`}
-                    className={`w-7 h-7 flex items-center justify-center text-xs rounded transition-colors ${!letter ? 'bg-brand-accent text-white' : 'bg-brand-card text-brand-secondary border border-brand-border hover:bg-brand-hover'
-                        }`}
+                    className={`h-7 px-2 flex items-center justify-center text-xs rounded transition-colors ${
+                        !letter
+                            ? 'bg-brand-accent/15 text-brand-gold-light border border-brand-accent'
+                            : 'text-[#c0bba8] border border-brand-accent/30 hover:border-brand-accent hover:text-brand-gold-light'
+                    }`}
                 >
                     All
                 </a>
@@ -91,8 +94,11 @@ export default async function CelebritiesPage({
                     <a
                         key={l}
                         href={`/${locale}/celebrity?sort=${sort}&letter=${l}`}
-                        className={`w-7 h-7 flex items-center justify-center text-xs rounded transition-colors ${letter === l ? 'bg-brand-accent text-white' : 'bg-brand-card text-brand-secondary border border-brand-border hover:bg-brand-hover'
-                            }`}
+                        className={`w-7 h-7 flex items-center justify-center text-xs rounded transition-colors ${
+                            letter === l
+                                ? 'bg-brand-accent/15 text-brand-gold-light border border-brand-accent'
+                                : 'text-[#c0bba8] border border-brand-accent/30 hover:border-brand-accent hover:text-brand-gold-light'
+                        }`}
                     >
                         {l}
                     </a>
@@ -100,7 +106,7 @@ export default async function CelebritiesPage({
             </div>
 
             {celebs.length > 0 ? (
-                <div className="grid grid-cols-3 gap-6 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+                <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-2.5">
                     {celebs.map((celeb) => (
                         <CelebrityCard key={celeb.id} celebrity={celeb} locale={locale} />
                     ))}

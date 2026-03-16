@@ -6,16 +6,12 @@ import FilterBar from './FilterBar';
 
 interface VideoCatalogFiltersProps {
     tags: Array<{ label: string; value: string; count?: number }>;
-    sortOptions: Array<{ label: string; value: string }>;
     selectedTag: string;
-    selectedSort: string;
 }
 
 export default function VideoCatalogFilters({
     tags,
-    sortOptions,
     selectedTag,
-    selectedSort,
 }: VideoCatalogFiltersProps) {
     const router = useRouter();
     const pathname = usePathname();
@@ -37,13 +33,6 @@ export default function VideoCatalogFilters({
         [pathname, searchParams]
     );
 
-    const handleSortChange = useCallback(
-        (sort: string) => {
-            router.push(buildUrl({ sort }));
-        },
-        [router, buildUrl]
-    );
-
     const handleTagChange = useCallback(
         (tags: string[]) => {
             // Single-select: use last selected tag, or empty for "All"
@@ -58,9 +47,6 @@ export default function VideoCatalogFilters({
             tags={tags}
             selectedTags={selectedTag ? [selectedTag] : []}
             onTagChange={handleTagChange}
-            sortOptions={sortOptions}
-            selectedSort={selectedSort}
-            onSortChange={handleSortChange}
         />
     );
 }

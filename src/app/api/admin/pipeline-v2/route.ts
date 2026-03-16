@@ -6,6 +6,7 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
+import { pool } from '@/lib/db/pool';
 
 const CONTABO_API = 'http://161.97.142.117:3100/api/pipeline';
 const API_TOKEN = process.env.PIPELINE_API_TOKEN || '';
@@ -49,6 +50,25 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(data);
     }
 
+    // AI Errors — videos with ai_vision_error (direct DB query, includes published)
+    if (action === 'ai-errors') {
+      try {
+        const { rows } = await pool.query(`
+          SELECT v.id, v.title->>'en' AS title, v.status, v.ai_vision_status, v.ai_vision_model,
+                 v.ai_vision_error, v.original_title, v.updated_at,
+                 (SELECT string_agg(c.name, ', ') FROM video_celebrities vc JOIN celebrities c ON c.id = vc.celebrity_id WHERE vc.video_id = v.id) AS celebrity
+          FROM videos v
+          WHERE v.ai_vision_error IS NOT NULL AND v.ai_vision_error <> ''
+          ORDER BY v.updated_at DESC
+          LIMIT 200
+        `);
+        return NextResponse.json({ ai_errors: rows });
+      } catch (dbErr: unknown) {
+        const msg = dbErr instanceof Error ? dbErr.message : 'DB error';
+        return NextResponse.json({ ai_errors: [], error: msg }, { status: 500 });
+      }
+    }
+
     // Default: status + videos
     const [status, videos] = await Promise.all([
       proxyGet('status'),
@@ -76,8 +96,8 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case 'start': {
-        const { source, category } = body as { source?: string; category?: string };
-        const data = await proxyPost('start', { limit: limit || 0, source: source || '', category: category || '' });
+        const { source, category, maxSizeMb } = body as { source?: string; category?: string; maxSizeMb?: number };
+        const data = await proxyPost('start', { limit: limit || 0, source: source || '', category: category || '', maxSizeMb: maxSizeMb || 0 });
         return NextResponse.json(data);
       }
       case 'stop': {
@@ -105,6 +125,22 @@ export async function POST(req: NextRequest) {
         }
         const data = await proxyPost('delete-bulk', { videoIds });
         return NextResponse.json(data);
+      }
+      case 'clear-ai-error': {
+        if (!videoId) {
+          return NextResponse.json({ error: 'videoId required' }, { status: 400 });
+        }
+        await pool.query(
+          `UPDATE videos SET ai_vision_error = NULL, updated_at = NOW() WHERE id = $1`,
+          [videoId]
+        );
+        return NextResponse.json({ ok: true, message: 'AI error cleared' });
+      }
+      case 'clear-all-ai-errors': {
+        const result = await pool.query(
+          `UPDATE videos SET ai_vision_error = NULL, updated_at = NOW() WHERE ai_vision_error IS NOT NULL`
+        );
+        return NextResponse.json({ ok: true, message: `Cleared ${result.rowCount} AI errors` });
       }
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });

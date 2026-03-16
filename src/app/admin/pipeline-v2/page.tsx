@@ -83,6 +83,18 @@ interface CategoryItem {
   count: number;
 }
 
+interface AiErrorVideo {
+  id: string;
+  title: string | null;
+  status: string;
+  ai_vision_status: string | null;
+  ai_vision_model: string | null;
+  ai_vision_error: string;
+  original_title: string | null;
+  updated_at: string;
+  celebrity: string | null;
+}
+
 // ============================================================
 // Constants
 // ============================================================
@@ -469,7 +481,7 @@ function VideoRow({
           </>
         )}
       </td>
-      <td className="px-3 py-2 text-xs text-gray-500">{timeAgo(v.updated_at)}</td>
+      <td className="px-3 py-2 text-xs text-gray-500">{v.step_progress?.started_at ? timeAgo(v.step_progress.started_at) : timeAgo(v.updated_at)}</td>
       <td className="px-2 py-2 w-10">
         <VideoDropdown
           videoId={v.id}
@@ -495,8 +507,9 @@ export default function PipelineV2Page() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [limit, setLimit] = useState(10);
-  const [source, setSource] = useState('');
+  const [source, setSource] = useState('boobsradar');
   const [category, setCategory] = useState('');
+  const [maxSizeMb, setMaxSizeMb] = useState(0);
   const [categories, setCategories] = useState<CategoryItem[]>([]);
   const [categoriesLoading, setCategoriesLoading] = useState(false);
   const [categoriesError, setCategoriesError] = useState(false);
@@ -507,6 +520,9 @@ export default function PipelineV2Page() {
     message: string;
     onConfirm: () => void;
   } | null>(null);
+  const [aiErrors, setAiErrors] = useState<AiErrorVideo[]>([]);
+  const [aiErrorsOpen, setAiErrorsOpen] = useState(false);
+  const [aiErrorExpanded, setAiErrorExpanded] = useState<Set<string>>(new Set());
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async (showRefresh = false) => {
@@ -526,6 +542,20 @@ export default function PipelineV2Page() {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  }, []);
+
+  const fetchAiErrors = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/admin/pipeline-v2?action=ai-errors', { cache: 'no-store' });
+      if (!resp.ok) {
+        console.error('AI errors fetch failed:', resp.status);
+        return;
+      }
+      const data = await resp.json();
+      setAiErrors(data.ai_errors || []);
+    } catch (err) {
+      console.error('AI errors fetch error:', err);
     }
   }, []);
 
@@ -551,9 +581,10 @@ export default function PipelineV2Page() {
 
   useEffect(() => {
     fetchData();
+    fetchAiErrors();
     intervalRef.current = setInterval(() => fetchData(true), 5000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [fetchData]);
+  }, [fetchData, fetchAiErrors]);
 
   // Fetch categories when source changes
   useEffect(() => {
@@ -624,6 +655,32 @@ export default function PipelineV2Page() {
     }
     failedSelected.forEach(v => doAction('retry', { videoId: v.id }));
     setSelectedIds(new Set());
+  };
+
+  const handleClearAiError = async (videoId: string) => {
+    await doAction('clear-ai-error', { videoId });
+    fetchAiErrors();
+  };
+
+  const handleClearAllAiErrors = () => {
+    setConfirmDialog({
+      title: 'Очистить все AI ошибки?',
+      message: `${aiErrors.length} записей об ошибках будут удалены. Видео не будут затронуты.`,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        await doAction('clear-all-ai-errors');
+        fetchAiErrors();
+      },
+    });
+  };
+
+  const toggleAiErrorExpand = (id: string) => {
+    setAiErrorExpanded(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
   const toggleSelectAll = () => {
@@ -751,10 +808,23 @@ export default function PipelineV2Page() {
               max={200}
             />
           </div>
+          <div>
+            <label className="text-[10px] text-gray-500 uppercase tracking-wide block mb-1">Макс. МБ</label>
+            <input
+              type="number"
+              value={maxSizeMb || ''}
+              onChange={(e) => setMaxSizeMb(parseInt(e.target.value) || 0)}
+              placeholder="0"
+              className="w-16 rounded bg-gray-800 border border-gray-700 px-2 py-1.5 text-xs text-white placeholder-gray-600"
+              min={0}
+              max={2000}
+              title="Макс. размер файла в МБ (0 = без ограничения)"
+            />
+          </div>
           <div className="flex gap-2">
             {!status?.running ? (
               <button
-                onClick={() => doAction('start', { limit, source, category })}
+                onClick={() => doAction('start', { limit, source, category, maxSizeMb: maxSizeMb || undefined })}
                 disabled={actionLoading}
                 className="flex items-center gap-1 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors"
               >
@@ -782,6 +852,18 @@ export default function PipelineV2Page() {
           {status?.stats?.elapsedMs ? (
             <span className="text-gray-500">Elapsed: {formatUptime(Math.round(status.stats.elapsedMs / 1000))}</span>
           ) : null}
+          {status?.running && status?.queues && status?.stats?.elapsedMs ? (() => {
+            const q = status.queues;
+            const totalVideos = Math.max(1, ...Object.values(q).map((s: QueueInfo) => s.waiting + s.active + s.done + s.failed));
+            const totalSteps = totalVideos * STEP_ORDER.length;
+            const doneSteps = STEP_ORDER.reduce((sum, name) => sum + (q[name]?.done || 0), 0);
+            if (doneSteps > 0 && doneSteps < totalSteps) {
+              const elapsedSec = status.stats.elapsedMs / 1000;
+              const etaSec = Math.round((elapsedSec / doneSteps) * (totalSteps - doneSteps));
+              return <span className="text-cyan-400">ETA: ~{formatUptime(etaSec)}</span>;
+            }
+            return null;
+          })() : null}
         </div>
         {/* DB stats */}
         {status?.scraping && (
@@ -921,6 +1003,132 @@ export default function PipelineV2Page() {
           </div>
         </div>
       )}
+
+      {/* ── AI Vision Errors ────────────────────────────── */}
+      <div className="rounded-xl border border-orange-900/50 bg-orange-950/10 overflow-hidden">
+        <button
+          onClick={() => { setAiErrorsOpen(!aiErrorsOpen); if (!aiErrorsOpen) fetchAiErrors(); }}
+          className="w-full px-4 py-3 flex items-center justify-between hover:bg-orange-950/20 transition-colors"
+        >
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-semibold text-orange-400">
+              AI Vision Errors
+            </h2>
+            <span className={`text-xs px-1.5 py-0.5 rounded ${
+              aiErrors.length > 0 ? 'bg-orange-600/30 text-orange-300' : 'bg-gray-800 text-gray-500'
+            }`}>
+              {aiErrors.length}
+            </span>
+          </div>
+          <span className="text-gray-500 text-xs">{aiErrorsOpen ? '\u25B2' : '\u25BC'}</span>
+        </button>
+
+        {aiErrorsOpen && (
+          <div className="border-t border-orange-900/30">
+            {/* Header actions */}
+            {aiErrors.length > 0 && (
+              <div className="px-4 py-2 flex items-center justify-between border-b border-orange-900/20">
+                <span className="text-[10px] text-gray-500">
+                  Видео с ошибками AI Vision (fallback на donor tags)
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => fetchAiErrors()}
+                    className="text-[10px] text-gray-500 hover:text-white transition-colors"
+                  >
+                    Обновить
+                  </button>
+                  <button
+                    onClick={handleClearAllAiErrors}
+                    className="text-[10px] text-red-400/70 hover:text-red-400 transition-colors"
+                  >
+                    Очистить все
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="max-h-[500px] overflow-y-auto">
+              {aiErrors.length === 0 ? (
+                <div className="px-4 py-6 text-center text-gray-500 text-xs">
+                  Нет ошибок AI Vision
+                </div>
+              ) : (
+                <div className="divide-y divide-orange-900/20">
+                  {aiErrors.map((v) => {
+                    const isExpanded = aiErrorExpanded.has(v.id);
+                    return (
+                      <div key={v.id} className="px-4 py-2.5 hover:bg-orange-950/10 transition-colors">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] px-1 py-0.5 rounded ${
+                                v.status === 'published' ? 'bg-green-900/30 text-green-400' :
+                                v.status === 'failed' ? 'bg-red-900/30 text-red-400' :
+                                'bg-gray-800 text-gray-400'
+                              }`}>
+                                {v.status}
+                              </span>
+                              <span className="text-xs text-gray-200 truncate max-w-[300px]" title={v.title || v.original_title || v.id}>
+                                {v.title || v.original_title || v.id.substring(0, 8)}
+                              </span>
+                              {v.celebrity && (
+                                <span className="text-[10px] text-gray-500 truncate max-w-[120px]">
+                                  {v.celebrity}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[10px] text-orange-400/70">
+                                {v.ai_vision_status} / {v.ai_vision_model || 'unknown'}
+                              </span>
+                              <button
+                                onClick={() => toggleAiErrorExpand(v.id)}
+                                className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors"
+                              >
+                                {isExpanded ? 'Скрыть ошибку' : 'Показать ошибку'}
+                              </button>
+                            </div>
+                            {isExpanded && (
+                              <div className="mt-1.5 p-2 bg-gray-900/80 rounded text-[10px] text-orange-300/80 font-mono leading-relaxed break-all max-h-[120px] overflow-y-auto">
+                                {v.ai_vision_error}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0">
+                            <span className="text-[10px] text-gray-600">{timeAgo(v.updated_at)}</span>
+                            <button
+                              onClick={() => handleView(v.id)}
+                              title="Редактировать"
+                              className="text-xs text-blue-400 hover:text-blue-300 px-1.5 py-0.5 rounded hover:bg-blue-950/30 transition-colors"
+                            >
+                              {'\u270F'}
+                            </button>
+                            <button
+                              onClick={() => handleClearAiError(v.id)}
+                              title="Очистить ошибку"
+                              className="text-xs text-gray-500 hover:text-green-400 px-1.5 py-0.5 rounded hover:bg-green-950/30 transition-colors"
+                            >
+                              {'\u2713'}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(v.id)}
+                              title="Удалить видео"
+                              className="text-xs text-gray-500 hover:text-red-400 px-1.5 py-0.5 rounded hover:bg-red-950/30 transition-colors"
+                            >
+                              {'\u2717'}
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

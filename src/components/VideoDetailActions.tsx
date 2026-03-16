@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import FavoriteButton from './FavoriteButton';
 
 function formatViews(n: number): string {
     if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -25,18 +26,14 @@ export default function VideoDetailActions({
     const [likes, setLikes] = useState(initialLikes);
     const [dislikes, setDislikes] = useState(initialDislikes);
     const [userVote, setUserVote] = useState<'like' | 'dislike' | null>(null);
-    const [bookmarked, setBookmarked] = useState(false);
     const [copied, setCopied] = useState(false);
     const viewTracked = useRef(false);
 
-    // Track view on page load (once)
     useEffect(() => {
         if (viewTracked.current) return;
         viewTracked.current = true;
-
         const viewedKey = `viewed_${videoId}`;
         if (sessionStorage.getItem(viewedKey)) return;
-
         fetch(`/api/videos/${videoId}/view`, { method: 'POST' })
             .then(r => r.json())
             .then(data => {
@@ -46,19 +43,25 @@ export default function VideoDetailActions({
             .catch(() => {});
     }, [videoId]);
 
-    // Load saved vote & bookmark
     useEffect(() => {
-        const stored = localStorage.getItem(`vote_${videoId}`);
-        if (stored === 'like' || stored === 'dislike') setUserVote(stored);
-
-        try {
-            const bookmarks: string[] = JSON.parse(localStorage.getItem('bookmarks') || '[]');
-            setBookmarked(bookmarks.includes(videoId));
-        } catch {}
+        fetch(`/api/videos/${videoId}/like`)
+            .then(r => r.json())
+            .then(data => {
+                const vote = data.userVote as 'like' | 'dislike' | null;
+                setUserVote(vote);
+                // Sync live counts from server (bypasses stale page cache)
+                if (data.likes != null) setLikes(data.likes);
+                if (data.dislikes != null) setDislikes(data.dislikes);
+                if (vote) localStorage.setItem(`vote_${videoId}`, vote);
+                else localStorage.removeItem(`vote_${videoId}`);
+            })
+            .catch(() => {
+                const stored = localStorage.getItem(`vote_${videoId}`);
+                if (stored === 'like' || stored === 'dislike') setUserVote(stored);
+            });
     }, [videoId]);
 
     const handleVote = async (action: 'like' | 'dislike') => {
-        if (userVote === action) return;
         try {
             const res = await fetch(`/api/videos/${videoId}/like`, {
                 method: 'POST',
@@ -69,23 +72,9 @@ export default function VideoDetailActions({
             if (data.likes !== undefined) {
                 setLikes(data.likes);
                 setDislikes(data.dislikes);
-                setUserVote(action);
-                localStorage.setItem(`vote_${videoId}`, action);
-            }
-        } catch {}
-    };
-
-    const handleBookmark = () => {
-        try {
-            const bookmarks: string[] = JSON.parse(localStorage.getItem('bookmarks') || '[]');
-            if (bookmarked) {
-                const next = bookmarks.filter(id => id !== videoId);
-                localStorage.setItem('bookmarks', JSON.stringify(next));
-                setBookmarked(false);
-            } else {
-                bookmarks.push(videoId);
-                localStorage.setItem('bookmarks', JSON.stringify(bookmarks));
-                setBookmarked(true);
+                setUserVote(data.userVote);
+                if (data.userVote) localStorage.setItem(`vote_${videoId}`, data.userVote);
+                else localStorage.removeItem(`vote_${videoId}`);
             }
         } catch {}
     };
@@ -102,13 +91,10 @@ export default function VideoDetailActions({
 
     return (
         <div className="flex items-center gap-2 mt-3 flex-wrap">
-            {/* Views */}
             <span className="text-sm text-gray-500">
                 {views >= 10 ? `${formatViews(views)} views` : 'Recently added'}
             </span>
-
             <div className="flex items-center gap-2 ml-auto">
-                {/* Like */}
                 <button
                     onClick={() => handleVote('like')}
                     className={`${btn} ${userVote === 'like' ? 'text-green-400 bg-green-400/10' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
@@ -118,8 +104,6 @@ export default function VideoDetailActions({
                     </svg>
                     <span className="hidden sm:inline text-xs">{formatViews(likes)}</span>
                 </button>
-
-                {/* Dislike */}
                 <button
                     onClick={() => handleVote('dislike')}
                     className={`${btn} ${userVote === 'dislike' ? 'text-red-400 bg-red-400/10' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
@@ -129,19 +113,7 @@ export default function VideoDetailActions({
                     </svg>
                     <span className="hidden sm:inline text-xs">{dislikes}</span>
                 </button>
-
-                {/* Bookmark */}
-                <button
-                    onClick={handleBookmark}
-                    className={`${btn} ${bookmarked ? 'text-red-400 bg-red-400/10' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}
-                >
-                    <svg className="w-4 h-4" fill={bookmarked ? 'currentColor' : 'none'} stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
-                    </svg>
-                    <span className="hidden sm:inline">Save</span>
-                </button>
-
-                {/* Share */}
+                <FavoriteButton itemType="video" itemId={videoId} />
                 <button
                     onClick={handleShare}
                     className={`${btn} ${copied ? 'text-green-400 bg-green-400/10' : 'text-gray-400 hover:text-white hover:bg-gray-700'}`}

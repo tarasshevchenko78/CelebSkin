@@ -63,6 +63,9 @@ export default async function AdminLayout({
                                     </span>
                                 )}
                             </a>
+                            <a href="/admin/collections" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                                Коллекции
+                            </a>
                             <a href="/admin/settings" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 Настройки
                             </a>

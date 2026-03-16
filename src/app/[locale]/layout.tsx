@@ -7,6 +7,7 @@ import Footer from '@/components/Footer';
 import BottomNav from '@/components/BottomNav';
 import AgeGate from '@/components/AgeGate';
 import CookieConsent from '@/components/CookieConsent';
+import AuthProvider from '@/components/AuthProvider';
 
 export async function generateMetadata({
     params,
@@ -53,12 +54,14 @@ export default function LocaleLayout({
                 />
             </head>
             <body className="min-h-screen bg-brand-bg text-brand-text font-sans antialiased flex flex-col">
-                <AgeGate />
-                <Header locale={locale} />
-                <main className="flex-1 pb-16 md:pb-0">{children}</main>
-                <Footer locale={locale} />
-                <BottomNav />
-                <CookieConsent />
+                <AuthProvider locale={locale}>
+                    <AgeGate />
+                    <Header locale={locale} />
+                    <main className="flex-1 pb-16 md:pb-0">{children}</main>
+                    <Footer locale={locale} />
+                    <BottomNav />
+                    <CookieConsent />
+                </AuthProvider>
             </body>
         </html>
     );

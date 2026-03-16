@@ -26,6 +26,12 @@ export async function getCelebrities(
     return cached(`celebs:${page}:${limit}:${order}:${letterFilter || ''}`, async () => {
         const offset = (page - 1) * limit;
         const dir = order === 'name' ? 'ASC' : 'DESC';
+        // Put celebrities with photos first (except A-Z sort where name order takes priority)
+        const photoFirst = order !== 'name' ? '(photo_url IS NULL) ASC, ' : '';
+        // For popular sort, use videos_count as primary + total_views as tiebreaker
+        const orderClause = order === 'videos_count'
+            ? `${photoFirst}videos_count DESC, total_views DESC`
+            : `${photoFirst}${order} ${dir}`;
 
         const dataParams = letterFilter
             ? [limit, offset, letterFilter.toUpperCase()]
@@ -41,7 +47,7 @@ export async function getCelebrities(
             pool.query(
                 `SELECT * FROM celebrities
                  ${dataWhere}
-                 ORDER BY ${order} ${dir}
+                 ORDER BY ${orderClause}
                  LIMIT $1 OFFSET $2`,
                 dataParams
             ),
@@ -66,8 +72,8 @@ export async function getTrendingCelebrities(limit: number = 10): Promise<Celebr
     return cached(`trending_celebs:${limit}`, async () => {
         const result = await pool.query(
             `SELECT * FROM celebrities
-         WHERE status = 'published' AND (is_featured = true OR videos_count > 0)
-         ORDER BY total_views DESC, videos_count DESC
+         WHERE status = 'published' AND videos_count > 0 AND photo_url IS NOT NULL
+         ORDER BY videos_count DESC, total_views DESC NULLS LAST
          LIMIT $1`,
             [limit]
         );

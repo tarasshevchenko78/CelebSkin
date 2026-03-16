@@ -15,6 +15,7 @@ import JsonLd from '@/components/JsonLd';
 import ExpandableText from '@/components/ExpandableText';
 import CelebrityTabs from '@/components/CelebrityTabs';
 import SafeImage from '@/components/SafeImage';
+import FavoriteButton from '@/components/FavoriteButton';
 
 // ============================================
 // i18n
@@ -178,13 +179,14 @@ export default async function CelebrityDetailPage({
 
                 {/* Info */}
                 <div className="text-center md:text-left flex-1">
-                    <div className="flex items-center justify-center md:justify-start gap-2">
+                    <div className="flex items-center justify-center md:justify-start gap-2 flex-wrap">
                         <h1 className="text-2xl md:text-3xl font-bold text-white">{name}</h1>
                         {isNewCeleb && (
                             <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
                                 NEW
                             </span>
                         )}
+                        <FavoriteButton itemType="celebrity" itemId={String(celeb.id)} compact />
                     </div>
 
                     {/* Stats row */}

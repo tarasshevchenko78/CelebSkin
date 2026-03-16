@@ -60,12 +60,13 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
         };
     }, []);
 
+    const hasPreview = !!(video.preview_url || video.preview_gif_url);
+
     const handleMouseEnter = useCallback(() => {
-        if (!video.preview_url || typeof window === 'undefined' || window.innerWidth < 768) return;
-        timeoutRef.current = setTimeout(() => {
-            setShowPreview(true);
-        }, 300);
-    }, [video.preview_url]);
+        if (!hasPreview || typeof window === 'undefined') return;
+        if (window.matchMedia('(hover: none)').matches) return; // touch device
+        timeoutRef.current = setTimeout(() => setShowPreview(true), 300);
+    }, [hasPreview]);
 
     const handleMouseLeave = useCallback(() => {
         if (timeoutRef.current) {
@@ -75,9 +76,9 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
         setShowPreview(false);
     }, []);
 
-    // Determine top-left priority badge
+    // Determine badges
     const showNewBadge = isNew(video.created_at);
-    const showHDBadge = !showNewBadge && isHD(video.quality);
+    const showHDBadge = isHD(video.quality);
 
     // Duration display
     const duration = video.duration_seconds
@@ -114,16 +115,20 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
                 )}
 
                 {/* Video preview on hover */}
-                {showPreview && video.preview_url && (
-                    <video
+                {showPreview && (video.preview_url
+                    ? <video
                         ref={videoRef}
                         src={video.preview_url}
                         muted
                         autoPlay
                         loop
                         playsInline
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${showPreview ? 'opacity-100' : 'opacity-0'}`}
-                    />
+                        preload="none"
+                        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200 opacity-100"
+                      />
+                    : video.preview_gif_url
+                        ? <img src={video.preview_gif_url} alt="" className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200 opacity-100" />
+                        : null
                 )}
 
                 {/* Bottom gradient overlay */}
@@ -136,17 +141,19 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
                     </span>
                 )}
 
-                {/* Priority badge — top-right (featured cards show celebrity top-left, so priority goes top-right) */}
-                {showNewBadge && (
-                    <span className="absolute top-2 right-2 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
-                        NEW
-                    </span>
-                )}
-                {showHDBadge && (
-                    <span className="absolute top-2 right-2 bg-gray-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
-                        HD
-                    </span>
-                )}
+                {/* Badges — top-right on featured (celebrity name is top-left) */}
+                <div className="absolute top-2 right-2 flex gap-1 z-10">
+                    {showNewBadge && (
+                        <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                            NEW
+                        </span>
+                    )}
+                    {showHDBadge && (
+                        <span className="bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
+                            HD
+                        </span>
+                    )}
+                </div>
 
                 {/* Duration badge — bottom-right */}
                 {duration && (
@@ -208,16 +215,20 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
                 )}
 
                 {/* Video preview on hover */}
-                {showPreview && video.preview_url && (
-                    <video
+                {showPreview && (video.preview_url
+                    ? <video
                         ref={videoRef}
                         src={video.preview_url}
                         muted
                         autoPlay
                         loop
                         playsInline
-                        className={`absolute inset-0 w-full h-full object-cover transition-opacity duration-300 ${showPreview ? 'opacity-100' : 'opacity-0'}`}
-                    />
+                        preload="none"
+                        className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200 opacity-100"
+                      />
+                    : video.preview_gif_url
+                        ? <img src={video.preview_gif_url} alt="" className="absolute inset-0 w-full h-full object-cover transition-opacity duration-200 opacity-100" />
+                        : null
                 )}
 
                 {/* Bottom gradient */}
@@ -230,14 +241,15 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
                     </span>
                 )}
 
-                {/* Priority badge — top-left (ONE only) */}
+                {/* NEW badge — top-left */}
                 {showNewBadge && (
                     <span className="absolute top-1.5 left-1.5 bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
                         NEW
                     </span>
                 )}
+                {/* HD badge — top-right */}
                 {showHDBadge && (
-                    <span className="absolute top-1.5 left-1.5 bg-gray-700 text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
+                    <span className="absolute top-1.5 right-1.5 bg-blue-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded z-10">
                         HD
                     </span>
                 )}
@@ -249,9 +261,9 @@ export default function VideoCard({ video, locale, size = 'normal' }: VideoCardP
                     {title}
                 </h3>
                 {celebrity && (
-                    <div className="mt-1 text-xs text-gray-400">
+                    <div className="mt-1">
                         <span
-                            className="hover:text-red-400 transition-colors truncate"
+                            className="text-xs text-gray-400 hover:text-red-400 transition-colors truncate cursor-pointer block"
                             onClick={(e) => {
                                 e.preventDefault();
                                 window.location.href = `/${locale}/celebrity/${celebrity.slug}`;

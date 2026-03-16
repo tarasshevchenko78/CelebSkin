@@ -47,6 +47,18 @@ export async function getFeaturedCollections(limit: number = 6): Promise<Collect
     }, 120);
 }
 
+export async function getTagCollections(minCount: number = 5): Promise<Collection[]> {
+    return cached(`collections:tag:${minCount}`, async () => {
+        const result = await pool.query(
+            `SELECT * FROM collections
+             WHERE is_auto = true AND featured = false AND videos_count >= $1
+             ORDER BY videos_count DESC, sort_order ASC`,
+            [minCount]
+        );
+        return result.rows;
+    }, 120);
+}
+
 export async function getCollectionBySlug(slug: string): Promise<Collection | null> {
     const result = await pool.query(
         `SELECT * FROM collections WHERE slug = $1 LIMIT 1`,

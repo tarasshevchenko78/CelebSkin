@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getLocalizedField } from '@/lib/i18n';
+import { getLocalizedField, sceneLabel } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
 import { getCollectionBySlug, getVideosForCollection } from '@/lib/db';
 import { logger } from '@/lib/logger';
@@ -12,11 +12,6 @@ import ExpandableText from '@/components/ExpandableText';
 // i18n
 // ============================================
 
-const scenesWord: Record<string, string> = {
-    en: 'scenes', ru: 'сцен', de: 'Szenen', fr: 'scènes',
-    es: 'escenas', pt: 'cenas', it: 'scene',
-    pl: 'scen', nl: 'scènes', tr: 'sahne',
-};
 
 const notFoundLabels: Record<string, string> = {
     en: 'Collection not found', ru: 'Коллекция не найдена', de: 'Sammlung nicht gefunden',
@@ -144,7 +139,7 @@ export default async function CollectionDetailPage({ params }: { params: { local
                         <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold text-white drop-shadow-lg">{title}</h1>
                         {totalVideos > 0 && (
                             <p className="text-sm text-gray-300 mt-1">
-                                {totalVideos} {scenesWord[locale] || scenesWord.en}
+                                {totalVideos} {sceneLabel(totalVideos, locale)}
                             </p>
                         )}
                     </div>
@@ -154,7 +149,7 @@ export default async function CollectionDetailPage({ params }: { params: { local
                     <h1 className="text-2xl sm:text-3xl font-bold text-white">{title}</h1>
                     {totalVideos > 0 && (
                         <p className="text-sm text-gray-400 mt-1">
-                            {totalVideos} {scenesWord[locale] || scenesWord.en}
+                            {totalVideos} {sceneLabel(totalVideos, locale)}
                         </p>
                     )}
                 </div>

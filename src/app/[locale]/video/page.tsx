@@ -37,7 +37,7 @@ const scenesLabel: Record<string, string> = {
 const sortMap: Record<string, string> = {
     latest: 'published_at',
     views: 'views_count',
-    rated: 'likes_count',
+    rated: 'rated',
     longest: 'duration_seconds',
 };
 
@@ -95,10 +95,17 @@ export default async function VideosPage({
         count: t.videos_count,
     }));
 
-    // Build sort options for FilterBar
-    const sortOptions = Object.entries(sortLabels).map(([key, labels]) => ({
-        label: labels[locale] || labels.en,
-        value: key,
+    // Sort tabs (server-rendered <a> links)
+    const sortTabs = Object.entries(sortLabels).map(([key, lbl]) => ({
+        key,
+        label: lbl[locale] || lbl.en,
+        href: (() => {
+            const p = new URLSearchParams();
+            if (key !== 'latest') p.set('sort', key);
+            if (tagSlug) p.set('tag', tagSlug);
+            const qs = p.toString();
+            return qs ? `/${locale}/video?${qs}` : `/${locale}/video`;
+        })(),
     }));
 
     // Active tag name (for result count label)
@@ -128,13 +135,30 @@ export default async function VideosPage({
             </div>
 
             {/* ── Sticky Filter Bar ── */}
-            <div className="sticky top-[84px] md:top-[96px] z-40 -mx-4 px-4 py-3 bg-brand-bg/95 backdrop-blur-sm border-b border-brand-accent/20 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
-                <VideoCatalogFilters
-                    tags={tagChips}
-                    sortOptions={sortOptions}
-                    selectedTag={tagSlug}
-                    selectedSort={sort}
-                />
+            <div className="sticky top-[84px] md:top-[96px] z-40 -mx-4 px-4 bg-brand-bg/95 backdrop-blur-sm border-b border-brand-accent/20 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                {/* Sort tabs */}
+                <div className="flex items-center gap-1 pt-2.5 pb-0 overflow-x-auto scrollbar-hide">
+                    {sortTabs.map(({ key, label, href }) => (
+                        <a
+                            key={key}
+                            href={href}
+                            className={`shrink-0 px-3.5 py-2 text-sm font-medium transition-colors border-b-2 ${
+                                sort === key
+                                    ? 'text-brand-gold-light border-brand-accent'
+                                    : 'text-gray-400 border-transparent hover:text-gray-200'
+                            }`}
+                        >
+                            {label}
+                        </a>
+                    ))}
+                </div>
+                {/* Tag chips */}
+                <div className="py-2">
+                    <VideoCatalogFilters
+                        tags={tagChips}
+                        selectedTag={tagSlug}
+                    />
+                </div>
             </div>
 
             {/* ── Result count ── */}

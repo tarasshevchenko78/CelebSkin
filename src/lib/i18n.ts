@@ -57,6 +57,35 @@ export function detectLocale(acceptLanguageHeader: string | null): SupportedLoca
 }
 
 /**
+ * Pluralized "scenes" label for a given count and locale.
+ * Handles Slavic pluralization rules for ru/pl.
+ */
+export function sceneLabel(count: number, locale: string): string {
+    const labels: Record<string, [string, string, string]> = {
+        en: ['scene',   'scenes',  'scenes'],
+        ru: ['сцена',   'сцены',   'сцен'],
+        de: ['Szene',   'Szenen',  'Szenen'],
+        fr: ['scène',   'scènes',  'scènes'],
+        es: ['escena',  'escenas', 'escenas'],
+        pt: ['cena',    'cenas',   'cenas'],
+        it: ['scena',   'scene',   'scene'],
+        pl: ['scena',   'sceny',   'scen'],
+        nl: ['scène',   'scènes',  'scènes'],
+        tr: ['sahne',   'sahne',   'sahne'],
+    };
+    const l = labels[locale] || labels.en;
+    if (locale === 'ru' || locale === 'pl') {
+        const n = Math.abs(count) % 100;
+        const n1 = n % 10;
+        if (n > 10 && n < 20) return l[2];
+        if (n1 > 1 && n1 < 5) return l[1];
+        if (n1 === 1) return l[0];
+        return l[2];
+    }
+    return count === 1 ? l[0] : l[1];
+}
+
+/**
  * Check if a locale string is supported.
  */
 export function isValidLocale(locale: string): locale is SupportedLocale {

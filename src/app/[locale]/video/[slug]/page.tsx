@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
-import { getLocalizedField } from '@/lib/i18n';
+import { getLocalizedField, getLocalizedSlug } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
-import { getVideoBySlug, getRelatedVideos, getOtherVideosByCelebrity, getOtherVideosByMovie } from '@/lib/db';
+import { getVideoBySlug, getRelatedVideos, getOtherVideosByCelebrity, getOtherVideosByMovie, getAdjacentVideos } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
@@ -37,6 +37,28 @@ export async function generateMetadata({
         alternates: buildAlternates(params.locale, `/video/${params.slug}`),
     };
 }
+
+// ============================================
+// i18n
+// ============================================
+
+const moreFromLabel: Record<string, string> = {
+    en: 'More from', ru: 'Ещё с', de: 'Mehr von', fr: 'Plus de',
+    es: 'Más de', pt: 'Mais de', it: 'Altro di',
+    pl: 'Więcej od', nl: 'Meer van', tr: 'Daha fazlası',
+};
+
+const viewAllLabel: Record<string, string> = {
+    en: 'View all', ru: 'Все видео', de: 'Alle anzeigen', fr: 'Voir tout',
+    es: 'Ver todo', pt: 'Ver tudo', it: 'Vedi tutto',
+    pl: 'Zobacz wszystko', nl: 'Alles bekijken', tr: 'Tümünü gör',
+};
+
+const similarLabel: Record<string, string> = {
+    en: 'Similar Scenes', ru: 'Похожие сцены', de: 'Ähnliche Szenen', fr: 'Scènes similaires',
+    es: 'Escenas similares', pt: 'Cenas similares', it: 'Scene simili',
+    pl: 'Podobne sceny', nl: 'Vergelijkbare scènes', tr: 'Benzer Sahneler',
+};
 
 // ============================================
 // Helpers
@@ -82,21 +104,31 @@ export default async function VideoDetailPage({
         ? (getLocalizedField(video.movie.title_localized, locale) || video.movie.title)
         : null;
 
-    // Fetch related content in parallel
+    // Fetch related content + adjacent videos in parallel
     let similar: Video[] = [];
     let moreByCeleb: Video[] = [];
     let moreByMovie: Video[] = [];
+    let prevSlug: string | null = null;
+    let nextSlug: string | null = null;
 
     try {
-        [similar, moreByCeleb, moreByMovie] = await Promise.all([
-            getRelatedVideos(video.id, locale, 8),
+        const [sim, celeb, movie, adjacent] = await Promise.all([
+            getRelatedVideos(video.id, locale, 20),
             celebrity
-                ? getOtherVideosByCelebrity(celebrity.id, video.id, 4)
+                ? getOtherVideosByCelebrity(celebrity.id, video.id, 6)
                 : Promise.resolve([]),
             video.movie
                 ? getOtherVideosByMovie(video.movie.id, video.id, 4)
                 : Promise.resolve([]),
+            video.published_at
+                ? getAdjacentVideos(video.published_at, locale)
+                : Promise.resolve({ prevSlug: null, nextSlug: null }),
         ]);
+        similar     = sim;
+        moreByCeleb = celeb;
+        moreByMovie = movie;
+        prevSlug    = adjacent.prevSlug;  // ← = older (published_at < current)
+        nextSlug    = adjacent.nextSlug;  // → = newer (published_at > current)
     } catch (error) {
         logger.error('Video detail related content error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
     }
@@ -104,6 +136,12 @@ export default async function VideoDetailPage({
     // Filter similar to exclude videos already in "More from" sections
     const moreIds = new Set([...moreByCeleb.map(v => v.id), ...moreByMovie.map(v => v.id)]);
     const filteredSimilar = similar.filter(v => !moreIds.has(v.id));
+
+    // Fallback nextSlug for the newest video (no newer adjacent exists)
+    if (!nextSlug) {
+        const fallback = moreByCeleb[0] || filteredSimilar[0];
+        if (fallback) nextSlug = getLocalizedSlug(fallback.slug, locale);
+    }
 
     // JSON-LD structured data (unchanged)
     const videoLd = title && video.thumbnail_url ? {
@@ -126,11 +164,18 @@ export default async function VideoDetailPage({
             <div className="-mx-4 md:mx-0 [&>div]:rounded-none md:[&>div]:rounded-xl">
                 {(video.video_url_watermarked || video.video_url) ? (
                     <VideoPlayer
+                        key={video.id}
                         src={video.video_url_watermarked || video.video_url}
                         poster={video.thumbnail_url}
                         title={title}
                         durationSeconds={video.duration_seconds || undefined}
                         hotMoments={video.hot_moments || []}
+                        screenshots={video.screenshots || []}
+                        relatedVideos={[...moreByCeleb, ...filteredSimilar].slice(0, 20)}
+                        prevSlug={prevSlug}
+                        nextSlug={nextSlug}
+                        locale={locale}
+                        initialSlug={params.slug}
                     />
                 ) : video.embed_code ? (
                     <div
@@ -287,22 +332,22 @@ export default async function VideoDetailPage({
                 {/* ══════════════ Sidebar ══════════════ */}
                 <aside className="mt-8 lg:mt-0 space-y-6">
 
-                    {/* ── 5a. More from Celebrity ── */}
+                    {/* ── 5a. More from Celebrity (sidebar — up to 4) ── */}
                     {moreByCeleb.length > 0 && celebrity && (
                         <section>
                             <div className="flex items-center justify-between mb-3">
                                 <h2 className="text-sm font-semibold text-white truncate mr-2">
-                                    More from {celebrity.name}
+                                    {moreFromLabel[locale] || moreFromLabel.en} {celebrity.name}
                                 </h2>
                                 <a
                                     href={`/${locale}/celebrity/${celebrity.slug}`}
                                     className="text-xs text-red-400 hover:text-red-300 transition-colors shrink-0"
                                 >
-                                    View all →
+                                    {viewAllLabel[locale] || viewAllLabel.en} →
                                 </a>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
-                                {moreByCeleb.map((v) => (
+                                {moreByCeleb.slice(0, 4).map((v) => (
                                     <VideoCard key={v.id} video={v} locale={locale} />
                                 ))}
                             </div>
@@ -334,7 +379,7 @@ export default async function VideoDetailPage({
                     {/* If no "More from" sections exist, show similar in sidebar instead */}
                     {moreByCeleb.length === 0 && moreByMovie.length === 0 && filteredSimilar.length > 0 && (
                         <section>
-                            <h2 className="text-sm font-semibold text-white mb-3">Similar Scenes</h2>
+                            <h2 className="text-sm font-semibold text-white mb-3">{similarLabel[locale] || similarLabel.en}</h2>
                             <div className="grid grid-cols-2 gap-2">
                                 {filteredSimilar.slice(0, 6).map((v) => (
                                     <VideoCard key={v.id} video={v} locale={locale} />
@@ -345,10 +390,32 @@ export default async function VideoDetailPage({
                 </aside>
             </div>
 
-            {/* ── 6. Similar Scenes — full width below two-column ── */}
-            {(moreByCeleb.length > 0 || moreByMovie.length > 0) && filteredSimilar.length > 0 && (
+            {/* ── 6a. More from Celebrity — full width ── */}
+            {moreByCeleb.length > 0 && celebrity && (
                 <section className="mt-8 pt-6 border-t border-gray-800/50">
-                    <h2 className="text-lg font-semibold text-white mb-4">Similar Scenes</h2>
+                    <div className="flex items-center gap-2 mb-4">
+                        <h2 className="text-lg font-semibold text-white">
+                            {moreFromLabel[locale] || moreFromLabel.en}
+                        </h2>
+                        <a
+                            href={`/${locale}/celebrity/${celebrity.slug}`}
+                            className="text-lg font-semibold text-brand-gold-light hover:text-brand-accent transition-colors"
+                        >
+                            {celebrity.name} →
+                        </a>
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {moreByCeleb.map((v) => (
+                            <VideoCard key={v.id} video={v} locale={locale} />
+                        ))}
+                    </div>
+                </section>
+            )}
+
+            {/* ── 6b. Similar Scenes — full width below two-column ── */}
+            {filteredSimilar.length > 0 && (moreByCeleb.length > 0 || moreByMovie.length > 0) && (
+                <section className="mt-8 pt-6 border-t border-gray-800/50">
+                    <h2 className="text-lg font-semibold text-white mb-4">{similarLabel[locale] || similarLabel.en}</h2>
                     <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
                         {filteredSimilar.map((v) => (
                             <VideoCard key={v.id} video={v} locale={locale} />
