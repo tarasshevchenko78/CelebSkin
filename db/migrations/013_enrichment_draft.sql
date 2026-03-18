@@ -1,23 +1,17 @@
--- Migration 013: Set draft status for celebrities/movies missing enrichment data
--- Celebrity = draft if: no TMDB photo OR no bio
--- Movie = draft if: no poster OR no description
+-- Migration 013: Set draft status for celebrities/movies missing TMDB photo/poster
+-- Celebrity = draft if: no TMDB photo
+-- Movie = draft if: no TMDB poster
 -- Run: psql -U celebskin -d celebskin -f db/migrations/013_enrichment_draft.sql
 
--- Set celebrities without photo or bio to draft (keep published if they have both)
+-- Set celebrities without photo to draft
 UPDATE celebrities SET status = 'draft'
 WHERE status = 'published'
-  AND (
-    photo_url IS NULL OR photo_url = ''
-    OR bio IS NULL OR bio::text = '{}' OR bio::text = 'null'
-  );
+  AND (photo_url IS NULL OR photo_url = '');
 
--- Set movies without poster or description to draft
+-- Set movies without poster to draft
 UPDATE movies SET status = 'draft'
 WHERE status = 'published'
-  AND (
-    poster_url IS NULL OR poster_url = ''
-    OR description IS NULL OR description::text = '{}' OR description::text = 'null'
-  );
+  AND (poster_url IS NULL OR poster_url = '');
 
 -- Report counts
 DO $$

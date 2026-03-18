@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
             params.push(`%${q}%`);
         }
         if (enrichment === 'needed') {
-            conditions.push(`(m.poster_url IS NULL OR m.poster_url = '' OR m.description IS NULL OR m.description::text = '{}' OR m.description::text = 'null')`);
+            conditions.push(`(m.poster_url IS NULL OR m.poster_url = '')`);
         }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         const [dataResult, countResult] = await Promise.all([
             pool.query(
                 `SELECT m.*,
-                    CASE WHEN (m.poster_url IS NULL OR m.poster_url = '' OR m.description IS NULL OR m.description::text = '{}' OR m.description::text = 'null')
+                    CASE WHEN (m.poster_url IS NULL OR m.poster_url = '')
                          THEN true ELSE false END AS needs_enrichment
                  FROM movies m ${whereClause}
                  ORDER BY m.created_at DESC LIMIT $1 OFFSET $2`,

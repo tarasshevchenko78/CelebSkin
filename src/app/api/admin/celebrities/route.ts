@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
             params.push(`%${q}%`);
         }
         if (enrichment === 'needed') {
-            conditions.push(`(c.photo_url IS NULL OR c.photo_url = '' OR c.bio IS NULL OR c.bio::text = '{}' OR c.bio::text = 'null')`);
+            conditions.push(`(c.photo_url IS NULL OR c.photo_url = '')`);
         }
 
         const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest) {
         const [dataResult, countResult] = await Promise.all([
             pool.query(
                 `SELECT c.*,
-                    CASE WHEN (c.photo_url IS NULL OR c.photo_url = '' OR c.bio IS NULL OR c.bio::text = '{}' OR c.bio::text = 'null')
+                    CASE WHEN (c.photo_url IS NULL OR c.photo_url = '')
                          THEN true ELSE false END AS needs_enrichment
                  FROM celebrities c ${whereClause}
                  ORDER BY c.total_views DESC LIMIT $1 OFFSET $2`,

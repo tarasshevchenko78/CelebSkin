@@ -251,14 +251,13 @@ export async function publishVideo(video, dryRun = false) {
         [videoId, JSON.stringify(slugs)]
     );
 
-    // Promote linked draft celebrities to published (only if they have photo + bio)
-    // Celebrities without TMDB photo or bio stay draft (served with noindex)
+    // Promote linked draft celebrities to published (only if they have TMDB photo)
+    // Celebrities without photo stay draft (served with noindex)
     await Promise.all([
         query(
             `UPDATE celebrities SET status = 'published'
              WHERE status = 'draft'
                AND photo_url IS NOT NULL AND photo_url != ''
-               AND bio IS NOT NULL AND bio::text != '{}' AND bio::text != 'null'
                AND id IN (SELECT celebrity_id FROM video_celebrities WHERE video_id = $1)`,
             [videoId]
         ),
@@ -266,7 +265,6 @@ export async function publishVideo(video, dryRun = false) {
             `UPDATE movies SET status = 'published'
              WHERE status = 'draft'
                AND poster_url IS NOT NULL AND poster_url != ''
-               AND description IS NOT NULL AND description::text != '{}' AND description::text != 'null'
                AND id IN (SELECT movie_id FROM movie_scenes WHERE video_id = $1)`,
             [videoId]
         ),

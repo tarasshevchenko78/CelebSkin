@@ -15,15 +15,11 @@ export async function getMovieBySlug(slug: string): Promise<Movie | null> {
 }
 
 /**
- * Check if a movie needs enrichment (missing poster or description)
+ * Check if a movie needs enrichment (missing TMDB poster)
  * Used to add noindex meta tag on detail pages
  */
 export function movieNeedsEnrichment(movie: Movie): boolean {
-    if (!movie.poster_url) return true;
-    const desc = movie.description;
-    if (!desc) return true;
-    const descObj = typeof desc === 'string' ? JSON.parse(desc) : desc;
-    return !descObj?.en;
+    return !movie.poster_url;
 }
 
 export async function getMovies(

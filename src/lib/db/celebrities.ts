@@ -15,15 +15,11 @@ export async function getCelebrityBySlug(slug: string): Promise<Celebrity | null
 }
 
 /**
- * Check if a celebrity needs enrichment (missing photo or bio)
+ * Check if a celebrity needs enrichment (missing TMDB photo)
  * Used to add noindex meta tag on detail pages
  */
 export function celebrityNeedsEnrichment(celeb: Celebrity): boolean {
-    if (!celeb.photo_url) return true;
-    const bio = celeb.bio;
-    if (!bio) return true;
-    const bioObj = typeof bio === 'string' ? JSON.parse(bio) : bio;
-    return !bioObj?.en;
+    return !celeb.photo_url;
 }
 
 export async function getCelebrities(
