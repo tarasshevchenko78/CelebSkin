@@ -65,10 +65,31 @@ export async function generateMetadata({ params }: { params: { locale: string; s
     } catch (error) {
         logger.error('Movie detail metadata DB error', { page: 'movie/detail', error: error instanceof Error ? error.message : String(error) });
     }
-    const title = movie ? `${getLocalizedField(movie.title_localized, params.locale) || movie.title} Nude Scenes` : 'Movie';
+    const movieName = movie ? (getLocalizedField(movie.title_localized, params.locale) || movie.title) : 'Movie';
+    const title = `${movieName} Nude Scenes — CelebSkin`;
+    const description = movie
+        ? `Nude and sex scenes from ${movie.title}${movie.year ? ` (${movie.year})` : ''}. Watch all celebrity nude clips in HD on CelebSkin.`
+        : undefined;
+    const posterUrl = movie?.poster_url || null;
+
     return {
-        title: `${title} — CelebSkin`,
+        title,
+        description,
         alternates: buildAlternates(params.locale, `/movie/${params.slug}`),
+        openGraph: {
+            title,
+            description,
+            type: 'video.movie',
+            url: `https://celeb.skin/${params.locale}/movie/${params.slug}`,
+            siteName: 'CelebSkin',
+            ...(posterUrl && { images: [{ url: posterUrl, width: 500, height: 750, alt: movieName }] }),
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title,
+            description,
+            ...(posterUrl && { images: [posterUrl] }),
+        },
     };
 }
 

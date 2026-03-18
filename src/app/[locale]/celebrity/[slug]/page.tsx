@@ -61,9 +61,30 @@ export async function generateMetadata({
         logger.error('Celebrity detail metadata DB error', { page: 'celebrity/detail', error: error instanceof Error ? error.message : String(error) });
     }
     const name = celeb ? celeb.name : 'Celebrity';
+    const title = `${name} Nude Scenes — CelebSkin`;
+    const description = celeb
+        ? `Watch ${name}'s nude and sex scenes from movies and TV shows. HD quality clips on CelebSkin.`
+        : undefined;
+    const photoUrl = celeb?.photo_url || null;
+
     return {
-        title: `${name} Nude Scenes — CelebSkin`,
+        title,
+        description,
         alternates: buildAlternates(params.locale, `/celebrity/${params.slug}`),
+        openGraph: {
+            title,
+            description,
+            type: 'profile',
+            url: `https://celeb.skin/${params.locale}/celebrity/${params.slug}`,
+            siteName: 'CelebSkin',
+            ...(photoUrl && { images: [{ url: photoUrl, width: 400, height: 600, alt: name }] }),
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title,
+            description,
+            ...(photoUrl && { images: [photoUrl] }),
+        },
     };
 }
 

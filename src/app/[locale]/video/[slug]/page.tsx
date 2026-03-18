@@ -31,10 +31,29 @@ export async function generateMetadata({
         : 'Video';
     const description = video ? getLocalizedField(video.seo_description, params.locale) : '';
 
+    const thumbnailUrl = video?.thumbnail_url || null;
+    const videoUrl = video?.video_url_watermarked || video?.video_url || null;
+    const pageUrl = `https://celeb.skin/${params.locale}/video/${params.slug}`;
+
     return {
         title: `${title} — CelebSkin`,
         description,
         alternates: buildAlternates(params.locale, `/video/${params.slug}`),
+        openGraph: {
+            title: `${title} — CelebSkin`,
+            description: description || undefined,
+            type: 'video.other',
+            url: pageUrl,
+            siteName: 'CelebSkin',
+            ...(thumbnailUrl && { images: [{ url: thumbnailUrl, width: 1280, height: 720, alt: title }] }),
+            ...(videoUrl && { videos: [{ url: videoUrl, type: 'video/mp4', width: 1920, height: 1080 }] }),
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title: `${title} — CelebSkin`,
+            description: description || undefined,
+            ...(thumbnailUrl && { images: [thumbnailUrl] }),
+        },
     };
 }
 
@@ -143,7 +162,7 @@ export default async function VideoDetailPage({
         if (fallback) nextSlug = getLocalizedSlug(fallback.slug, locale);
     }
 
-    // JSON-LD structured data (unchanged)
+    // JSON-LD structured data
     const videoLd = title && video.thumbnail_url ? {
         '@context': 'https://schema.org',
         '@type': 'VideoObject',
@@ -153,12 +172,32 @@ export default async function VideoDetailPage({
         ...(video.published_at && { uploadDate: new Date(video.published_at).toISOString() }),
         ...(video.duration_seconds && { duration: formatDurationISO(video.duration_seconds) }),
         ...((video.video_url_watermarked || video.video_url) && { contentUrl: video.video_url_watermarked || video.video_url }),
+        embedUrl: `https://celeb.skin/${locale}/video/${params.slug}`,
+        inLanguage: locale,
         publisher: { '@type': 'Organization', name: 'CelebSkin', url: 'https://celeb.skin' },
+        interactionStatistic: {
+            '@type': 'InteractionCounter',
+            interactionType: { '@type': 'WatchAction' },
+            userInteractionCount: video.views_count || 0,
+        },
     } : null;
+
+    // BreadcrumbList JSON-LD
+    const breadcrumbLd = {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: [
+            { '@type': 'ListItem', position: 1, name: 'Home', item: `https://celeb.skin/${locale}` },
+            { '@type': 'ListItem', position: 2, name: 'Videos', item: `https://celeb.skin/${locale}/video` },
+            ...(celebrity ? [{ '@type': 'ListItem', position: 3, name: celebrity.name, item: `https://celeb.skin/${locale}/celebrity/${celebrity.slug}` }] : []),
+            { '@type': 'ListItem', position: celebrity ? 4 : 3, name: title },
+        ],
+    };
 
     return (
         <div className="mx-auto max-w-6xl px-4 py-4 md:py-6">
             {videoLd && <JsonLd data={videoLd} />}
+            <JsonLd data={breadcrumbLd} />
 
             {/* ── 1. Video Player — edge-to-edge on mobile ── */}
             <div className="-mx-4 md:mx-0 [&>div]:rounded-none md:[&>div]:rounded-xl">
