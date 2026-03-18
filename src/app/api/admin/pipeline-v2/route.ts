@@ -74,7 +74,12 @@ export async function GET(req: NextRequest) {
       proxyGet('status'),
       proxyGet('videos'),
     ]);
-    return NextResponse.json({ status, videos: videos.videos || [] });
+    // Map 'progress' from pipeline-api to 'step_progress' expected by UI
+    const mappedVideos = (videos.videos || []).map((v: Record<string, unknown>) => ({
+      ...v,
+      step_progress: v.progress || null,
+    }));
+    return NextResponse.json({ status, videos: mappedVideos });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json(
