@@ -26,6 +26,7 @@ src/
     [locale]/          — публичные страницы (10 локалей)
     admin/             — админка (русский интерфейс)
     api/admin/         — API админки
+    api/search/        — двухфазный поисковый API (Phase 1 synonym+fulltext, Phase 2 Gemini)
   lib/
     db/                — модули БД (pool, videos, celebrities, movies, search, settings, etc.)
     config.ts          — централизованный конфиг
@@ -34,8 +35,11 @@ src/
     gemini.ts          — Gemini API хелперы
     seo.ts             — hreflang хелпер
     bunny.ts           — Bunny CDN upload helper
+    search/
+      query-expander.ts — Gemini 2.5 Flash расширение поисковых запросов (Phase 2)
   components/
     VideoCard.tsx      — универсальная карточка видео с hover preview
+    SearchDropdown.tsx — двухфазный поисковый dropdown в хедере
     BottomNav.tsx      — мобильная навигация
     ChipFilter.tsx     — chip-фильтры
     admin/             — компоненты админки
@@ -261,13 +265,24 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - `ai_vision_error` written on Gemini fallback for UI display
   - 133 orphan Bunny folders deleted
 
+- **Система поиска (18-19.03.2026)**:
+  - PostgreSQL: `search_index` (unified full-text), `search_synonyms` (69 строк, 10 языков), `smart_search()` функция (5-уровневый скоринг: exact_tag 100 → celebrity_fuzzy 80 → fulltext_en 50 → fulltext_all 40 → trigram 30)
+  - Расширения: pg_trgm, unaccent
+  - 8 триггеров автообновления search_index при CRUD videos/celebrities/collections/tags
+  - Детерминистичные UUID: celebrities (0001-{id}), collections (0002-{id}), tags (0003-{id})
+  - API: `GET /api/search?q=&phase=1|2&lang=&hydrate=true` — synonym lookup, smart_search, dedup, grouping, Redis cache (1ч)
+  - Phase 2: Gemini 2.5 Flash (`query-expander.ts`) — извлечение имён, тегов, фильмов, 3с timeout, 24ч Redis cache
+  - `SearchDropdown.tsx`: двухфазный dropdown в Header, debounce 400мс, auto phase 2 при <20 результатах, solid bg #11100e
+  - `[locale]/search/page.tsx`: полная страница результатов с гидрированными сущностями, горизонтальные скроллы, grid видео, noindex
+  - Header обновлён: SearchDropdown вместо статичной формы
+
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
 - НИКОГДА не запускать pipeline на AbeloHost — только на Contabo
 - НИКОГДА не записывать boobsradar search URL в video_url
 - НИКОГДА не публиковать видео без русских переводов (title.ru, review.ru, seo_title.ru)
 - НИКОГДА не использовать `process-with-ai.js` в pipeline v2 (это v1 скрипт для raw_videos)
-- `generate-multilang.js` — единственный скрипт для переводов в pipeline v2 (НЕ в git, только на Contabo)
+- `generate-multilang.js` — единственный скрипт для переводов в pipeline v2 (в git с коммита 43f6ca5)
 - Gemini File API: upload и generateContent ОБЯЗАНЫ использовать ОДИН И ТОТ ЖЕ API ключ
 - Промты для Sonnet давать КОРОТКИЕ — по 1 багу, иначе пропускает
 - Gemini AI Vision: gemini-3-flash-preview (pipeline v2). Legacy: gemini-2.5-flash (extractGeminiJSON)

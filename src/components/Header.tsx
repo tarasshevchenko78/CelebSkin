@@ -1,11 +1,13 @@
 'use client';
 
 import { useState } from 'react';
+import { usePathname } from 'next/navigation';
 import { SUPPORTED_LOCALES, LOCALE_NAMES, type SupportedLocale } from '@/lib/i18n';
 import { useAuth } from './AuthProvider';
+import SearchDropdown from './SearchDropdown';
 
 const navLinks = [
-    { key: 'videos', href: '/video', labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Videos', pt: 'Vídeos', it: 'Video', pl: 'Filmy', nl: "Video's", tr: 'Videolar' } },
+    { key: 'videos', href: '/video', labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Vídeos', pt: 'Vídeos', it: 'Video', pl: 'Wideo', nl: "Video's", tr: 'Videolar' } },
     { key: 'celebrities', href: '/celebrity', labels: { en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités', es: 'Celebridades', pt: 'Celebridades', it: 'Celebrità', pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler' } },
     { key: 'movies', href: '/movie', labels: { en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films', es: 'Películas', pt: 'Filmes', it: 'Film', pl: 'Filmy', nl: 'Films', tr: 'Filmler' } },
     { key: 'collections', href: '/collection', labels: { en: 'Collections', ru: 'Коллекции', de: 'Sammlungen', fr: 'Collections', es: 'Colecciones', pt: 'Coleções', it: 'Collezioni', pl: 'Kolekcje', nl: 'Collecties', tr: 'Koleksiyonlar' } },
@@ -14,6 +16,10 @@ const navLinks = [
 export default function Header({ locale }: { locale: string }) {
     const [langOpen, setLangOpen] = useState(false);
     const { user, loading, openAuthModal } = useAuth();
+    const pathname = usePathname();
+    // Strip current locale prefix to get the path after locale
+    const pathWithoutLocale = pathname.replace(/^\/[a-z]{2}/, '') || '/';
+    const buildLocaleHref = (loc: string) => `/${loc}${pathWithoutLocale}`;
 
     return (
         <header className="sticky top-0 z-50 pt-2 pb-2 px-2 md:px-6 lg:px-10 bg-transparent w-full">
@@ -52,20 +58,8 @@ export default function Header({ locale }: { locale: string }) {
 
                 {/* Right: Search, User & Language Island */}
                 <div className="flex-1 ml-[90px] lg:ml-[140px] flex items-center gap-2 lg:gap-4 h-full px-4 lg:px-6 rounded-full border border-brand-accent/40 bg-brand-bg/90 backdrop-blur-md shadow-[0_4px_20px_rgba(0,0,0,0.5)]">
-                    {/* Large Search Input */}
-                    <form action={`/${locale}/search`} className="relative w-full flex-1">
-                        <input
-                            type="text"
-                            name="q"
-                            placeholder={locale === 'ru' ? 'Поиск...' : 'Search actors, movies...'}
-                            className="w-full bg-[#161411]/80 border border-brand-accent/30 rounded-full py-2 pl-11 pr-4 text-[15px] text-brand-gold-light placeholder-brand-secondary/60 focus:outline-none focus:ring-1 focus:ring-brand-accent/80 focus:border-brand-accent/80 transition-all shadow-inner"
-                        />
-                        <button type="submit" className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-secondary hover:text-brand-gold-light transition-colors">
-                            <svg className="w-[20px] h-[20px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                        </button>
-                    </form>
+                    {/* Search with Dropdown */}
+                    <SearchDropdown locale={locale} />
 
                     {/* User Button */}
                     {!loading && (
@@ -111,7 +105,7 @@ export default function Header({ locale }: { locale: string }) {
                                 {SUPPORTED_LOCALES.map((loc) => (
                                     <a
                                         key={loc}
-                                        href={`/${loc}`}
+                                        href={buildLocaleHref(loc)}
                                         className={`flex items-center px-5 py-2.5 text-[15px] transition-colors ${loc === locale
                                             ? 'text-brand-gold-light bg-brand-accent/10 border-l-2 border-brand-accent font-medium'
                                             : 'text-[#c0bba8] hover:text-white hover:bg-[#1f1d19] border-l-2 border-transparent'
@@ -183,7 +177,7 @@ export default function Header({ locale }: { locale: string }) {
                         {langOpen && (
                             <div className="absolute right-0 top-12 w-36 rounded-xl border border-brand-accent/40 bg-[#11100e] shadow-2xl py-2 z-50">
                                 {SUPPORTED_LOCALES.map((loc) => (
-                                    <a key={loc} href={`/${loc}`} className={`block px-4 py-2 text-[14px] ${loc === locale ? 'text-brand-gold-light bg-brand-accent/10' : 'text-[#c0bba8] hover:bg-[#1a1815]'}`} onClick={() => setLangOpen(false)}>{LOCALE_NAMES[loc]}</a>
+                                    <a key={loc} href={buildLocaleHref(loc)} className={`block px-4 py-2 text-[14px] ${loc === locale ? 'text-brand-gold-light bg-brand-accent/10' : 'text-[#c0bba8] hover:bg-[#1a1815]'}`} onClick={() => setLangOpen(false)}>{LOCALE_NAMES[loc]}</a>
                                 ))}
                             </div>
                         )}

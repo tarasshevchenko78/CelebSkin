@@ -4,6 +4,7 @@ import { buildAlternates } from '@/lib/seo';
 export async function generateMetadata({ params }: { params: { locale: string } }): Promise<Metadata> {
     return {
         title: 'Search — CelebSkin',
+        robots: { index: false, follow: true },
         alternates: buildAlternates(params.locale, '/search'),
     };
 }

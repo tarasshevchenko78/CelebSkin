@@ -33,6 +33,15 @@ const config: Config = {
         'gold-gradient': 'linear-gradient(135deg, #F3E5AB 0%, #D4AF37 50%, #AA7C11 100%)',
         'gold-border': 'linear-gradient(90deg, rgba(170,124,17,0.3), #D4AF37, rgba(170,124,17,0.3))',
         'gold-shimmer': 'linear-gradient(90deg, transparent, rgba(212,175,55,0.15), transparent)',
+      },
+      keyframes: {
+        fadeIn: {
+          '0%': { opacity: '0', transform: 'translateY(-4px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        fadeIn: 'fadeIn 0.3s ease-out',
       }
     },
   },
