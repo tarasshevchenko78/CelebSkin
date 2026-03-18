@@ -506,6 +506,7 @@ export default function PipelineV2Page() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [startingUp, setStartingUp] = useState(false);
   const [limit, setLimit] = useState(10);
   const [source, setSource] = useState('boobsradar');
   const [category, setCategory] = useState('');
@@ -597,6 +598,7 @@ export default function PipelineV2Page() {
   const doAction = async (action: string, extra?: Record<string, unknown>) => {
     setActionLoading(true);
     setMessage(null);
+    if (action === 'start') setStartingUp(true);
     try {
       const resp = await fetch('/api/admin/pipeline-v2', {
         method: 'POST',
@@ -608,8 +610,11 @@ export default function PipelineV2Page() {
       fetchData();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Action failed');
+      if (action === 'start') setStartingUp(false);
     } finally {
       setActionLoading(false);
+      // startingUp clears after 3s or when status shows running
+      if (action === 'start') setTimeout(() => setStartingUp(false), 3000);
     }
   };
 
@@ -868,13 +873,20 @@ export default function PipelineV2Page() {
             />
           </div>
           <div className="flex gap-2">
-            {!status?.running ? (
+            {startingUp && !status?.running ? (
+              <button
+                disabled
+                className="flex items-center gap-1 bg-yellow-600 text-white text-sm px-4 py-1.5 rounded-lg cursor-not-allowed animate-pulse"
+              >
+                ⏳ Запускается...
+              </button>
+            ) : !status?.running ? (
               <button
                 onClick={() => doAction('start', { limit, source, category, maxSizeMb: maxSizeMb || undefined })}
                 disabled={actionLoading}
-                className="flex items-center gap-1 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 text-white text-sm px-4 py-1.5 rounded-lg transition-colors"
+                className="flex items-center gap-1 bg-green-600 hover:bg-green-500 disabled:bg-gray-700 disabled:cursor-not-allowed text-white text-sm px-4 py-1.5 rounded-lg transition-colors"
               >
-                {'\u25B6'} Запуск
+                ▶ Запуск
               </button>
             ) : (
               <button

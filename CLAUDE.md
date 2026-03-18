@@ -203,7 +203,7 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - Pipeline конвейер: event-driven scheduler, мгновенный re-spawn, parallel steps
 - Publish автомодерация: полные → published, неполные → needs_review
 - Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
-- Документация деплоя: выяснено, что Web App задеплоен на Vercel (push в `master` обновляет UI админки на `celeb.skin`).
+- Документация деплоя: Web App НЕ на Vercel! Работает через PM2 на AbeloHost. Деплой: `cd /opt/celebskin/site && npm run build && pm2 restart celebskin`. Git push НЕ деплоит автоматически.
 - Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
 - **Watermark fix (13.03.2026)**: `-sar 1:1`, `-keyint_min 48 -sc_threshold 0`, `-af aresample=async=1:first_pts=0`, `-fflags +genpts+discardcorrupt`, `-max_muxing_queue_size 4096` — исправляет PIPELINE_ERROR_DECODE при seek в Chrome
 - Новые скрипты: `scan-broken-videos.js` (сканирование SAR), `reprocess-broken-videos.js` (перекодировка старых видео)
@@ -250,10 +250,25 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - setsar=1 in FFmpeg watermark, AI Vision timeout 5→10 min
   - Dedup by original_title: backfilled 2135 videos, scraper checks publishedTitles Set
 
+- **Pipeline Restoration (18.03.2026)**:
+  - `generate-multilang.js` recreated (was missing) — Gemini 3-flash-preview, 10 locales, accepts `--video-id`
+  - Gemini key rotation: comma-separated keys, `nextSessionKey()` locks one key per upload+generate cycle (File API key-bound)
+  - Translation check in processPublish: blocks without ru title/review/seo
+  - Collection linking: `donor_category` from `raw_videos` → `collection_videos`
+  - Download timeout 10→30 min
+  - Start button debounce (3s yellow "Запускается...")
+  - `resetInProgressVideos` preserves `needs_review` and `failed`
+  - `ai_vision_error` written on Gemini fallback for UI display
+  - 133 orphan Bunny folders deleted
+
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
 - НИКОГДА не запускать pipeline на AbeloHost — только на Contabo
 - НИКОГДА не записывать boobsradar search URL в video_url
+- НИКОГДА не публиковать видео без русских переводов (title.ru, review.ru, seo_title.ru)
+- НИКОГДА не использовать `process-with-ai.js` в pipeline v2 (это v1 скрипт для raw_videos)
+- `generate-multilang.js` — единственный скрипт для переводов в pipeline v2 (НЕ в git, только на Contabo)
+- Gemini File API: upload и generateContent ОБЯЗАНЫ использовать ОДИН И ТОТ ЖЕ API ключ
 - Промты для Sonnet давать КОРОТКИЕ — по 1 багу, иначе пропускает
 - Gemini AI Vision: gemini-3-flash-preview (pipeline v2). Legacy: gemini-2.5-flash (extractGeminiJSON)
 - video_url при создании = NULL, заполняется pipeline (cdn_upload шаг)

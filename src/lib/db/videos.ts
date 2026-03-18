@@ -264,10 +264,12 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
     if (collected.length < limit) {
         const remaining = limit - collected.length;
         const result = await pool.query(
-            `SELECT DISTINCT v.* FROM videos v
-             JOIN video_celebrities vc ON vc.video_id = v.id
-             WHERE vc.celebrity_id IN (
-               SELECT celebrity_id FROM video_celebrities WHERE video_id = $1
+            `SELECT v.* FROM videos v
+             WHERE v.id IN (
+               SELECT DISTINCT vc2.video_id FROM video_celebrities vc2
+               WHERE vc2.celebrity_id IN (
+                 SELECT celebrity_id FROM video_celebrities WHERE video_id = $1
+               )
              )
              AND v.id != ALL($3::uuid[])
              AND v.status = 'published'
@@ -285,10 +287,12 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
     if (collected.length < limit) {
         const remaining = limit - collected.length;
         const result = await pool.query(
-            `SELECT DISTINCT v.* FROM videos v
-             JOIN movie_scenes ms ON ms.video_id = v.id
-             WHERE ms.movie_id IN (
-               SELECT movie_id FROM movie_scenes WHERE video_id = $1
+            `SELECT v.* FROM videos v
+             WHERE v.id IN (
+               SELECT DISTINCT ms2.video_id FROM movie_scenes ms2
+               WHERE ms2.movie_id IN (
+                 SELECT movie_id FROM movie_scenes WHERE video_id = $1
+               )
              )
              AND v.id != ALL($3::uuid[])
              AND v.status = 'published'
