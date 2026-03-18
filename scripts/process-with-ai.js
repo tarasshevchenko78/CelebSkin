@@ -39,11 +39,15 @@ import { createWriteStream } from "fs";
 import { pipeline as streamPipeline } from "stream/promises";
 import { mkdir, access, readFile, stat } from "fs/promises";
 
-const GEMINI_API_KEY = config.ai.geminiApiKey;
+// Multi-key rotation
+const GEMINI_API_KEYS = (config.ai.geminiApiKey || '').split(',').map(k => k.trim()).filter(Boolean);
+let _mlKeyIdx = 0;
+function getMLApiKey() { return GEMINI_API_KEYS[_mlKeyIdx++ % GEMINI_API_KEYS.length] || ''; }
+const GEMINI_API_KEY = GEMINI_API_KEYS[0] || '';
 // CLI override: --model=gemini-2.5-pro | gemini-2.0-flash | gemini-2.0-pro
 const _cliModel = process.argv.find(a => a.startsWith("--model="));
 const GEMINI_MODEL = _cliModel ? _cliModel.split("=")[1] : config.ai.geminiModel;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+function getGeminiUrl() { return `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${getMLApiKey()}`; }
 
 const VISUAL_ONLY = process.argv.includes("--visual-only");
 const SKIP_VISUAL = process.argv.includes("--skip-visual");
@@ -146,7 +150,7 @@ async function uploadVideoToGemini(videoPath) {
 
   // Step 1: Start resumable upload
   const startRes = await fetch(
-    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${getMLApiKey()}`,
     {
       method: 'POST',
       headers: {
@@ -191,7 +195,7 @@ async function uploadVideoToGemini(videoPath) {
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 3000)); // poll every 3s
     const statusRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${GEMINI_API_KEY}`
+      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${getMLApiKey()}`
     );
     if (!statusRes.ok) continue;
     const statusData = await statusRes.json();
@@ -212,7 +216,7 @@ async function uploadVideoToGemini(videoPath) {
 async function deleteGeminiFile(fileName) {
   try {
     await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${GEMINI_API_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${getMLApiKey()}`,
       { method: 'DELETE' }
     );
   } catch { /* non-critical */ }
@@ -254,7 +258,7 @@ ${hasVideo ? 'IMPORTANT: Watch the ENTIRE video carefully. Identify hot moments 
 
   logger.info(`Calling Gemini ${hasVideo && geminiFile ? '(with video)' : '(text-only)'}...`);
 
-  const response = await fetch(GEMINI_URL, {
+  const response = await fetch(getGeminiUrl(), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -295,7 +299,7 @@ ${hasVideo ? 'IMPORTANT: Watch the ENTIRE video carefully. Identify hot moments 
     geminiFile = null;
 
     const fallbackParts = [{ text: SYSTEM_PROMPT + "\n\n" + userPrompt }];
-    const fallbackRes = await fetch(GEMINI_URL, {
+    const fallbackRes = await fetch(getGeminiUrl(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -886,7 +890,7 @@ logger.info(`=== CelebSkin AI Processing ===`);
 logger.info(`Model: ${GEMINI_MODEL}, Limit: ${limit}, Auto-publish: ${autoPublish}`);
 logger.info(`Visual: ${VISUAL_ONLY ? 'ONLY' : SKIP_VISUAL ? 'SKIP' : 'AUTO (if confidence < 0.5)'}`);
 
-if (!GEMINI_API_KEY) {
+if (GEMINI_API_KEYS.length === 0) {
   logger.error("GEMINI_API_KEY not set in .env");
   process.exit(1);
 }
