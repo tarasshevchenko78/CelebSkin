@@ -427,10 +427,9 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
 
     const raw = rawResult.rows[0] || null;
 
-    // Fallback chain: CDN watermarked → CDN original → raw source
+    // Fallback chain: CDN watermarked → CDN original (NEVER use raw source URL)
     const videoUrl = video.video_url
         || video.video_url_watermarked
-        || raw?.video_file_url
         || null;
     const videoUrlWatermarked = video.video_url_watermarked || null;
 

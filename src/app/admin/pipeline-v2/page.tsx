@@ -523,6 +523,8 @@ export default function PipelineV2Page() {
   const [aiErrors, setAiErrors] = useState<AiErrorVideo[]>([]);
   const [aiErrorsOpen, setAiErrorsOpen] = useState(false);
   const [aiErrorExpanded, setAiErrorExpanded] = useState<Set<string>>(new Set());
+  const [repairLoading, setRepairLoading] = useState(false);
+  const [repairResult, setRepairResult] = useState<{ ok?: boolean; message?: string; brokenCount?: number; error?: string } | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async (showRefresh = false) => {
@@ -670,6 +672,50 @@ export default function PipelineV2Page() {
         setConfirmDialog(null);
         await doAction('clear-all-ai-errors');
         fetchAiErrors();
+      },
+    });
+  };
+
+  const handleRepairScan = async () => {
+    setRepairLoading(true);
+    setRepairResult(null);
+    try {
+      const resp = await fetch('/api/admin/pipeline-v2', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'repair-thumbnails-scan' }),
+      });
+      const data = await resp.json();
+      setRepairResult(data);
+    } catch (err) {
+      setRepairResult({ error: err instanceof Error ? err.message : 'Scan failed' });
+    } finally {
+      setRepairLoading(false);
+    }
+  };
+
+  const handleRepairStart = () => {
+    setConfirmDialog({
+      title: 'Запустить ремонт тамбнейлов?',
+      message: `Будут найдены все опубликованные видео с битыми тамбнейлами, скачаны с CDN, пересозданы скриншоты и превью, загружены обратно. Это может занять длительное время.${repairResult?.brokenCount ? ` Найдено: ${repairResult.brokenCount} видео.` : ''}`,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        setRepairLoading(true);
+        setRepairResult(null);
+        try {
+          const resp = await fetch('/api/admin/pipeline-v2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'repair-thumbnails' }),
+          });
+          const data = await resp.json();
+          setRepairResult(data);
+          setMessage(data.message || data.error || 'Repair started');
+        } catch (err) {
+          setRepairResult({ error: err instanceof Error ? err.message : 'Repair failed' });
+        } finally {
+          setRepairLoading(false);
+        }
       },
     });
   };
@@ -1003,6 +1049,47 @@ export default function PipelineV2Page() {
           </div>
         </div>
       )}
+
+      {/* ── Repair Thumbnails ─────────────────────────────── */}
+      <div className="rounded-xl border border-gray-800 bg-gray-900/50 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-300">Repair Broken Thumbnails</h2>
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              Сканирует published видео с отсутствующими/битыми тамбнейлами и пересоздаёт скриншоты + превью
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleRepairScan}
+              disabled={repairLoading}
+              className="text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            >
+              {repairLoading ? 'Scanning...' : 'Scan'}
+            </button>
+            <button
+              onClick={handleRepairStart}
+              disabled={repairLoading}
+              className="text-xs bg-brand-accent/80 hover:bg-brand-accent text-black font-medium px-3 py-1.5 rounded transition-colors disabled:opacity-50"
+            >
+              {repairLoading ? 'Working...' : 'Repair All'}
+            </button>
+          </div>
+        </div>
+        {repairResult && (
+          <div className={`mt-3 text-xs rounded px-3 py-2 ${
+            repairResult.error
+              ? 'bg-red-900/20 text-red-400'
+              : 'bg-green-900/20 text-green-400'
+          }`}>
+            {repairResult.error && <span>Error: {repairResult.error}</span>}
+            {repairResult.brokenCount !== undefined && (
+              <span>Found <strong>{repairResult.brokenCount}</strong> videos with broken thumbnails</span>
+            )}
+            {repairResult.message && <span>{repairResult.message}</span>}
+          </div>
+        )}
+      </div>
 
       {/* ── AI Vision Errors ────────────────────────────── */}
       <div className="rounded-xl border border-orange-900/50 bg-orange-950/10 overflow-hidden">

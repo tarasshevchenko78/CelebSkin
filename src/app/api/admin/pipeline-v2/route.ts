@@ -142,6 +142,32 @@ export async function POST(req: NextRequest) {
         );
         return NextResponse.json({ ok: true, message: `Cleared ${result.rowCount} AI errors` });
       }
+      case 'repair-thumbnails': {
+        const repairLimit = (body as { repairLimit?: number }).repairLimit || 0;
+        const data = await proxyPost('repair-thumbnails', { limit: repairLimit });
+        return NextResponse.json(data);
+      }
+      case 'repair-thumbnails-scan': {
+        // Quick scan: count broken thumbnails without fixing
+        try {
+          const { rows: [{ count }] } = await pool.query(`
+            SELECT COUNT(*)::int AS count FROM videos
+            WHERE status = 'published'
+              AND (
+                thumbnail_url IS NULL
+                OR thumbnail_url = ''
+                OR thumbnail_url LIKE 'pipeline-work%'
+                OR thumbnail_url LIKE 'tmp/%'
+                OR screenshots IS NULL
+                OR screenshots = '[]'::jsonb
+              )
+          `);
+          return NextResponse.json({ ok: true, brokenCount: count });
+        } catch (dbErr: unknown) {
+          const msg = dbErr instanceof Error ? dbErr.message : 'DB error';
+          return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+        }
+      }
       default:
         return NextResponse.json({ error: `Unknown action: ${action}` }, { status: 400 });
     }
