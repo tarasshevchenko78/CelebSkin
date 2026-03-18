@@ -181,8 +181,8 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 `movies.countries`: VARCHAR(2)[] массив ISO кодов
 
 ## Известные баги (март 2026)
-1. ~~Import пишет boobsradar URL в video_url — должен быть NULL~~ — video_url используется watermark шагом, перезаписывается CDN upload
-2. Скачивается 480p вместо максимального качества
+1. ~~Import пишет boobsradar URL в video_url — должен быть NULL~~ — ИСПРАВЛЕНО: убран fallback на raw?.video_file_url в enrichVideoWithRelations()
+2. ~~Скачивается 480p~~ — Boobsradar отдаёт один URL без выбора качества. quality теперь всегда определяется ffprobe (1080p/720p/480p/360p)
 3. Водяной знак xcadr.online не убирается — delogo не реализован
 4. ~~Коллекции не привязываются к видео при Import~~ — ИСПРАВЛЕНО
 5. ~~Draft статус для актрис/фильмов не реализован~~ — РЕАЛИЗОВАНО в Pipeline v2 (tmdb_enrich → draft, publish → published)
@@ -235,6 +235,20 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - Pipeline polls for `watermarked` videos from home worker → enqueues to `media` step
   - Error retry: 3 attempts, then `watermark_failed`. CDN upload: 3 retries with 10s delay
   - Pipeline completion waits for `watermarking_home` videos in DB
+- **Pipeline Hardening & Data Quality (18.03.2026)**:
+  - Scraper speedup: page-level early stop (2 consecutive full-skip pages → stop), Set preloading, silent skipping
+  - Broken thumbnails: `repair-thumbnails.js` + API endpoint + admin UI (scan/repair buttons)
+  - CDN download: Storage API (`storage.bunnycdn.com` + AccessKey) instead of CDN URL (was 403)
+  - Dynamic FFmpeg timeout: 5× duration, min 60 min (was fixed 30 min)
+  - Stuck video recovery: main loop re-enqueues videos stuck >10 min
+  - 404/403 instant fail: `NonRetryableError` class, no retries for HTTP 404/403
+  - video_url fix: removed `raw?.video_file_url` fallback — no more boobsradar URLs in player
+  - Celebrity name cleanup: `cleanCelebrityName()` in pipeline, regex fix in adapter, 47 garbage entries fixed
+  - Duration backfill: 8 videos → ffprobe via Bunny Storage API
+  - Quality backfill: 119 videos HD/SD/Unknown → real quality via ffprobe
+  - Collections Title Case: 37 ALL CAPS → Title Case, `toTitleCase()` in `sync-categories.js`
+  - setsar=1 in FFmpeg watermark, AI Vision timeout 5→10 min
+  - Dedup by original_title: backfilled 2135 videos, scraper checks publishedTitles Set
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса

@@ -254,12 +254,13 @@ export async function getVideosByTag(
     };
 }
 
-// Similar / Related videos — priority: same celebrity > same movie > same tags > random
-export async function getRelatedVideos(videoId: string, locale: string, limit: number = 6): Promise<Video[]> {
+// Similar / Related videos — priority: same celebrity > same movie > same tags > same collection > random
+// Uses partial randomization within tiers so different pages show different results
+export async function getRelatedVideos(videoId: string, locale: string, limit: number = 12): Promise<Video[]> {
     const collected: Video[] = [];
     const collectedIds: string[] = [videoId];
 
-    // Step 1: Same celebrities
+    // Step 1: Same celebrities (highest priority)
     if (collected.length < limit) {
         const remaining = limit - collected.length;
         const result = await pool.query(
@@ -270,7 +271,7 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
              )
              AND v.id != ALL($3::uuid[])
              AND v.status = 'published'
-             ORDER BY v.views_count DESC
+             ORDER BY v.views_count DESC, RANDOM()
              LIMIT $2`,
             [videoId, remaining, collectedIds]
         );
@@ -291,7 +292,7 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
              )
              AND v.id != ALL($3::uuid[])
              AND v.status = 'published'
-             ORDER BY v.views_count DESC
+             ORDER BY v.views_count DESC, RANDOM()
              LIMIT $2`,
             [videoId, remaining, collectedIds]
         );
@@ -313,7 +314,7 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
              AND v.id != ALL($3::uuid[])
              AND v.status = 'published'
              GROUP BY v.id
-             ORDER BY COUNT(*) DESC, v.views_count DESC
+             ORDER BY COUNT(*) DESC, RANDOM()
              LIMIT $2`,
             [videoId, remaining, collectedIds]
         );
@@ -323,7 +324,29 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
         }
     }
 
-    // Step 4: Random fallback
+    // Step 4: Same collection/category
+    if (collected.length < limit) {
+        const remaining = limit - collected.length;
+        const result = await pool.query(
+            `SELECT v.* FROM videos v
+             JOIN video_categories vc2 ON vc2.video_id = v.id
+             WHERE vc2.category_id IN (
+               SELECT category_id FROM video_categories WHERE video_id = $1
+             )
+             AND v.id != ALL($3::uuid[])
+             AND v.status = 'published'
+             GROUP BY v.id
+             ORDER BY COUNT(*) DESC, RANDOM()
+             LIMIT $2`,
+            [videoId, remaining, collectedIds]
+        );
+        for (const row of result.rows) {
+            collected.push(row);
+            collectedIds.push(row.id);
+        }
+    }
+
+    // Step 5: Random fallback
     if (collected.length < limit) {
         const remaining = limit - collected.length;
         const result = await pool.query(

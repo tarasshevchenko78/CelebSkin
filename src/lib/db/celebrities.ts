@@ -8,10 +8,22 @@ import type { Celebrity, Tag, PaginatedResult } from '../types';
 
 export async function getCelebrityBySlug(slug: string): Promise<Celebrity | null> {
     const result = await pool.query(
-        `SELECT * FROM celebrities WHERE slug = $1 AND status = 'published' LIMIT 1`,
+        `SELECT * FROM celebrities WHERE slug = $1 AND status IN ('published', 'draft') LIMIT 1`,
         [slug]
     );
     return result.rows[0] || null;
+}
+
+/**
+ * Check if a celebrity needs enrichment (missing photo or bio)
+ * Used to add noindex meta tag on detail pages
+ */
+export function celebrityNeedsEnrichment(celeb: Celebrity): boolean {
+    if (!celeb.photo_url) return true;
+    const bio = celeb.bio;
+    if (!bio) return true;
+    const bioObj = typeof bio === 'string' ? JSON.parse(bio) : bio;
+    return !bioObj?.en;
 }
 
 export async function getCelebrities(

@@ -81,6 +81,9 @@ export const config = {
         channelId: optionalEnv('TELEGRAM_CHANNEL_ID', ''),
     },
 
+    // --- IndexNow (optional, for search engine URL submission) ---
+    indexNowKey: optionalEnv('INDEXNOW_KEY', ''),
+
     // --- Contabo (pipeline server) ---
     contabo: {
         host: 'root@161.97.142.117',

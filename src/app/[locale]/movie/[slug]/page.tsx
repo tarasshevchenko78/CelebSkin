@@ -3,6 +3,7 @@ import { getLocalizedField } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
 import {
     getMovieBySlug,
+    movieNeedsEnrichment,
     getVideosForMovie,
     getCelebritiesForMovie,
     getSimilarMovies,
@@ -72,9 +73,13 @@ export async function generateMetadata({ params }: { params: { locale: string; s
         : undefined;
     const posterUrl = movie?.poster_url || null;
 
+    // noindex for movies without poster or description (needs enrichment)
+    const noindex = movie ? movieNeedsEnrichment(movie) : false;
+
     return {
         title,
         description,
+        ...(noindex && { robots: { index: false, follow: true } }),
         alternates: buildAlternates(params.locale, `/movie/${params.slug}`),
         openGraph: {
             title,

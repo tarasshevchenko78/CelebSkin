@@ -9,20 +9,36 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '25');
     const q = searchParams.get('q') || '';
+    const enrichment = searchParams.get('enrichment'); // 'needed' to filter
     const offset = (page - 1) * limit;
 
     try {
-        const whereClause = q ? `WHERE c.name ILIKE $3` : '';
-        const params = q ? [limit, offset, `%${q}%`] : [limit, offset];
+        const conditions: string[] = [];
+        const params: unknown[] = [limit, offset];
+        let paramIndex = 3;
+
+        if (q) {
+            conditions.push(`c.name ILIKE $${paramIndex++}`);
+            params.push(`%${q}%`);
+        }
+        if (enrichment === 'needed') {
+            conditions.push(`(c.photo_url IS NULL OR c.photo_url = '' OR c.bio IS NULL OR c.bio::text = '{}' OR c.bio::text = 'null')`);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         const [dataResult, countResult] = await Promise.all([
             pool.query(
-                `SELECT c.* FROM celebrities c ${whereClause} ORDER BY c.total_views DESC LIMIT $1 OFFSET $2`,
+                `SELECT c.*,
+                    CASE WHEN (c.photo_url IS NULL OR c.photo_url = '' OR c.bio IS NULL OR c.bio::text = '{}' OR c.bio::text = 'null')
+                         THEN true ELSE false END AS needs_enrichment
+                 FROM celebrities c ${whereClause}
+                 ORDER BY c.total_views DESC LIMIT $1 OFFSET $2`,
                 params
             ),
             pool.query(
-                `SELECT COUNT(*) FROM celebrities c ${q ? `WHERE c.name ILIKE $1` : ''}`,
-                q ? [`%${q}%`] : []
+                `SELECT COUNT(*) FROM celebrities c ${whereClause}`,
+                params.slice(2)
             ),
         ]);
 
@@ -41,7 +57,7 @@ export async function GET(request: NextRequest) {
 export async function PUT(request: NextRequest) {
     try {
         const body = await request.json();
-        const { id, name, bio, photo_url, is_featured } = body;
+        const { id, name, bio, photo_url, is_featured, status } = body;
 
         if (!id) {
             return NextResponse.json({ error: 'Celebrity ID required' }, { status: 400 });
@@ -66,6 +82,10 @@ export async function PUT(request: NextRequest) {
         if (is_featured !== undefined) {
             updates.push(`is_featured = $${paramIndex++}`);
             params.push(is_featured);
+        }
+        if (status !== undefined && ['published', 'draft'].includes(status)) {
+            updates.push(`status = $${paramIndex++}`);
+            params.push(status);
         }
 
         if (updates.length === 0) {

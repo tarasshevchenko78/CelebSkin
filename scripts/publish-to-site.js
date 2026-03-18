@@ -26,6 +26,8 @@ import { isCdnUrl } from './lib/bunny.js';
 
 const LANGS = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
 const SITE_URL = config.siteUrl;
+const INDEXNOW_KEY = process.env.INDEXNOW_KEY || '';
+const INDEXNOW_ENDPOINT = 'https://api.indexnow.org/indexnow';
 
 // ============================================
 // Slug Generation
@@ -249,17 +251,22 @@ export async function publishVideo(video, dryRun = false) {
         [videoId, JSON.stringify(slugs)]
     );
 
-    // Promote linked draft celebrities and movies to published
+    // Promote linked draft celebrities to published (only if they have photo + bio)
+    // Celebrities without TMDB photo or bio stay draft (served with noindex)
     await Promise.all([
         query(
             `UPDATE celebrities SET status = 'published'
              WHERE status = 'draft'
+               AND photo_url IS NOT NULL AND photo_url != ''
+               AND bio IS NOT NULL AND bio::text != '{}' AND bio::text != 'null'
                AND id IN (SELECT celebrity_id FROM video_celebrities WHERE video_id = $1)`,
             [videoId]
         ),
         query(
             `UPDATE movies SET status = 'published'
              WHERE status = 'draft'
+               AND poster_url IS NOT NULL AND poster_url != ''
+               AND description IS NOT NULL AND description::text != '{}' AND description::text != 'null'
                AND id IN (SELECT movie_id FROM movie_scenes WHERE video_id = $1)`,
             [videoId]
         ),
@@ -368,6 +375,7 @@ async function main() {
     const _errors = [];
     const _warnings = [];
     const _blocked = [];
+    const _publishedSlugs = [];
 
     for (const video of videos) {
         try {
@@ -465,6 +473,7 @@ async function main() {
                 published++;
                 removeActiveItem(video.id);
                 _completed.push({ id: video.id, title: vTitle, status: 'ok', ms: Date.now() - _start });
+                if (result.slug) _publishedSlugs.push(result.slug);
                 logger.info(`  [${published}] "${result.title || 'untitled'}" → /video/${result.slug}${result.scenesLinked ? ` (${result.scenesLinked} movie scenes)` : ''}`);
             } else {
                 skipped++;
@@ -491,6 +500,11 @@ async function main() {
     // Update all counts after publishing batch
     if (published > 0 && !dryRun) {
         await updateAllCounts();
+    }
+
+    // Notify search engines via IndexNow
+    if (published > 0 && !dryRun) {
+        await submitToIndexNow(_publishedSlugs);
     }
 
     // Summary
@@ -522,6 +536,49 @@ async function main() {
         logger.info(`\nSite URLs (examples):`);
         logger.info(`  ${SITE_URL}/en/video/<slug>`);
         logger.info(`  ${SITE_URL}/ru/video/<slug>`);
+    }
+}
+
+// ============================================
+// IndexNow — notify search engines about new URLs
+// ============================================
+
+async function submitToIndexNow(publishedSlugs) {
+    if (!INDEXNOW_KEY || publishedSlugs.length === 0) return;
+
+    const host = new URL(SITE_URL).host;
+    const urls = [];
+    for (const slug of publishedSlugs) {
+        for (const lang of LANGS) {
+            urls.push(`${SITE_URL}/${lang}/video/${slug}`);
+        }
+    }
+
+    logger.info(`IndexNow: submitting ${urls.length} URLs (${publishedSlugs.length} videos × ${LANGS.length} locales)`);
+
+    // Batch up to 10000 per request
+    for (let i = 0; i < urls.length; i += 10000) {
+        const batch = urls.slice(i, i + 10000);
+        try {
+            const response = await fetch(INDEXNOW_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    host,
+                    key: INDEXNOW_KEY,
+                    keyLocation: `${SITE_URL}/${INDEXNOW_KEY}.txt`,
+                    urlList: batch,
+                }),
+            });
+            if (response.ok || response.status === 202) {
+                logger.info(`  IndexNow: batch ${Math.floor(i / 10000) + 1} — ${batch.length} URLs submitted`);
+            } else {
+                const text = await response.text().catch(() => '');
+                logger.error(`  IndexNow: batch failed — HTTP ${response.status}: ${text}`);
+            }
+        } catch (err) {
+            logger.error(`  IndexNow: request error — ${err.message}`);
+        }
     }
 }
 

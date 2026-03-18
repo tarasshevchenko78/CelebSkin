@@ -3,6 +3,7 @@ import { getLocalizedField } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
 import {
     getCelebrityBySlug,
+    celebrityNeedsEnrichment,
     getVideosForCelebrity,
     getMoviesForCelebrity,
     getSimilarCelebrities,
@@ -67,9 +68,13 @@ export async function generateMetadata({
         : undefined;
     const photoUrl = celeb?.photo_url || null;
 
+    // noindex for celebrities without photo or bio (needs enrichment)
+    const noindex = celeb ? celebrityNeedsEnrichment(celeb) : false;
+
     return {
         title,
         description,
+        ...(noindex && { robots: { index: false, follow: true } }),
         alternates: buildAlternates(params.locale, `/celebrity/${params.slug}`),
         openGraph: {
             title,

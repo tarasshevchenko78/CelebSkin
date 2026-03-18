@@ -9,20 +9,36 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '25');
     const q = searchParams.get('q') || '';
+    const enrichment = searchParams.get('enrichment'); // 'needed' to filter
     const offset = (page - 1) * limit;
 
     try {
-        const whereClause = q ? `WHERE m.title ILIKE $3` : '';
-        const params = q ? [limit, offset, `%${q}%`] : [limit, offset];
+        const conditions: string[] = [];
+        const params: unknown[] = [limit, offset];
+        let paramIndex = 3;
+
+        if (q) {
+            conditions.push(`m.title ILIKE $${paramIndex++}`);
+            params.push(`%${q}%`);
+        }
+        if (enrichment === 'needed') {
+            conditions.push(`(m.poster_url IS NULL OR m.poster_url = '' OR m.description IS NULL OR m.description::text = '{}' OR m.description::text = 'null')`);
+        }
+
+        const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
         const [dataResult, countResult] = await Promise.all([
             pool.query(
-                `SELECT m.* FROM movies m ${whereClause} ORDER BY m.created_at DESC LIMIT $1 OFFSET $2`,
+                `SELECT m.*,
+                    CASE WHEN (m.poster_url IS NULL OR m.poster_url = '' OR m.description IS NULL OR m.description::text = '{}' OR m.description::text = 'null')
+                         THEN true ELSE false END AS needs_enrichment
+                 FROM movies m ${whereClause}
+                 ORDER BY m.created_at DESC LIMIT $1 OFFSET $2`,
                 params
             ),
             pool.query(
-                `SELECT COUNT(*) FROM movies m ${q ? `WHERE m.title ILIKE $1` : ''}`,
-                q ? [`%${q}%`] : []
+                `SELECT COUNT(*) FROM movies m ${whereClause}`,
+                params.slice(2)
             ),
         ]);
 

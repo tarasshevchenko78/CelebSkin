@@ -8,10 +8,22 @@ import type { Movie, Celebrity, PaginatedResult } from '../types';
 
 export async function getMovieBySlug(slug: string): Promise<Movie | null> {
     const result = await pool.query(
-        `SELECT * FROM movies WHERE slug = $1 AND status = 'published' LIMIT 1`,
+        `SELECT * FROM movies WHERE slug = $1 AND status IN ('published', 'draft') LIMIT 1`,
         [slug]
     );
     return result.rows[0] || null;
+}
+
+/**
+ * Check if a movie needs enrichment (missing poster or description)
+ * Used to add noindex meta tag on detail pages
+ */
+export function movieNeedsEnrichment(movie: Movie): boolean {
+    if (!movie.poster_url) return true;
+    const desc = movie.description;
+    if (!desc) return true;
+    const descObj = typeof desc === 'string' ? JSON.parse(desc) : desc;
+    return !descObj?.en;
 }
 
 export async function getMovies(

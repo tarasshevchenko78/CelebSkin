@@ -16,6 +16,15 @@ const nextConfig = {
             },
         ],
     },
+    async rewrites() {
+        return [
+            // IndexNow verification: /{key}.txt → /api/indexnow?key={key}
+            {
+                source: '/:key([a-f0-9]{32}).txt',
+                destination: '/api/indexnow?key=:key',
+            },
+        ];
+    },
     async headers() {
         return [
             {
