@@ -128,14 +128,25 @@ PipelineQueue + WorkerPool. Шаги download→ai_vision используют i
 ### 8 шагов
 | # | Шаг | Workers | Описание |
 |---|------|---------|----------|
-| 1 | download | 3 | axios stream, 10min timeout, .downloading tmp file |
-| 2 | tmdb_enrich | 3 | TMDB API (Bearer JWT), nationality (ISO 2-letter), countries, draft статус |
-| 3 | ai_vision | 3 | subprocess ai-vision-analyze.js, 120s timeout, censored fallback на donor tags |
-| 4 | watermark | 2 | FFmpeg veryfast CRF22, DB poll (shared queue with Home Worker), image/text, rotating_corners |
-| 5 | media | 3 | Screenshots (1280px), preview.mp4 (6s, 480px), preview.gif (4s) |
-| 6 | cdn_upload | 3 | uploadFile() → Bunny Storage, все файлы → videos/{videoId}/ |
-| 7 | publish | 3 | CDN verify → status='published', celebrities/movies → published, counts update |
-| 8 | cleanup | 3 | rm workdir (только если published), raw_videos → processed |
+| 1 | download | 6 | Playwright network intercept → axios stream, 5min timeout |
+| 2 | tmdb_enrich | 4 | TMDB API (Bearer JWT), nationality (ISO 2-letter), countries, draft статус |
+| 3 | ai_vision | 3 | subprocess ai-vision-analyze.js + generate-multilang.js (10 locales) |
+| 4 | watermark | 2 | FFmpeg veryfast CRF22, ATOMIC SQL claim (prevents double-processing with Home Worker) |
+| 5 | media | 3 | Screenshots (1280px) at hot_moments timestamps, preview.mp4 (6s), preview.gif (4s) |
+| 6 | cdn_upload | 4 | uploadFile() → Bunny Storage, все файлы → videos/{videoId}/ |
+| 7 | publish | 3 | CDN HEAD check >500KB, verify translations 10 locales, block censored AI, link collection |
+| 8 | cleanup | 3 | rm workdir (только если published + CDN URLs present), raw_videos → processed |
+
+### CRITICAL: Watermark double-processing prevention
+- Contabo watermark queue + Home worker polling can grab same video simultaneously
+- processWatermark uses ATOMIC SQL claim: `UPDATE videos SET status='watermarking' WHERE id=$1 AND status NOT IN ('watermarking','watermarking_home','watermarked','published','failed','needs_review') AND pipeline_step NOT IN ('watermarked','media','cdn_upload','publish','cleanup')`
+- If rowCount=0 → skip (another worker already claimed)
+
+### CRITICAL: Donor video URL extraction
+- boobsradar.com loads video URL via JavaScript (not in static HTML)
+- Adapter uses Playwright with `networkidle` to intercept actual CDN URL
+- Video URL chain: boobsradar → fuckcelebs.net/get_file → vcdn.fuckcelebs.net → ahcdn.com (real mp4)
+- Some videos return 48-byte GIF stub instead of real video — processPublish HEAD-checks CDN file >500KB
 
 ### AI Vision
 - **Модель**: gemini-3-flash-preview (primary) → gemini-3.1-pro-preview → gemini-2.5-pro (fallback)

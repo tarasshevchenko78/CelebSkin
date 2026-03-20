@@ -22,7 +22,7 @@ import { stat, unlink, readFile, rm, rename } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { pipeline as streamPipeline } from 'stream/promises';
-import { execFile as execFileCb, spawn } from 'child_process';
+import { execFile as execFileCb, spawn, execSync } from 'child_process';
 import { promisify } from 'util';
 
 const execFileAsync = promisify(execFileCb);
@@ -84,7 +84,7 @@ const STEP_ORDER = [
 ];
 
 const STEP_CONCURRENCY = {
-  download:     3,  // Each download spawns Playwright browser — limit RAM usage
+  download:     6,  // Playwright browser per download, 5min hard timeout
   tmdb_enrich:  4,
   ai_vision:    3,
   watermark:    2,  // 4-core Contabo handles 2 concurrent FFmpeg watermark jobs
@@ -282,7 +282,7 @@ class WorkerPool {
 
         if (success && resultVideoId === '__skip__') {
           // Skipped (duplicate etc) — don't pass to next step
-          this._activeCount--;
+          // Note: activeCount decremented in finally block
           continue;
         }
 
@@ -419,95 +419,123 @@ async function processDownload(inputId, stepName) {
   let realCdnUrl = null;
   let browserCookies = [];
 
-  try {
-    // Step A: Open page in Playwright to intercept real video CDN URL
-    const { chromium } = await import('playwright');
-    const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-    const ctx = await browser.newContext();
-    const page = await ctx.newPage();
+  // Hard timeout wrapper — kills everything after 5 minutes
+  const DOWNLOAD_HARD_TIMEOUT = 300000; // 5 min
+  let playwrightBrowser = null;
 
-    page.on('response', r => {
-      const ct = r.headers()['content-type'] || '';
-      if (ct.includes('video/mp4') && !realCdnUrl) {
-        realCdnUrl = r.url();
-      }
-    });
+  const downloadPromise = (async () => {
+    try {
+      // Step A: Open page in Playwright to intercept real video CDN URL (max 45s)
+      const { chromium } = await import('playwright');
+      playwrightBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+      const ctx = await playwrightBrowser.newContext();
+      const page = await ctx.newPage();
 
-    await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 60000 });
-
-    // Get cookies for CDN download
-    browserCookies = await ctx.cookies();
-
-    await page.close();
-    await ctx.close();
-    await browser.close();
-
-    if (!realCdnUrl) {
-      throw new Error('No video/mp4 URL found on donor page');
-    }
-
-    logger.info(`[${stepName}:${shortId}] Got CDN URL, downloading via stream...`);
-    writeStepProgress(videoId, { step: 'download', status: 'running', percent: 5, detail: 'Downloading...' });
-
-    // Step B: Download via axios stream with cookies (full file, not partial)
-    const cookieHeader = browserCookies.map(c => c.name + '=' + c.value).join('; ');
-    const tmpPath = outputPath + '.downloading';
-
-    const resp = await axios({
-      method: 'get',
-      url: realCdnUrl,
-      responseType: 'stream',
-      timeout: 1800000, // 30 min
-      maxRedirects: 5,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Referer': 'https://boobsradar.com/',
-        'Cookie': cookieHeader,
-      },
-    });
-
-    const totalBytes = parseInt(resp.headers['content-length'] || '0');
-    let downloadedBytes = 0;
-    let lastProgressWrite = 0;
-
-    await streamPipeline(
-      resp.data.on('data', (chunk) => {
-        downloadedBytes += chunk.length;
-        const now = Date.now();
-        if (now - lastProgressWrite > 2000 && totalBytes > 0) {
-          lastProgressWrite = now;
-          const pct = Math.min(95, Math.round(downloadedBytes / totalBytes * 100));
-          const dlMB = (downloadedBytes / 1048576).toFixed(1);
-          const totalMB = (totalBytes / 1048576).toFixed(1);
-          const speed = downloadedBytes / ((now - Date.parse(startedAt)) / 1000) / 1048576;
-          writeStepProgress(videoId, {
-            step: 'download', status: 'running', percent: pct,
-            detail: `${dlMB}/${totalMB} MB (${speed.toFixed(1)} MB/s)`,
-          });
+      page.on('response', r => {
+        const ct = r.headers()['content-type'] || '';
+        if (ct.includes('video/mp4') && !realCdnUrl) {
+          realCdnUrl = r.url();
         }
-      }),
-      createWriteStream(tmpPath)
-    );
+      });
 
-    // Verify downloaded file
-    const dlStat = await stat(tmpPath);
-    if (dlStat.size < 100000) {
+      await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 45000 });
+      browserCookies = await ctx.cookies();
+      await page.close();
+      await ctx.close();
+      await playwrightBrowser.close();
+      playwrightBrowser = null;
+
+      if (!realCdnUrl) {
+        throw new Error('No video/mp4 URL found on donor page');
+      }
+
+      logger.info(`[${stepName}:${shortId}] Got CDN URL, downloading via stream...`);
+      writeStepProgress(videoId, { step: 'download', status: 'running', percent: 5, detail: 'Downloading...' });
+
+      // Step B: Download via axios stream with cookies
+      const cookieHeader = browserCookies.map(c => c.name + '=' + c.value).join('; ');
+      const tmpPath = outputPath + '.downloading';
+
+      const resp = await axios({
+        method: 'get',
+        url: realCdnUrl,
+        responseType: 'stream',
+        timeout: 60000, // 1 min connection timeout
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Referer': 'https://boobsradar.com/',
+          'Cookie': cookieHeader,
+        },
+      });
+
+      const totalBytes = parseInt(resp.headers['content-length'] || '0');
+      let downloadedBytes = 0;
+      let lastProgressWrite = 0;
+
+      // Set stream timeout — if no data for 30s, abort
+      let lastDataTime = Date.now();
+      const streamWatchdog = setInterval(() => {
+        if (Date.now() - lastDataTime > 30000) {
+          clearInterval(streamWatchdog);
+          resp.data.destroy(new Error('Stream stalled — no data for 30s'));
+        }
+      }, 5000);
+
+      await streamPipeline(
+        resp.data.on('data', (chunk) => {
+          downloadedBytes += chunk.length;
+          lastDataTime = Date.now();
+          const now = Date.now();
+          if (now - lastProgressWrite > 2000 && totalBytes > 0) {
+            lastProgressWrite = now;
+            const pct = Math.min(95, Math.round(downloadedBytes / totalBytes * 100));
+            const dlMB = (downloadedBytes / 1048576).toFixed(1);
+            const totalMB = (totalBytes / 1048576).toFixed(1);
+            const speed = downloadedBytes / ((now - Date.parse(startedAt)) / 1000) / 1048576;
+            writeStepProgress(videoId, {
+              step: 'download', status: 'running', percent: pct,
+              detail: `${dlMB}/${totalMB} MB (${speed.toFixed(1)} MB/s)`,
+            });
+          }
+        }),
+        createWriteStream(tmpPath)
+      );
+      clearInterval(streamWatchdog);
+
+      // Verify downloaded file
+      const dlStat = await stat(tmpPath);
+      if (dlStat.size < 100000) {
+        await unlink(tmpPath).catch(() => {});
+        throw new Error(`Downloaded file too small: ${dlStat.size} bytes (min 100KB) — donor returned stub`);
+      }
+
+      await rename(tmpPath, outputPath);
+      const sizeMB = (dlStat.size / 1048576).toFixed(1);
+      logger.info(`[${stepName}:${shortId}] Downloaded: ${sizeMB}MB → ${outputPath}`);
+    } catch (err) {
+      const tmpPath = outputPath + '.downloading';
       await unlink(tmpPath).catch(() => {});
-      throw new Error(`Downloaded file too small: ${dlStat.size} bytes (min 100KB) — donor returned stub`);
+      if (existsSync(outputPath) && (await stat(outputPath).catch(() => ({size:0}))).size < 100000) {
+        await unlink(outputPath).catch(() => {});
+      }
+      throw new Error(`Download failed: ${err.message}`);
     }
+  })();
 
-    // Move to final path
-    await rename(tmpPath, outputPath);
-    const sizeMB = (dlStat.size / 1048576).toFixed(1);
-    logger.info(`[${stepName}:${shortId}] Downloaded: ${sizeMB}MB → ${outputPath}`);
+  // Race: download vs hard timeout
+  try {
+    await Promise.race([
+      downloadPromise,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Download hard timeout (5min)')), DOWNLOAD_HARD_TIMEOUT)),
+    ]);
   } catch (err) {
-    // Cleanup on failure
-    const tmpPath = outputPath + '.downloading';
-    await unlink(tmpPath).catch(() => {});
-    if (existsSync(outputPath) && (await stat(outputPath).catch(() => ({size:0}))).size < 100000) {
-      await unlink(outputPath).catch(() => {});
+    // Kill Playwright browser if still running
+    if (playwrightBrowser) {
+      try { await playwrightBrowser.close(); } catch {}
+      playwrightBrowser = null;
     }
-    throw new Error(`Download failed: ${err.message}`);
+    throw err;
   }
 
   return videoId;
@@ -1017,17 +1045,30 @@ function runFFmpegWatermark(ffmpegArgs, timeoutMs, onProgress) {
 async function processWatermark(videoId, stepName) {
   const shortId = videoId.substring(0, 8);
 
-  // Atomic claim: try to set status=watermarking. If already watermarking/watermarking_home/published/failed — skip
-  const { rowCount: claimed } = await query(
-    `UPDATE videos SET status = 'watermarking', pipeline_step = 'watermark', updated_at = NOW()
-     WHERE id = $1 AND status NOT IN ('watermarking', 'watermarking_home', 'watermarked', 'published', 'failed', 'needs_review')`,
-    [videoId]
-  );
-  if (claimed === 0) {
-    const { rows: [cur] } = await query('SELECT status FROM videos WHERE id = $1', [videoId]);
-    logger.info(`[${stepName}:${shortId}] Already ${cur?.status || 'unknown'} — skipping watermark`);
+  // Check if video already past watermark (home worker finished, or already published)
+  const { rows: [wmChk] } = await query('SELECT status, pipeline_step FROM videos WHERE id = $1', [videoId]);
+  if (!wmChk) return '__skip__';
+
+  // Skip if already past watermark stage
+  if (['watermarked', 'published', 'failed', 'needs_review'].includes(wmChk.status)) {
+    logger.info(`[${stepName}:${shortId}] Already ${wmChk.status} — skipping`);
     return '__skip__';
   }
+  if (['watermarked', 'media', 'cdn_upload', 'publish', 'cleanup'].includes(wmChk.pipeline_step)) {
+    logger.info(`[${stepName}:${shortId}] Already at step=${wmChk.pipeline_step} — skipping`);
+    return '__skip__';
+  }
+  // Skip if home worker claimed it
+  if (wmChk.status === 'watermarking_home') {
+    logger.info(`[${stepName}:${shortId}] Home worker claimed — skipping`);
+    return '__skip__';
+  }
+
+  // Proceed with watermark
+  await query(
+    `UPDATE videos SET status = 'watermarking', pipeline_step = 'watermark', updated_at = NOW() WHERE id = $1`,
+    [videoId]
+  );
 
   const workDir = join(WORK_DIR, videoId);
   const inputPath = join(workDir, 'original.mp4');
@@ -1599,7 +1640,7 @@ async function processPublish(videoId, stepName) {
        VALUES ($1, 'publish', 'skipped', $2)`,
       [videoId, `Sent to needs_review: missing ${missing.join(', ')}`]
     );
-    return; // don't throw — this is a controlled skip, not a retry-worthy error
+    return '__skip__'; // don't pass to cleanup — video is needs_review
   }
 
   // ── 1a2. Verify CDN video is not a stub (min 500KB) ──
@@ -1616,7 +1657,7 @@ async function processPublish(videoId, stepName) {
          pipeline_error = $2, updated_at = NOW() WHERE id = $1`,
         [videoId, `CDN video stub: ${cdnSize} bytes (min 500KB)`]
       );
-      return;
+      return '__skip__';
     }
   } catch (headErr) {
     logger.warn(`[${stepName}:${shortId}] CDN HEAD check failed: ${headErr.message} — continuing`);
@@ -1632,7 +1673,7 @@ async function processPublish(videoId, stepName) {
       `UPDATE videos SET status = 'needs_review', pipeline_step = NULL, pipeline_error = $2, updated_at = NOW() WHERE id = $1`,
       [videoId, `AI Vision failed: status=${aiCheck?.ai_vision_status}, no tags`]
     );
-    return;
+    return '__skip__';
   }
 
   // ── 1c. Pre-flight: verify translations (all 10 locales) ──
@@ -1660,7 +1701,7 @@ async function processPublish(videoId, stepName) {
        WHERE id = $1`,
       [videoId, `Missing translations: ${missingTranslations.join(', ')}`]
     );
-    return;
+    return '__skip__';
   }
 
   // ── 2. Publish video ───────────────────────────────────
@@ -2349,9 +2390,19 @@ async function main() {
     if (scraperChild && !scraperChild.killed) {
       try { scraperChild.kill("SIGKILL"); logger.info("Killed scraper subprocess"); } catch {}
     }
+    // Kill any Playwright chrome processes to unblock stuck downloads
+    try {
+      execSync('killall -9 chrome 2>/dev/null || true');
+      logger.info("Killed chrome processes");
+    } catch {}
     for (const name of STEP_ORDER) {
       if (queues[name]) queues[name].wakeAll();
     }
+    // Force exit after 30s if workers don't finish
+    setTimeout(() => {
+      logger.warn('Force exit after 30s timeout');
+      process.exit(1);
+    }, 30000).unref();
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
