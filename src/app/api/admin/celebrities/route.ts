@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
                     CASE WHEN (c.photo_url IS NULL OR c.photo_url = '')
                          THEN true ELSE false END AS needs_enrichment
                  FROM celebrities c ${whereClause}
-                 ORDER BY c.total_views DESC LIMIT $1 OFFSET $2`,
+                 ORDER BY GREATEST(c.created_at, c.updated_at) DESC LIMIT $1 OFFSET $2`,
                 params
             ),
             pool.query(

@@ -2,6 +2,7 @@
 // Connects to PostgreSQL on AbeloHost (remote)
 import pg from "pg";
 import { config } from "./config.js";
+import { toTitleCase } from "./name-utils.js";
 
 const pool = new pg.Pool({
   host: config.db.host,
@@ -222,13 +223,17 @@ export async function linkVideoCategory(videoId, categoryId) {
 // ============================================
 
 export async function findOrCreateCollection(titleRaw, slug, localizedTitle = null) {
+  const normalizedTitle = toTitleCase(titleRaw);
+  const titleJson = localizedTitle
+    ? JSON.stringify(localizedTitle)
+    : JSON.stringify({ en: normalizedTitle, ru: normalizedTitle });
   const { rows } = await query(
     `INSERT INTO collections (title, slug, is_auto)
      VALUES ($1::jsonb, $2, true)
      ON CONFLICT (slug) DO UPDATE SET
        title = COALESCE(EXCLUDED.title, collections.title)
      RETURNING id`,
-    [localizedTitle ? JSON.stringify(localizedTitle) : JSON.stringify({ en: titleRaw, ru: titleRaw }), slug]
+    [titleJson, slug]
   );
   return rows[0].id;
 }

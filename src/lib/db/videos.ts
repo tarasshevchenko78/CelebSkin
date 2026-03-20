@@ -328,14 +328,14 @@ export async function getRelatedVideos(videoId: string, locale: string, limit: n
         }
     }
 
-    // Step 4: Same collection/category
+    // Step 4: Same collection
     if (collected.length < limit) {
         const remaining = limit - collected.length;
         const result = await pool.query(
             `SELECT v.* FROM videos v
-             JOIN video_categories vc2 ON vc2.video_id = v.id
-             WHERE vc2.category_id IN (
-               SELECT category_id FROM video_categories WHERE video_id = $1
+             JOIN collection_videos cv2 ON cv2.video_id = v.id
+             WHERE cv2.collection_id IN (
+               SELECT collection_id FROM collection_videos WHERE video_id = $1
              )
              AND v.id != ALL($3::uuid[])
              AND v.status = 'published'

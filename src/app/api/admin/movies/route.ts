@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
                     CASE WHEN (m.poster_url IS NULL OR m.poster_url = '')
                          THEN true ELSE false END AS needs_enrichment
                  FROM movies m ${whereClause}
-                 ORDER BY m.created_at DESC LIMIT $1 OFFSET $2`,
+                 ORDER BY GREATEST(m.created_at, m.updated_at) DESC LIMIT $1 OFFSET $2`,
                 params
             ),
             pool.query(

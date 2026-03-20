@@ -44,7 +44,7 @@ export default async function AdminCelebritiesPage({
 
         const [dataResult, countResult] = await Promise.all([
             pool.query(
-                `SELECT c.* FROM celebrities c ${whereClause} ORDER BY c.total_views DESC LIMIT $1 OFFSET $2`,
+                `SELECT c.* FROM celebrities c ${whereClause} ORDER BY GREATEST(c.created_at, c.updated_at) DESC LIMIT $1 OFFSET $2`,
                 params
             ),
             pool.query(

@@ -22,16 +22,16 @@ const labels: Record<string, {
     searchPlaceholder: string;
     scenes: string;
 }> = {
-    en: { newScenes: 'New Scenes', popularCelebs: 'Popular Celebrities', popularVideos: 'Popular Videos', collections: 'Collections', newMovies: 'Movies', viewAll: 'View All', searchPlaceholder: 'Search celebrities, movies...', scenes: 'scenes' },
-    ru: { newScenes: 'Новые сцены', popularCelebs: 'Популярные знаменитости', popularVideos: 'Популярные видео', collections: 'Коллекции', newMovies: 'Фильмы', viewAll: 'Все', searchPlaceholder: 'Поиск знаменитостей, фильмов...', scenes: 'сцен' },
-    de: { newScenes: 'Neue Szenen', popularCelebs: 'Beliebte Prominente', popularVideos: 'Beliebte Videos', collections: 'Sammlungen', newMovies: 'Filme', viewAll: 'Alle', searchPlaceholder: 'Prominente, Filme suchen...', scenes: 'Szenen' },
-    fr: { newScenes: 'Nouvelles scènes', popularCelebs: 'Célébrités populaires', popularVideos: 'Vidéos populaires', collections: 'Collections', newMovies: 'Films', viewAll: 'Tout voir', searchPlaceholder: 'Rechercher célébrités, films...', scenes: 'scènes' },
-    es: { newScenes: 'Nuevas escenas', popularCelebs: 'Celebridades populares', popularVideos: 'Videos populares', collections: 'Colecciones', newMovies: 'Películas', viewAll: 'Ver todo', searchPlaceholder: 'Buscar celebridades, películas...', scenes: 'escenas' },
-    pt: { newScenes: 'Novas cenas', popularCelebs: 'Celebridades populares', popularVideos: 'Vídeos populares', collections: 'Coleções', newMovies: 'Filmes', viewAll: 'Ver tudo', searchPlaceholder: 'Pesquisar celebridades, filmes...', scenes: 'cenas' },
-    it: { newScenes: 'Nuove scene', popularCelebs: 'Celebrità popolari', popularVideos: 'Video popolari', collections: 'Collezioni', newMovies: 'Film', viewAll: 'Vedi tutto', searchPlaceholder: 'Cerca celebrità, film...', scenes: 'scene' },
-    pl: { newScenes: 'Nowe sceny', popularCelebs: 'Popularne gwiazdy', popularVideos: 'Popularne filmy', collections: 'Kolekcje', newMovies: 'Filmy', viewAll: 'Wszystko', searchPlaceholder: 'Szukaj gwiazd, filmów...', scenes: 'scen' },
-    nl: { newScenes: 'Nieuwe scènes', popularCelebs: 'Populaire beroemdheden', popularVideos: "Populaire video's", collections: 'Collecties', newMovies: 'Films', viewAll: 'Alles', searchPlaceholder: 'Zoek beroemdheden, films...', scenes: "scènes" },
-    tr: { newScenes: 'Yeni Sahneler', popularCelebs: 'Popüler Ünlüler', popularVideos: 'Popüler Videolar', collections: 'Koleksiyonlar', newMovies: 'Filmler', viewAll: 'Tümü', searchPlaceholder: 'Ünlü, film ara...', scenes: 'sahne' },
+    en: { newScenes: 'New Videos', popularCelebs: 'Popular Celebrities', popularVideos: 'Popular Videos', collections: 'Collections', newMovies: 'Movies', viewAll: 'View All', searchPlaceholder: 'Search celebrities, movies...', scenes: 'videos' },
+    ru: { newScenes: 'Новые видео', popularCelebs: 'Популярные знаменитости', popularVideos: 'Популярные видео', collections: 'Коллекции', newMovies: 'Фильмы', viewAll: 'Все', searchPlaceholder: 'Поиск знаменитостей, фильмов...', scenes: 'видео' },
+    de: { newScenes: 'Neue Videos', popularCelebs: 'Beliebte Prominente', popularVideos: 'Beliebte Videos', collections: 'Sammlungen', newMovies: 'Filme', viewAll: 'Alle', searchPlaceholder: 'Prominente, Filme suchen...', scenes: 'Videos' },
+    fr: { newScenes: 'Nouvelles vidéos', popularCelebs: 'Célébrités populaires', popularVideos: 'Vidéos populaires', collections: 'Collections', newMovies: 'Films', viewAll: 'Tout voir', searchPlaceholder: 'Rechercher célébrités, films...', scenes: 'vidéos' },
+    es: { newScenes: 'Nuevos vídeos', popularCelebs: 'Celebridades populares', popularVideos: 'Vídeos populares', collections: 'Colecciones', newMovies: 'Películas', viewAll: 'Ver todo', searchPlaceholder: 'Buscar celebridades, películas...', scenes: 'vídeos' },
+    pt: { newScenes: 'Novos vídeos', popularCelebs: 'Celebridades populares', popularVideos: 'Vídeos populares', collections: 'Coleções', newMovies: 'Filmes', viewAll: 'Ver tudo', searchPlaceholder: 'Pesquisar celebridades, filmes...', scenes: 'vídeos' },
+    it: { newScenes: 'Nuovi video', popularCelebs: 'Celebrità popolari', popularVideos: 'Video popolari', collections: 'Collezioni', newMovies: 'Film', viewAll: 'Vedi tutto', searchPlaceholder: 'Cerca celebrità, film...', scenes: 'video' },
+    pl: { newScenes: 'Nowe wideo', popularCelebs: 'Popularne gwiazdy', popularVideos: 'Popularne wideo', collections: 'Kolekcje', newMovies: 'Filmy', viewAll: 'Wszystko', searchPlaceholder: 'Szukaj gwiazd, filmów...', scenes: 'wideo' },
+    nl: { newScenes: "Nieuwe video's", popularCelebs: 'Populaire beroemdheden', popularVideos: "Populaire video's", collections: 'Collecties', newMovies: 'Films', viewAll: 'Alles', searchPlaceholder: 'Zoek beroemdheden, films...', scenes: "video's" },
+    tr: { newScenes: 'Yeni Videolar', popularCelebs: 'Popüler Ünlüler', popularVideos: 'Popüler Videolar', collections: 'Koleksiyonlar', newMovies: 'Filmler', viewAll: 'Tümü', searchPlaceholder: 'Ünlü, film ara...', scenes: 'video' },
 };
 
 // ============================================

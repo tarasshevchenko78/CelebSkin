@@ -44,7 +44,7 @@ export default async function AdminMoviesPage({
 
         const [dataResult, countResult] = await Promise.all([
             pool.query(
-                `SELECT m.* FROM movies m ${whereClause} ORDER BY m.scenes_count DESC, m.created_at DESC LIMIT $1 OFFSET $2`,
+                `SELECT m.* FROM movies m ${whereClause} ORDER BY GREATEST(m.created_at, m.updated_at) DESC LIMIT $1 OFFSET $2`,
                 params
             ),
             pool.query(

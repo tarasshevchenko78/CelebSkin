@@ -12,9 +12,9 @@ import VideoCatalogFilters from '@/components/VideoCatalogFilters';
 // ============================================
 
 const titles: Record<string, string> = {
-    en: 'All Scenes', ru: 'Все сцены', de: 'Alle Szenen', fr: 'Toutes les scènes',
-    es: 'Todas las escenas', pt: 'Todas as cenas', it: 'Tutte le scene',
-    pl: 'Wszystkie sceny', nl: 'Alle scènes', tr: 'Tüm Sahneler',
+    en: 'All Videos', ru: 'Все видео', de: 'Alle Videos', fr: 'Toutes les vidéos',
+    es: 'Todos los vídeos', pt: 'Todos os vídeos', it: 'Tutti i video',
+    pl: 'Wszystkie wideo', nl: "Alle video's", tr: 'Tüm Videolar',
 };
 
 const sortLabels: Record<string, Record<string, string>> = {

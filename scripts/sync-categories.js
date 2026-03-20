@@ -13,6 +13,7 @@
 import BoobsRadarAdapter from './adapters/boobsradar-adapter.js';
 import { query, pool } from './lib/db.js';
 import logger from './lib/logger.js';
+import { toTitleCase } from './lib/name-utils.js';
 
 const VIDEOS_PER_PAGE = 20;
 
@@ -58,7 +59,7 @@ async function main() {
          title = COALESCE(EXCLUDED.title, collections.title),
          videos_count = CASE WHEN EXCLUDED.videos_count > 0 THEN EXCLUDED.videos_count ELSE collections.videos_count END
        RETURNING (xmax = 0) AS is_new`,
-      [JSON.stringify({ en: cat.title, ru: cat.title }), cat.slug, totalVideos]
+      [JSON.stringify({ en: toTitleCase(cat.title), ru: toTitleCase(cat.title) }), cat.slug, totalVideos]
     );
     if (result.rows[0]?.is_new) inserted++;
     else updated++;

@@ -9,6 +9,7 @@
  */
 
 import axios from 'axios';
+import { cleanCelebrityName } from '../lib/name-utils.js';
 
 const BASE = 'https://boobsradar.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -265,7 +266,9 @@ export default class BoobsRadarAdapter {
         // or "Name nude scene in Movie (Year)"
         const celebMatch = metadata.raw_title.match(/^([^-–—]+?)(?:\s+nude|\s+naked|\s+topless|\s+sex|\s+bikini)/i);
         if (celebMatch) {
-            const names = celebMatch[1].split(/,\s*/).map(n => n.trim()).filter(n => n.length > 2);
+            const names = celebMatch[1].split(/,\s*/)
+                .map(n => cleanCelebrityName(n.trim()))
+                .filter(Boolean);
             metadata.celebrities = names;
         }
 

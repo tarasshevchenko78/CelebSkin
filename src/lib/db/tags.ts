@@ -16,7 +16,7 @@ export async function getTagBySlug(slug: string): Promise<Tag | null> {
 export async function getAllTags(limit: number = 50): Promise<Tag[]> {
     const result = await pool.query(
         `SELECT * FROM tags
-         WHERE is_canonical = true AND videos_count > 0
+         WHERE is_canonical = true AND videos_count > 0 AND slug != 'movie'
          ORDER BY videos_count DESC
          LIMIT $1`,
         [limit]
