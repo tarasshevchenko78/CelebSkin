@@ -1026,7 +1026,7 @@ async function processWatermark(videoId, stepName) {
   if (claimed === 0) {
     const { rows: [cur] } = await query('SELECT status FROM videos WHERE id = $1', [videoId]);
     logger.info(`[${stepName}:${shortId}] Already ${cur?.status || 'unknown'} — skipping watermark`);
-    return videoId;
+    return '__skip__';
   }
 
   const workDir = join(WORK_DIR, videoId);
@@ -1667,7 +1667,7 @@ async function processPublish(videoId, stepName) {
   await query(
     `UPDATE videos SET
        status = 'published',
-       published_at = COALESCE(published_at, NOW()),
+       published_at = NOW(),
        pipeline_step = NULL,
        pipeline_error = NULL,
        updated_at = NOW()
@@ -1928,17 +1928,7 @@ async function processCleanup(videoId, stepName) {
     return;
   }
 
-  // Verify CDN URLs exist before deleting workdir (prevent deleting before cdn_upload finishes)
-  const { rows: [cdnCheck] } = await query(
-    `SELECT video_url, thumbnail_url FROM videos WHERE id = $1`, [videoId]
-  );
-  const hasCdnVideo = cdnCheck?.video_url?.includes('b-cdn.net');
-  const hasCdnThumb = cdnCheck?.thumbnail_url?.includes('b-cdn.net');
-
-  if (!hasCdnVideo || !hasCdnThumb) {
-    logger.warn(`[${stepName}:${shortId}] CDN URLs missing (video=${hasCdnVideo}, thumb=${hasCdnThumb}) — keeping workdir`);
-    return;
-  }
+  // Published or needs_review — always clean workdir
 
   writeStepProgress(videoId, { step: 'cleanup', status: 'running', percent: 50, detail: 'Removing workdir...' });
   // Remove workdir

@@ -9,7 +9,7 @@
  */
 
 import axios from 'axios';
-import { cleanCelebrityName } from '../lib/name-utils.js';
+import { chromium } from 'playwright';
 
 const BASE = 'https://boobsradar.com';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
@@ -44,6 +44,18 @@ function parseDuration(str) {
 }
 
 export default class BoobsRadarAdapter {
+    _browser = null;
+
+    async _getBrowser() {
+        if (!this._browser || !this._browser.isConnected()) {
+            this._browser = await chromium.launch({ headless: false, args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--headless=new'] });
+        }
+        return this._browser;
+    }
+
+    async close() {
+        if (this._browser) { await this._browser.close().catch(() => {}); this._browser = null; }
+    }
 
     async delay(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -145,7 +157,30 @@ export default class BoobsRadarAdapter {
      * Parse an individual video page — extract all metadata
      */
     async parseVideoPage(videoUrl) {
-        const html = await fetchHtml(videoUrl);
+        // Use Playwright to intercept actual video .mp4 URL from network requests
+        let html = '';
+        let interceptedMp4 = null;
+        try {
+            const browser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+            const ctx = await browser.newContext();
+            const page = await ctx.newPage();
+            page.on('response', r => {
+                const u = r.url();
+                const ct = r.headers()['content-type'] || '';
+                // Capture the actual video/mp4 response (after redirects), not the gif stub
+                if (ct.includes('video/mp4') && !interceptedMp4) {
+                    interceptedMp4 = u;
+                }
+            });
+            await page.goto(videoUrl, { waitUntil: 'networkidle', timeout: 45000 });
+            html = await page.content();
+            await page.close();
+            await ctx.close();
+            await browser.close();
+        } catch (err) {
+            // Fallback to axios if Playwright fails
+            html = await fetchHtml(videoUrl);
+        }
 
         const metadata = {
             source_url: videoUrl,
@@ -196,15 +231,19 @@ export default class BoobsRadarAdapter {
             if (previewMatch) metadata.thumbnail_url = previewMatch[1];
         }
 
-        // Video file URL: prefer JS object video_url, fallback to raw .mp4 scan
-        const jsVideoMatch = html.match(/video_url:\s*'(https?:\/\/[^']+\.mp4[^']*)'/);
-        if (jsVideoMatch) {
-            metadata.video_file_url = jsVideoMatch[1];
+        // Video file URL: prefer intercepted mp4 from network, then JS video_url, then .mp4 scan
+        if (interceptedMp4) {
+            metadata.video_file_url = interceptedMp4;
         } else {
-            const mp4Matches = html.match(/https?:\/\/[^"'\s,]+\.mp4[^"'\s,]*/gi) || [];
-            if (mp4Matches.length > 0) {
-                metadata.video_file_url = mp4Matches.find(u => u.includes('get_file')) || mp4Matches[0];
-                metadata.video_file_url = metadata.video_file_url.replace(/['"\\]/g, '');
+            const jsVideoMatch = html.match(/video_url:\s*'(https?:\/\/[^']+\.mp4[^']*)'/);
+            if (jsVideoMatch) {
+                metadata.video_file_url = jsVideoMatch[1];
+            } else {
+                const mp4Matches = html.match(/https?:\/\/[^"'\s,]+\.mp4[^"'\s,]*/gi) || [];
+                if (mp4Matches.length > 0) {
+                    metadata.video_file_url = mp4Matches.find(u => u.includes('get_file')) || mp4Matches[0];
+                    metadata.video_file_url = metadata.video_file_url.replace(/['"\\]/g, '');
+                }
             }
         }
 
@@ -266,9 +305,7 @@ export default class BoobsRadarAdapter {
         // or "Name nude scene in Movie (Year)"
         const celebMatch = metadata.raw_title.match(/^([^-–—]+?)(?:\s+nude|\s+naked|\s+topless|\s+sex|\s+bikini)/i);
         if (celebMatch) {
-            const names = celebMatch[1].split(/,\s*/)
-                .map(n => cleanCelebrityName(n.trim()))
-                .filter(Boolean);
+            const names = celebMatch[1].split(/,\s*/).map(n => n.trim()).filter(n => n.length > 2);
             metadata.celebrities = names;
         }
 
