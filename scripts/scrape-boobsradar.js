@@ -500,16 +500,8 @@ async function main() {
         }
       }
 
-      // Page-level early stop: if ALL videos on page were skipped, skip remaining pages
-      if (pageSkipped > 0 && tasks.length === 0 && pageData.videos.length > 0) {
-        consecutiveFullSkipPages = (consecutiveFullSkipPages || 0) + 1;
-        if (consecutiveFullSkipPages >= 2) {
-          logger.info(`  ⏩ 2 consecutive full-skip pages → moving to next category`);
-          break;
-        }
-      } else {
-        consecutiveFullSkipPages = 0;
-      }
+      // No early stop — scan ALL pages. New videos can appear on any page.
+      // Previous "2 consecutive full-skip pages" was too aggressive.
 
       // --- Скачиваем параллельно батчами ---
       const BATCH = config.parallelDownloads;

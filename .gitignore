@@ -50,3 +50,4 @@ scripts/logs/
 *.dump
 /backups/
 scripts/node_modules/
+scripts/tmp/
