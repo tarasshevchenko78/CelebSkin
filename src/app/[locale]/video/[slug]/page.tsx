@@ -163,12 +163,13 @@ export default async function VideoDetailPage({
     }
 
     // JSON-LD structured data
-    const videoLd = title && video.thumbnail_url ? {
+    const thumbUrl = video.thumbnail_url || (video.screenshots?.[0] as {url?: string})?.url || null;
+    const videoLd = title && thumbUrl ? {
         '@context': 'https://schema.org',
         '@type': 'VideoObject',
         name: title,
         description: getLocalizedField(video.seo_description, locale) || review || '',
-        thumbnailUrl: video.thumbnail_url,
+        thumbnailUrl: thumbUrl,
         ...(video.published_at && { uploadDate: new Date(video.published_at).toISOString() }),
         ...(video.duration_seconds && { duration: formatDurationISO(video.duration_seconds) }),
         ...((video.video_url_watermarked || video.video_url) && { contentUrl: video.video_url_watermarked || video.video_url }),
