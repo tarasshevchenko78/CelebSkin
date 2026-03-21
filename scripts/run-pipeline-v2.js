@@ -486,6 +486,22 @@ async function processDownload(inputId, stepName) {
     });
 
     await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 45000 });
+
+    // Check page title for garbage (Cloudflare, ads, redirects)
+    const pageTitle = await page.title().catch(() => '');
+    const GARBAGE_TITLES = ['attention required', 'cloudflare', 'join wicked', 'wicked.com', 'just a moment', '404', 'not found', 'access denied', 'forbidden', 'cinematic and parody'];
+    if (GARBAGE_TITLES.some(g => pageTitle.toLowerCase().includes(g))) {
+      await page.close().catch(() => {});
+      await ctx.close().catch(() => {});
+      await playwrightBrowser.close().catch(() => {});
+      playwrightBrowser = null;
+      // Mark raw_video as processed to skip in future runs
+      await query(`UPDATE raw_videos SET status = 'processed' WHERE id = (SELECT raw_video_id FROM videos WHERE id = $1)`, [videoId]).catch(() => {});
+      await query(`UPDATE videos SET status = 'failed', pipeline_error = $2, updated_at = NOW() WHERE id = $1`, [videoId, `Garbage page: "${pageTitle}"`]);
+      logger.warn(`[${stepName}:${shortId}] Garbage page title: "${pageTitle}" — skipping`);
+      return '__skip__';
+    }
+
     browserCookies = await ctx.cookies();
     await page.close();
     await ctx.close();
@@ -1732,30 +1748,30 @@ async function processPublish(videoId, stepName) {
 
   // ── 1a2. Verify CDN video is not a stub or truncated upload ──
   // Use Storage API (authoritative) instead of CDN edge (can return stale cached size)
-  // Check both absolute minimum (500KB) and duration-based minimum (50KB per second)
+  // Check absolute minimum only — low bitrate from donor is normal, not our error
+  // Stub files are <100KB, real videos are always >500KB
   try {
     const remotePath = extractRemotePath(video.video_url_watermarked);
     if (remotePath) {
       let storageSize = await getStorageFileSize(remotePath);
-      // Get duration for smart size check
+      // Get duration for logging
       const { rows: [durRow] } = await query(`SELECT duration_seconds FROM videos WHERE id = $1`, [videoId]);
       const duration = durRow?.duration_seconds || 0;
-      // Minimum: at least 500KB absolute OR 50KB per second of video
-      const minSize = Math.max(500000, duration * 50000);
+      // Minimum: 500KB absolute (catch stubs/GIFs, not low-bitrate videos)
+      const minSize = 500000;
 
       if (storageSize < minSize) {
         // CDN propagation delay — wait 10s and recheck once
-        logger.warn(`[${stepName}:${shortId}] Storage file small: ${(storageSize/1024).toFixed(0)}KB (min ${(minSize/1024).toFixed(0)}KB for ${duration}s), retrying in 10s...`);
+        logger.warn(`[${stepName}:${shortId}] Storage file small: ${(storageSize/1024).toFixed(0)}KB (min 500KB), retrying in 10s...`);
         await sleep(10000);
         storageSize = await getStorageFileSize(remotePath);
       }
       if (storageSize < minSize) {
-        const kbs = duration > 0 ? Math.round(storageSize / duration / 1024) : 0;
-        logger.warn(`[${stepName}:${shortId}] Storage file too small after retry: ${(storageSize/1024).toFixed(0)}KB (${kbs}KB/s, need 50KB/s for ${duration}s) → needs_review`);
+        logger.warn(`[${stepName}:${shortId}] Storage file stub/empty: ${storageSize} bytes → needs_review`);
         await query(
           `UPDATE videos SET status = 'needs_review', pipeline_step = NULL,
            pipeline_error = $2, updated_at = NOW() WHERE id = $1`,
-          [videoId, `CDN video too small: ${(storageSize/1024).toFixed(0)}KB (${kbs}KB/s, min 50KB/s for ${duration}s) [Storage API]`]
+          [videoId, `CDN file stub: ${storageSize} bytes (min 500KB) — donor returned fake video`]
         );
         return '__skip__';
       }

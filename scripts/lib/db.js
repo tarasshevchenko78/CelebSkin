@@ -37,9 +37,10 @@ export async function insertRawVideo(video) {
     `INSERT INTO raw_videos
       (source_id, source_url, source_video_id, raw_title, raw_description,
        thumbnail_url, duration_seconds, raw_tags, raw_categories, raw_celebrities,
-       embed_code, video_file_url, extra_data)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       embed_code, video_file_url, donor_category, extra_data)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (source_url) DO UPDATE SET
+       donor_category = COALESCE(EXCLUDED.donor_category, raw_videos.donor_category),
        updated_at = NOW()
      RETURNING id`,
     [
@@ -47,6 +48,7 @@ export async function insertRawVideo(video) {
       video.raw_title, video.raw_description, video.thumbnail_url,
       video.duration_seconds, video.raw_tags || [], video.raw_categories || [],
       video.raw_celebrities || [], video.embed_code, video.video_file_url,
+      video.donor_category || null,
       video.extra_data || {},
     ]
   );
@@ -119,7 +121,7 @@ export async function insertVideo(video) {
 
 export async function publishVideo(id) {
   await query(
-    `UPDATE videos SET status = 'published', published_at = NOW() WHERE id = $1`,
+    `UPDATE videos SET status = 'published', published_at = NOW(), pipeline_step = NULL, pipeline_error = NULL, updated_at = NOW() WHERE id = $1`,
     [id]
   );
 }

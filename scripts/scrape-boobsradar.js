@@ -553,6 +553,15 @@ async function main() {
 
             // БД
             try {
+              // Filter garbage titles (Cloudflare blocks, ad pages, site homepages)
+              const GARBAGE_TITLES = ['attention required', 'cloudflare', 'join wicked', 'wicked.com', 'just a moment', '404', 'not found', 'access denied', 'forbidden', 'cinematic and parody'];
+              const titleLower = (metadata.raw_title || videoItem.title || '').toLowerCase();
+              if (GARBAGE_TITLES.some(g => titleLower.includes(g)) || titleLower.length < 5) {
+                logger.warn(`${tag} Пропуск мусорного title: "${metadata.raw_title || videoItem.title}"`);
+                progress.stats.totalSkipped++;
+                return;
+              }
+
               const sourceId = await getSourceId();
               const dbId = await insertRawVideo({
                 source_id: sourceId,
@@ -566,6 +575,7 @@ async function main() {
                 raw_categories: metadata.categories || [],
                 raw_celebrities: metadata.celebrities || [],
                 video_file_url: metadata.video_file_url || null,
+                donor_category: catSlug || null,
                 extra_data: metadata,
                 local_video_path: metadata.local_video ? `${catSlug}/${videoSlug}/video.mp4` : null,
                 local_preview_path: metadata.local_preview ? `${catSlug}/${videoSlug}/preview.jpg` : null,
