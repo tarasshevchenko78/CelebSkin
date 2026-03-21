@@ -280,6 +280,30 @@ async function uploadToFileAPI(videoBuffer, mimeType) {
       throw err;
     }
 
+    // Retry on 429 rate limit (wait 30s then retry once)
+    if (startRes.status === 429) {
+      console.log('  ⚠️ File API rate limited (429), waiting 30s...');
+      await new Promise(r => setTimeout(r, 30000));
+      const retryRes = await fetch(
+        `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${getVisionApiKey()}`,
+        {
+          method: 'POST',
+          headers: {
+            'X-Goog-Upload-Protocol': 'resumable',
+            'X-Goog-Upload-Command': 'start',
+            'X-Goog-Upload-Header-Content-Length': String(videoBuffer.length),
+            'X-Goog-Upload-Header-Content-Type': mimeType,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            file: { displayName: `video-${videoId}` },
+          }),
+          signal: controller.signal,
+        }
+      );
+      startRes = retryRes;
+    }
+
     const uploadUrl = startRes.headers.get('X-Goog-Upload-URL');
     if (!uploadUrl) {
       throw new Error(`File API: failed to get upload URL. Status: ${startRes.status}`);
@@ -638,6 +662,7 @@ async function saveResults(videoId, aiResult, model, meta) {
         ai_confidence = $7,
         ai_raw_response = $8,
         ai_tags = $9,
+        ai_vision_error = NULL,
         updated_at = NOW()
       WHERE id = $1
     `, [
@@ -695,20 +720,22 @@ async function saveCensoredFallback(videoId, meta, errors) {
   await writeFile(metadataPath, JSON.stringify(metadata, null, 2));
   console.log(`  Saved fallback: ${metadataPath}`);
 
-  // Update DB
+  // Update DB — distinguish censored from transient errors (429, timeout, etc.)
   if (!dryRun) {
     const errorMsg = errors.join(' → ');
+    const isTransientError = errors.some(e => e.includes('429') || e.includes('timeout') || e.includes('ECONNRESET') || e.includes('ETIMEDOUT'));
+    const visionStatus = isTransientError ? 'error' : 'censored';
     await query(`
       UPDATE videos SET
-        ai_vision_status = 'censored',
+        ai_vision_status = $4,
         ai_vision_model = 'fallback-donor-tags',
         ai_vision_error = $3,
         donor_tags = $2,
         pipeline_error = $3,
         updated_at = NOW()
       WHERE id = $1
-    `, [videoId, meta.rawTags, errorMsg]);
-    console.log(`  DB updated: ai_vision_status=censored, error=${errorMsg.substring(0, 100)}`);
+    `, [videoId, meta.rawTags, errorMsg, visionStatus]);
+    console.log(`  DB updated: ai_vision_status=${visionStatus}, error=${errorMsg.substring(0, 100)}`);
   } else {
     console.log('  [DRY RUN] DB not updated');
   }

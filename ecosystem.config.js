@@ -4,7 +4,8 @@ module.exports = {
     script: 'npm',
     args: 'start',
     cwd: '/opt/celebskin/site',
-    max_memory_restart: '500M',
+    max_memory_restart: '400M',
+    cron_restart: '0 */6 * * *',
     env: {
       NODE_ENV: 'production',
       PORT: 3000

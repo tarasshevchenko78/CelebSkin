@@ -17,8 +17,8 @@
  * Spec: /opt/celebskin/PIPELINE_V2_SPEC.md §2
  */
 
-import { existsSync, readdirSync, mkdirSync, createWriteStream, writeFileSync, unlinkSync } from 'fs';
-import { stat, unlink, readFile, rm, rename } from 'fs/promises';
+import { existsSync, readdirSync, mkdirSync, createWriteStream, writeFileSync, unlinkSync, statSync } from 'fs';
+import { stat, unlink, readFile, writeFile, rm, rename } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { pipeline as streamPipeline } from 'stream/promises';
@@ -33,7 +33,7 @@ import { query } from './lib/db.js';
 import { extractNationality, mapDonorTags } from './lib/tags.js';
 import slugify from 'slugify';
 import { recordFailure } from './lib/dead-letter.js';
-import { uploadFile, getVideoPath } from './lib/bunny.js';
+import { uploadFile, getVideoPath, getStorageFileSize, extractRemotePath } from './lib/bunny.js';
 import logger from './lib/logger.js';
 import {
   writePipelineProgress,
@@ -84,7 +84,7 @@ const STEP_ORDER = [
 ];
 
 const STEP_CONCURRENCY = {
-  download:     6,  // Playwright browser per download, 5min hard timeout
+  download:     4,  // 4 concurrent downloads
   tmdb_enrich:  4,
   ai_vision:    3,
   watermark:    2,  // 4-core Contabo handles 2 concurrent FFmpeg watermark jobs
@@ -93,6 +93,13 @@ const STEP_CONCURRENCY = {
   publish:      3,
   cleanup:      3,
 };
+
+// Max items in download queue at once — prevents memory overload
+// Workers pull from queue; we refill when queue drops below threshold
+const DOWNLOAD_QUEUE_MAX = 5;  // 4 workers + 1 buffer
+
+// Track which raw_video IDs have already been enqueued — prevents duplicate enqueue
+const enqueuedRawIds = new Set();
 
 // DB status written at start of each step (for monitoring)
 const STEP_DB_STATUS = {
@@ -211,6 +218,8 @@ class WorkerPool {
 
       this._activeCount++;
       let shortId = String(videoId).substring(0, 8);
+      const stepStartTime = Date.now();
+      logger.info(`[${this.name}:${shortId}] ▶ START worker#${workerId} (active: ${this._activeCount}/${this.concurrency}, queue: ${this.inputQueue.size()})`);
 
       try {
         // For download step: videoId might be a raw_video ID (UUID from raw_videos table)
@@ -226,14 +235,16 @@ class WorkerPool {
           const dbStatus = STEP_DB_STATUS[this.name];
           if (dbStatus) {
             if (this.name === 'watermark') {
-              // Conditional claim: skip if home watermark worker already claimed this video
+              // Atomic claim: skip if already watermarking/watermarked (by home worker or Contabo)
               const { rowCount } = await query(
                 `UPDATE videos SET status = $2, pipeline_step = $3, pipeline_error = NULL, updated_at = NOW()
-                 WHERE id = $1 AND pipeline_step != 'watermarking_home'`,
+                 WHERE id = $1
+                   AND status NOT IN ('watermarking', 'watermarking_home', 'watermarked', 'published', 'failed', 'needs_review')
+                   AND pipeline_step NOT IN ('watermarking_home', 'watermarked', 'media', 'cdn_upload', 'publish', 'cleanup')`,
                 [videoId, dbStatus, this.name]
               );
               if (rowCount === 0) {
-                logger.info(`[${this.name}:${shortId}] Claimed by home worker — skipping`);
+                logger.info(`[${this.name}:${shortId}] Already claimed/processed — skipping`);
                 clearStepProgress(videoId);
                 continue; // finally(_activeCount--) runs, skip to next queue item
               }
@@ -304,7 +315,21 @@ class WorkerPool {
           this.stats.completed++;
           this.stats.byStep[this.name] = (this.stats.byStep[this.name] || 0) + 1;
           clearStepProgress(videoId);
-          logger.info(`[${this.name}:${shortId}] ✅ Done`);
+          const stepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+
+          // Detailed file audit after each step
+          const workDir = join(WORK_DIR, videoId);
+          let fileAudit = '';
+          if (existsSync(workDir)) {
+            try {
+              const files = readdirSync(workDir);
+              const sizes = files.map(f => {
+                try { const s = statSync(join(workDir, f)); return `${f}(${(s.size/1048576).toFixed(1)}MB)`; } catch { return `${f}(?)`; }
+              });
+              fileAudit = ` files=[${sizes.join(', ')}]`;
+            } catch {}
+          }
+          logger.info(`[${this.name}:${shortId}] ✅ Done in ${stepDuration}s${fileAudit}`);
 
           // After ai_vision: mark as watermark_ready for home worker to claim
           if (this.name === 'ai_vision') {
@@ -323,12 +348,22 @@ class WorkerPool {
         } else {
           // Exhausted retries → dead letter queue
           this.stats.failed++;
-          logger.error(`[${this.name}:${shortId}] ❌ Failed after ${RETRY_DELAYS.length + 1} attempts`);
+          const stepDuration = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+          const errMsg = lastError?.message || 'Unknown error';
+          logger.error(`[${this.name}:${shortId}] ❌ Failed after ${RETRY_DELAYS.length + 1} attempts in ${stepDuration}s: ${errMsg}`);
 
           await query(
             `UPDATE videos SET status = 'failed', pipeline_step = $2, pipeline_error = $3, updated_at = NOW() WHERE id = $1`,
-            [videoId, this.name, lastError?.message || 'Unknown error']
+            [videoId, this.name, errMsg]
           );
+          // Write error to processing_log for investigation
+          try {
+            await query(
+              `INSERT INTO processing_log (video_id, step, status, message, metadata)
+               VALUES ($1, $2, 'failed', $3, $4::jsonb)`,
+              [videoId, this.name, errMsg, JSON.stringify({ duration_sec: parseFloat(stepDuration), attempts: RETRY_DELAYS.length + 1 })]
+            );
+          } catch {}
 
           clearStepProgress(videoId);
           await recordFailure(videoId, this.name, lastError, RETRY_DELAYS.length + 1);
@@ -339,6 +374,8 @@ class WorkerPool {
         logger.error(`[${this.name}:${shortId}] Worker crash: ${err.message}`);
       } finally {
         this._activeCount--;
+        const elapsed = ((Date.now() - stepStartTime) / 1000).toFixed(1);
+        logger.info(`[${this.name}:${shortId}] ■ END worker#${workerId} ${elapsed}s (active: ${this._activeCount}/${this.concurrency})`);
       }
     }
   }
@@ -413,129 +450,172 @@ async function processDownload(inputId, stepName) {
 
   // 3. Get real CDN video URL via Playwright, then download via axios stream
   const pageUrl = source_url || downloadUrl;
-  const startedAt = new Date().toISOString();
+  const startedAt = Date.now();
   writeStepProgress(videoId, { step: 'download', status: 'running', percent: 0, detail: 'Getting video URL...' });
 
-  let realCdnUrl = null;
-  let browserCookies = [];
+  // Single AbortController for the entire download — no zombie streams
+  const abortController = new AbortController();
+  const DOWNLOAD_HARD_TIMEOUT = 10 * 60 * 1000; // 10 min total (Playwright + download)
+  const hardTimer = setTimeout(() => {
+    logger.warn(`[${stepName}:${shortId}] Hard timeout ${DOWNLOAD_HARD_TIMEOUT/1000}s — aborting`);
+    abortController.abort(new Error('Download hard timeout'));
+  }, DOWNLOAD_HARD_TIMEOUT);
 
-  // Hard timeout wrapper — kills everything after 5 minutes
-  const DOWNLOAD_HARD_TIMEOUT = 300000; // 5 min
   let playwrightBrowser = null;
+  let streamWatchdog = null;
+  const tmpPath = outputPath + '.downloading';
 
-  const downloadPromise = (async () => {
-    try {
-      // Step A: Open page in Playwright to intercept real video CDN URL (max 45s)
-      const { chromium } = await import('playwright');
-      playwrightBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-      const ctx = await playwrightBrowser.newContext();
-      const page = await ctx.newPage();
-
-      page.on('response', r => {
-        const ct = r.headers()['content-type'] || '';
-        if (ct.includes('video/mp4') && !realCdnUrl) {
-          realCdnUrl = r.url();
-        }
-      });
-
-      await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 45000 });
-      browserCookies = await ctx.cookies();
-      await page.close();
-      await ctx.close();
-      await playwrightBrowser.close();
-      playwrightBrowser = null;
-
-      if (!realCdnUrl) {
-        throw new Error('No video/mp4 URL found on donor page');
-      }
-
-      logger.info(`[${stepName}:${shortId}] Got CDN URL, downloading via stream...`);
-      writeStepProgress(videoId, { step: 'download', status: 'running', percent: 5, detail: 'Downloading...' });
-
-      // Step B: Download via axios stream with cookies
-      const cookieHeader = browserCookies.map(c => c.name + '=' + c.value).join('; ');
-      const tmpPath = outputPath + '.downloading';
-
-      const resp = await axios({
-        method: 'get',
-        url: realCdnUrl,
-        responseType: 'stream',
-        timeout: 60000, // 1 min connection timeout
-        maxRedirects: 5,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Referer': 'https://boobsradar.com/',
-          'Cookie': cookieHeader,
-        },
-      });
-
-      const totalBytes = parseInt(resp.headers['content-length'] || '0');
-      let downloadedBytes = 0;
-      let lastProgressWrite = 0;
-
-      // Set stream timeout — if no data for 30s, abort
-      let lastDataTime = Date.now();
-      const streamWatchdog = setInterval(() => {
-        if (Date.now() - lastDataTime > 30000) {
-          clearInterval(streamWatchdog);
-          resp.data.destroy(new Error('Stream stalled — no data for 30s'));
-        }
-      }, 5000);
-
-      await streamPipeline(
-        resp.data.on('data', (chunk) => {
-          downloadedBytes += chunk.length;
-          lastDataTime = Date.now();
-          const now = Date.now();
-          if (now - lastProgressWrite > 2000 && totalBytes > 0) {
-            lastProgressWrite = now;
-            const pct = Math.min(95, Math.round(downloadedBytes / totalBytes * 100));
-            const dlMB = (downloadedBytes / 1048576).toFixed(1);
-            const totalMB = (totalBytes / 1048576).toFixed(1);
-            const speed = downloadedBytes / ((now - Date.parse(startedAt)) / 1000) / 1048576;
-            writeStepProgress(videoId, {
-              step: 'download', status: 'running', percent: pct,
-              detail: `${dlMB}/${totalMB} MB (${speed.toFixed(1)} MB/s)`,
-            });
-          }
-        }),
-        createWriteStream(tmpPath)
-      );
-      clearInterval(streamWatchdog);
-
-      // Verify downloaded file
-      const dlStat = await stat(tmpPath);
-      if (dlStat.size < 100000) {
-        await unlink(tmpPath).catch(() => {});
-        throw new Error(`Downloaded file too small: ${dlStat.size} bytes (min 100KB) — donor returned stub`);
-      }
-
-      await rename(tmpPath, outputPath);
-      const sizeMB = (dlStat.size / 1048576).toFixed(1);
-      logger.info(`[${stepName}:${shortId}] Downloaded: ${sizeMB}MB → ${outputPath}`);
-    } catch (err) {
-      const tmpPath = outputPath + '.downloading';
-      await unlink(tmpPath).catch(() => {});
-      if (existsSync(outputPath) && (await stat(outputPath).catch(() => ({size:0}))).size < 100000) {
-        await unlink(outputPath).catch(() => {});
-      }
-      throw new Error(`Download failed: ${err.message}`);
-    }
-  })();
-
-  // Race: download vs hard timeout
   try {
-    await Promise.race([
-      downloadPromise,
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Download hard timeout (5min)')), DOWNLOAD_HARD_TIMEOUT)),
-    ]);
+    // Step A: Open page in Playwright to intercept real video CDN URL (max 45s)
+    let realCdnUrl = null;
+    let browserCookies = [];
+
+    const { chromium } = await import('playwright');
+    playwrightBrowser = await chromium.launch({ headless: true, args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+
+    if (abortController.signal.aborted) throw new Error('Aborted before page load');
+
+    const ctx = await playwrightBrowser.newContext();
+    const page = await ctx.newPage();
+
+    page.on('response', r => {
+      const ct = r.headers()['content-type'] || '';
+      if (ct.includes('video/mp4') && !realCdnUrl) {
+        realCdnUrl = r.url();
+      }
+    });
+
+    await page.goto(pageUrl, { waitUntil: 'networkidle', timeout: 45000 });
+    browserCookies = await ctx.cookies();
+    await page.close();
+    await ctx.close();
+    await playwrightBrowser.close();
+    playwrightBrowser = null;
+
+    if (!realCdnUrl) {
+      throw new Error('No video/mp4 URL found on donor page');
+    }
+    if (abortController.signal.aborted) throw new Error('Aborted after page load');
+
+    logger.info(`[${stepName}:${shortId}] Got CDN URL: ${realCdnUrl.substring(0, 80)}...`);
+    writeStepProgress(videoId, { step: 'download', status: 'running', percent: 3, detail: 'Checking video URL...' });
+
+    // Step B0: HEAD check
+    const cookieHeader = browserCookies.map(c => c.name + '=' + c.value).join('; ');
+    const defaultHeaders = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Referer': 'https://boobsradar.com/',
+      'Cookie': cookieHeader,
+    };
+
+    try {
+      const headResp = await axios.head(realCdnUrl, {
+        timeout: 15000, maxRedirects: 5, headers: defaultHeaders,
+        signal: abortController.signal,
+      });
+      const headSize = parseInt(headResp.headers['content-length'] || '0');
+      const headType = headResp.headers['content-type'] || '';
+      if (headSize > 0 && headSize < 100000) {
+        throw new Error(`Donor video stub: ${headSize} bytes (HEAD check)`);
+      }
+      if (headType && !headType.includes('video') && !headType.includes('octet-stream')) {
+        throw new Error(`Donor wrong content-type: ${headType} (HEAD check)`);
+      }
+      if (headSize > 0) {
+        logger.info(`[${stepName}:${shortId}] HEAD OK: ${(headSize / 1048576).toFixed(1)}MB, ${headType}`);
+      }
+    } catch (headErr) {
+      if (headErr.response?.status === 403 || headErr.response?.status === 404) {
+        throw new Error(`Donor URL dead: HTTP ${headErr.response.status} (HEAD check)`);
+      }
+      if (headErr.message.includes('stub') || headErr.message.includes('content-type') || headErr.message.includes('dead') || headErr.message.includes('Aborted')) {
+        throw headErr;
+      }
+      logger.warn(`[${stepName}:${shortId}] HEAD check failed (${headErr.message}), trying GET anyway`);
+    }
+
+    writeStepProgress(videoId, { step: 'download', status: 'running', percent: 5, detail: 'Downloading...' });
+
+    // Step B: Download via axios stream — same AbortController kills stream on timeout
+    const resp = await axios({
+      method: 'get', url: realCdnUrl, responseType: 'stream',
+      timeout: 60000, maxRedirects: 5, headers: defaultHeaders,
+      signal: abortController.signal,
+    });
+
+    const totalBytes = parseInt(resp.headers['content-length'] || '0');
+    let downloadedBytes = 0;
+    let lastProgressWrite = 0;
+    let lastDataTime = Date.now();
+    let lastMeaningfulBytes = 0;
+    let lastMeaningfulTime = Date.now();
+
+    // Stream watchdog: kill stalled/slow streams
+    streamWatchdog = setInterval(() => {
+      if (Date.now() - lastDataTime > 30000) {
+        clearInterval(streamWatchdog); streamWatchdog = null;
+        abortController.abort(new Error('Stream stalled — no data for 30s'));
+      }
+      if (Date.now() - lastMeaningfulTime > 180000 && downloadedBytes - lastMeaningfulBytes < 180000) {
+        clearInterval(streamWatchdog); streamWatchdog = null;
+        abortController.abort(new Error(`Stream too slow — ${((downloadedBytes - lastMeaningfulBytes)/1024).toFixed(0)}KB in 3min`));
+      }
+    }, 5000);
+
+    await streamPipeline(
+      resp.data.on('data', (chunk) => {
+        downloadedBytes += chunk.length;
+        lastDataTime = Date.now();
+        const now = Date.now();
+        if (now - lastProgressWrite > 2000) {
+          lastProgressWrite = now;
+          const dlMB = (downloadedBytes / 1048576).toFixed(1);
+          const elapsed = (now - startedAt) / 1000;
+          const speed = elapsed > 0 ? downloadedBytes / elapsed / 1048576 : 0;
+          if (downloadedBytes - lastMeaningfulBytes > 100000) {
+            lastMeaningfulBytes = downloadedBytes;
+            lastMeaningfulTime = now;
+          }
+          if (totalBytes > 0) {
+            const pct = Math.min(95, Math.round(downloadedBytes / totalBytes * 100));
+            const totalMB = (totalBytes / 1048576).toFixed(1);
+            writeStepProgress(videoId, { step: 'download', status: 'running', percent: pct, detail: `${dlMB}/${totalMB} MB (${speed.toFixed(1)} MB/s)` });
+          } else {
+            writeStepProgress(videoId, { step: 'download', status: 'running', percent: 10, detail: `${dlMB} MB (${speed.toFixed(1)} MB/s)` });
+          }
+        }
+      }),
+      createWriteStream(tmpPath)
+    );
+
+    if (streamWatchdog) { clearInterval(streamWatchdog); streamWatchdog = null; }
+
+    // Verify downloaded file
+    const dlStat = await stat(tmpPath);
+    if (dlStat.size < 100000) {
+      await unlink(tmpPath).catch(() => {});
+      throw new Error(`Downloaded file too small: ${dlStat.size} bytes (min 100KB) — donor returned stub`);
+    }
+
+    await rename(tmpPath, outputPath);
+    const sizeMB = (dlStat.size / 1048576).toFixed(1);
+    const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+    logger.info(`[${stepName}:${shortId}] ✅ Downloaded: ${sizeMB}MB in ${elapsed}s → ${outputPath}`);
   } catch (err) {
-    // Kill Playwright browser if still running
+    // Clean up temp file
+    await unlink(tmpPath).catch(() => {});
+    if (existsSync(outputPath) && (await stat(outputPath).catch(() => ({size:0}))).size < 100000) {
+      await unlink(outputPath).catch(() => {});
+    }
+    throw new Error(`Download failed: ${err.message}`);
+  } finally {
+    // ALWAYS clean up — no zombies possible
+    clearTimeout(hardTimer);
+    if (streamWatchdog) { clearInterval(streamWatchdog); streamWatchdog = null; }
     if (playwrightBrowser) {
       try { await playwrightBrowser.close(); } catch {}
       playwrightBrowser = null;
     }
-    throw err;
   }
 
   return videoId;
@@ -1248,13 +1328,13 @@ async function processMedia(videoId, stepName) {
 
   const workDir = join(WORK_DIR, videoId);
 
-  // Use watermarked video as source (screenshots/preview should show watermark)
+  // REQUIRE watermarked video — never fall back to original.mp4
+  // If watermarked.mp4 doesn't exist, it means pipeline ordering is broken
   const watermarkedPath = join(workDir, 'watermarked.mp4');
-  const originalPath = join(workDir, 'original.mp4');
-  const videoPath = existsSync(watermarkedPath) ? watermarkedPath : originalPath;
-  if (!existsSync(videoPath)) {
-    throw new Error(`No video file found in workdir (checked watermarked.mp4, original.mp4)`);
+  if (!existsSync(watermarkedPath)) {
+    throw new Error(`watermarked.mp4 not found in workdir — media step ran before watermark completed. Pipeline ordering bug.`);
   }
+  const videoPath = watermarkedPath;
 
   // ── Get video info ─────────────────────────────────────
   const duration = await getVideoDuration(videoPath);
@@ -1504,11 +1584,18 @@ async function processCdnUpload(videoId, stepName) {
   let watermarkedCdnUrl = null;
   if (existsSync(watermarkedPath)) {
     const sz = (await stat(watermarkedPath)).size;
-    logger.info(`[${stepName}:${shortId}] Uploading watermarked.mp4 (${(sz / 1048576).toFixed(1)}MB)...`);
+    logger.info(`[${stepName}:${shortId}] Uploading watermarked.mp4 — local size: ${sz} bytes (${(sz / 1048576).toFixed(1)}MB)`);
     watermarkedCdnUrl = await uploadFile(watermarkedPath, `${cdnBase}/watermarked.mp4`, uploadOpts);
     cdnFilesDone++;
+    // Verify upload: compare local size vs Storage size
+    const remotePath = `${cdnBase}/watermarked.mp4`;
+    const storageSize = await getStorageFileSize(remotePath);
+    if (storageSize !== sz) {
+      logger.error(`[${stepName}:${shortId}] UPLOAD MISMATCH: local=${sz} bytes, storage=${storageSize} bytes, diff=${sz - storageSize} bytes`);
+      throw new Error(`Upload verification failed: local=${sz} vs storage=${storageSize} (${((storageSize/sz)*100).toFixed(1)}% uploaded). Retry needed.`);
+    }
+    logger.info(`[${stepName}:${shortId}] ✓ watermarked.mp4 → ${watermarkedCdnUrl} (verified: ${storageSize} bytes match)`);
     writeStepProgress(videoId, { step: 'cdn_upload', status: 'running', percent: Math.round(cdnFilesDone / cdnTotalFiles * 100), detail: `Uploading ${cdnFilesDone}/${cdnTotalFiles} files (watermarked.mp4 done)` });
-    logger.info(`[${stepName}:${shortId}] ✓ watermarked.mp4 → ${watermarkedCdnUrl}`);
   } else {
     logger.warn(`[${stepName}:${shortId}] watermarked.mp4 not found, skipping`);
   }
@@ -1643,24 +1730,41 @@ async function processPublish(videoId, stepName) {
     return '__skip__'; // don't pass to cleanup — video is needs_review
   }
 
-  // ── 1a2. Verify CDN video is not a stub (min 500KB) ──
+  // ── 1a2. Verify CDN video is not a stub or truncated upload ──
+  // Use Storage API (authoritative) instead of CDN edge (can return stale cached size)
+  // Check both absolute minimum (500KB) and duration-based minimum (50KB per second)
   try {
-    const headResp = await axios.head(video.video_url_watermarked, {
-      headers: { 'Referer': 'https://celeb.skin/' },
-      timeout: 10000,
-    });
-    const cdnSize = parseInt(headResp.headers['content-length'] || '0');
-    if (cdnSize < 500000) {
-      logger.warn(`[${stepName}:${shortId}] CDN video too small: ${cdnSize} bytes → needs_review`);
-      await query(
-        `UPDATE videos SET status = 'needs_review', pipeline_step = NULL,
-         pipeline_error = $2, updated_at = NOW() WHERE id = $1`,
-        [videoId, `CDN video stub: ${cdnSize} bytes (min 500KB)`]
-      );
-      return '__skip__';
+    const remotePath = extractRemotePath(video.video_url_watermarked);
+    if (remotePath) {
+      let storageSize = await getStorageFileSize(remotePath);
+      // Get duration for smart size check
+      const { rows: [durRow] } = await query(`SELECT duration_seconds FROM videos WHERE id = $1`, [videoId]);
+      const duration = durRow?.duration_seconds || 0;
+      // Minimum: at least 500KB absolute OR 50KB per second of video
+      const minSize = Math.max(500000, duration * 50000);
+
+      if (storageSize < minSize) {
+        // CDN propagation delay — wait 10s and recheck once
+        logger.warn(`[${stepName}:${shortId}] Storage file small: ${(storageSize/1024).toFixed(0)}KB (min ${(minSize/1024).toFixed(0)}KB for ${duration}s), retrying in 10s...`);
+        await sleep(10000);
+        storageSize = await getStorageFileSize(remotePath);
+      }
+      if (storageSize < minSize) {
+        const kbs = duration > 0 ? Math.round(storageSize / duration / 1024) : 0;
+        logger.warn(`[${stepName}:${shortId}] Storage file too small after retry: ${(storageSize/1024).toFixed(0)}KB (${kbs}KB/s, need 50KB/s for ${duration}s) → needs_review`);
+        await query(
+          `UPDATE videos SET status = 'needs_review', pipeline_step = NULL,
+           pipeline_error = $2, updated_at = NOW() WHERE id = $1`,
+          [videoId, `CDN video too small: ${(storageSize/1024).toFixed(0)}KB (${kbs}KB/s, min 50KB/s for ${duration}s) [Storage API]`]
+        );
+        return '__skip__';
+      }
+      logger.info(`[${stepName}:${shortId}] Storage file OK: ${(storageSize / 1048576).toFixed(1)}MB (${duration}s)`);
+    } else {
+      logger.warn(`[${stepName}:${shortId}] Cannot extract remote path from ${video.video_url_watermarked} — skipping size check`);
     }
   } catch (headErr) {
-    logger.warn(`[${stepName}:${shortId}] CDN HEAD check failed: ${headErr.message} — continuing`);
+    logger.warn(`[${stepName}:${shortId}] Storage API size check failed: ${headErr.message} — continuing`);
   }
 
   // ── 1b. Pre-flight: verify AI Vision completed (not censored fallback) ──
@@ -2116,121 +2220,62 @@ async function cleanupUnpublished() {
   }
 }
 
-async function resumeFromWorkdirs() {
-  const resumed = { download: [], tmdb_enrich: [], ai_vision: [], watermark: [], media: [], cdn_upload: [], publish: [] };
+async function cleanupOnStart() {
+  // New start = clean slate. No auto-resume from previous runs.
+  // 1. Delete ALL unpublished/non-failed videos (leftover from previous pipeline run)
+  try {
+    const { rows: unpublished } = await query(
+      `SELECT id FROM videos
+       WHERE status NOT IN ('published', 'failed', 'needs_review')
+         AND pipeline_step IS NOT NULL`
+    );
+    if (unpublished.length > 0) {
+      const ids = unpublished.map(r => r.id);
+      // Delete related data first
+      await query(`DELETE FROM video_tags WHERE video_id = ANY($1)`, [ids]);
+      await query(`DELETE FROM video_celebrities WHERE video_id = ANY($1)`, [ids]);
+      await query(`DELETE FROM movie_scenes WHERE video_id = ANY($1)`, [ids]);
+      await query(`DELETE FROM collection_videos WHERE video_id = ANY($1)`, [ids]);
+      const { rowCount } = await query(`DELETE FROM videos WHERE id = ANY($1)`, [ids]);
+      logger.info(`Cleanup: deleted ${rowCount} unpublished pipeline videos from DB`);
 
-  // Clean orphan raw_videos (not linked to any video) to unblock future scrapes
+      // Reset their raw_videos back to pending so scraper can re-process them
+      await query(
+        `UPDATE raw_videos SET status = 'pending'
+         WHERE status = 'processing'
+           AND id NOT IN (SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL)`
+      );
+    }
+  } catch (err) {
+    logger.warn(`Cleanup DB error: ${err.message}`);
+  }
+
+  // 2. Clean ALL workdirs
+  if (existsSync(WORK_DIR)) {
+    const dirs = readdirSync(WORK_DIR, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.match(/^[0-9a-f]{8}-/));
+    let removed = 0;
+    for (const d of dirs) {
+      try { await rm(join(WORK_DIR, d.name), { recursive: true, force: true }); removed++; } catch {}
+    }
+    if (removed > 0) {
+      logger.info(`Cleanup: removed ${removed} workdirs`);
+    }
+  }
+
+  // 3. Reset stuck raw_videos
   try {
     const { rowCount } = await query(
-      `DELETE FROM raw_videos WHERE id NOT IN (
-        SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL
-      )`
+      `UPDATE raw_videos SET status = 'pending'
+       WHERE status = 'processing'
+         AND id NOT IN (SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL AND status = 'published')`
     );
     if (rowCount > 0) {
-      logger.info(`Cleaned ${rowCount} orphan raw_videos (not linked to any video)`);
+      logger.info(`Cleanup: reset ${rowCount} stuck raw_videos → pending`);
     }
   } catch (err) {
-    logger.warn(`Failed to clean orphan raw_videos: ${err.message}`);
+    logger.warn(`Cleanup raw_videos error: ${err.message}`);
   }
-
-  // Reset stuck processing raw_videos that have linked videos back to processed
-  try {
-    const { rowCount: resetCount } = await query(
-      `UPDATE raw_videos SET status = processed
-       WHERE status = processing
-       AND id IN (SELECT raw_video_id FROM videos WHERE raw_video_id IS NOT NULL)`
-    );
-    if (resetCount > 0) {
-      logger.info(`Reset ${resetCount} stuck processing raw_videos → processed`);
-    }
-  } catch (err) {
-    logger.warn(`Failed to reset stuck raw_videos: ${err.message}`);
-  }
-
-  if (!existsSync(WORK_DIR)) return resumed;
-
-  const dirs = readdirSync(WORK_DIR, { withFileTypes: true })
-    .filter(d => d.isDirectory() && d.name.match(/^[0-9a-f]{8}-/))
-    .map(d => d.name);
-
-  let removedEmpty = 0;
-
-  for (const videoId of dirs) {
-    const dir = join(WORK_DIR, videoId);
-
-    // Check directory contents
-    const files = readdirSync(dir);
-    if (files.length === 0) {
-      // Empty workdir — leftover from crash, remove
-      try { await rm(dir, { recursive: true, force: true }); } catch {}
-      removedEmpty++;
-      continue;
-    }
-
-    const hasOriginal = existsSync(join(dir, 'original.mp4'));
-    const hasMetadata = existsSync(join(dir, 'metadata.json'));
-    const hasWatermarked = existsSync(join(dir, 'watermarked.mp4'));
-    const hasPreview = existsSync(join(dir, 'preview.mp4'));
-    const hasThumbs = files.some(f => f.startsWith('thumb_') && f.endsWith('.jpg'));
-
-    // Check DB for CDN/publish status
-    const { rows } = await query(
-      `SELECT status, video_url_watermarked, thumbnail_url FROM videos WHERE id = $1`,
-      [videoId]
-    );
-    const video = rows[0];
-    if (!video) {
-      // Video deleted from DB — orphan workdir, remove
-      try { await rm(dir, { recursive: true, force: true }); } catch {}
-      removedEmpty++;
-      continue;
-    }
-
-    // Skip already finished
-    if (video.status === 'published' || video.status === 'failed') {
-      // Published — cleanup should handle this, but remove if somehow left
-      if (video.status === 'published') {
-        try { await rm(dir, { recursive: true, force: true }); } catch {}
-        removedEmpty++;
-      }
-      continue;
-    }
-
-    const hasCdnVideo = video.video_url_watermarked?.includes('b-cdn.net');
-    const hasCdnThumb = video.thumbnail_url?.includes('b-cdn.net');
-
-    // Determine which step to resume FROM (next step to run)
-    // Order: most-progressed first
-    if (hasCdnVideo && hasCdnThumb) {
-      resumed.publish.push(videoId);
-    } else if (hasWatermarked && hasThumbs && hasPreview) {
-      resumed.cdn_upload.push(videoId);
-    } else if (hasWatermarked && !hasThumbs) {
-      resumed.media.push(videoId);
-    } else if (hasMetadata && !hasWatermarked) {
-      resumed.watermark.push(videoId);
-    } else if (hasOriginal && !hasMetadata) {
-      // Check if TMDB enrichment was done
-      const { rows: celebRows } = await query(
-        `SELECT 1 FROM video_celebrities WHERE video_id = $1 LIMIT 1`,
-        [videoId]
-      );
-      if (celebRows.length > 0) {
-        resumed.ai_vision.push(videoId);
-      } else {
-        resumed.tmdb_enrich.push(videoId);
-      }
-    } else if (!hasOriginal) {
-      // No original — re-download
-      resumed.download.push(videoId);
-    }
-  }
-
-  if (removedEmpty > 0) {
-    logger.info(`Cleaned up ${removedEmpty} empty/orphan workdirs`);
-  }
-
-  return resumed;
 }
 
 // ============================================================
@@ -2244,10 +2289,23 @@ async function fetchPendingVideos(limit) {
     SELECT id FROM raw_videos
     WHERE status = 'pending'
     ORDER BY created_at ASC
-    ${limit > 0 ? `LIMIT ${limit}` : ''}
+    ${limit > 0 ? `LIMIT ${Math.max(limit, 20)}` : ''}
   `);
 
-  return rows.map(r => r.id);  // raw_video IDs (not video IDs!)
+  // Filter out IDs already enqueued (prevents duplicate downloads)
+  const newIds = rows.map(r => r.id).filter(id => !enqueuedRawIds.has(id));
+
+  // Track enqueued IDs
+  for (const id of newIds) {
+    enqueuedRawIds.add(id);
+  }
+
+  // Return only requested limit
+  const result = newIds.slice(0, limit > 0 ? limit : newIds.length);
+  if (result.length > 0) {
+    logger.info(`[fetchPending] ${rows.length} pending in DB, ${newIds.length} new (not yet enqueued), returning ${result.length}`);
+  }
+  return result;
 }
 
 // Create a video record from raw_video just before download starts
@@ -2449,30 +2507,18 @@ async function main() {
   // Seed the queues
   let totalSeeded = 0;
 
-  // Auto-resume: always scan workdirs for interrupted videos before fetching new ones
+  // Clean start: delete all leftovers from previous pipeline runs
   {
-    logger.info('Scanning workdirs for interrupted videos...');
-    // Clear progress.json from previous run
+    logger.info('Clean start: removing leftovers from previous runs...');
+    // Clear progress.json
     try {
       const progressFile = join(__dirname, 'logs', 'progress.json');
       writeFileSync(progressFile, JSON.stringify({ steps: {}, status: 'starting', startedAt: new Date().toISOString() }));
     } catch {}
 
-    // NOTE: resetInProgressVideos is called ONLY on graceful shutdown (SIGTERM/SIGINT),
-    // NOT on startup. This prevents deleting videos that are already downloaded/watermarked.
+    await cleanupOnStart();
 
-    const resumed = await resumeFromWorkdirs();
-    let resumedTotal = 0;
-
-    for (const [step, videoIds] of Object.entries(resumed)) {
-      if (videoIds.length > 0 && queues[step]) {
-        for (const id of videoIds) {
-          queues[step].enqueue(id);
-        }
-        resumedTotal += videoIds.length;
-        logger.info(`  Resumed ${videoIds.length} video(s) → ${step}`);
-      }
-    }
+    const resumedTotal = 0;
 
     if (resumedTotal > 0) {
       totalSeeded += resumedTotal;
@@ -2534,15 +2580,28 @@ async function main() {
           const scraperPath = join(__dirname, 'scrape-boobsradar.js');
 
           // Poll for new raw_videos every 10s while scraper runs
+          // Only enqueue up to DOWNLOAD_QUEUE_MAX at a time to prevent memory overload
           const pollInterval = setInterval(async () => {
             try {
-              const newIds = await fetchPendingVideos(limitArg > 0 ? limitArg - totalSeeded : 0);
+              const currentQueueSize = queues[stepsToRun[0]].size();
+              const activeDownloads = pools.download ? pools.download.activeCount : 0;
+              const totalInFlight = currentQueueSize + activeDownloads;
+              const slotsAvailable = DOWNLOAD_QUEUE_MAX - totalInFlight;
+              if (slotsAvailable <= 0) {
+                logger.debug?.(`[poll] Queue full: ${currentQueueSize} queued + ${activeDownloads} active = ${totalInFlight} (max ${DOWNLOAD_QUEUE_MAX})`);
+                return;
+              }
+              const fetchLimit = limitArg > 0 ? Math.min(slotsAvailable, limitArg - totalSeeded) : slotsAvailable;
+              if (fetchLimit <= 0) return;
+              const newIds = await fetchPendingVideos(fetchLimit);
               if (newIds.length > 0) {
                 for (const id of newIds) queues[stepsToRun[0]].enqueue(id);
                 totalSeeded += newIds.length;
-                logger.info(`Scraper poll: ${newIds.length} new videos enqueued (total: ${totalSeeded})`);
+                logger.info(`[poll] +${newIds.length} enqueued (total seeded: ${totalSeeded}, queue: ${queues[stepsToRun[0]].size()}, active: ${activeDownloads})`);
               }
-            } catch {}
+            } catch (e) {
+              logger.error(`[poll] Error: ${e.message}`);
+            }
           }, 10000);
 
           await new Promise((resolve, reject) => {
@@ -2568,12 +2627,20 @@ async function main() {
           clearInterval(pollInterval);
         }
 
-        // Final sweep: enqueue any remaining raw_videos
-        const ids = await fetchPendingVideos(limitArg > 0 ? limitArg - totalSeeded : 0);
-        if (ids.length > 0) {
-          for (const id of ids) queues[stepsToRun[0]].enqueue(id);
-          totalSeeded += ids.length;
-          logger.info(`Scraper final: ${ids.length} new videos enqueued (total: ${totalSeeded})`);
+        // Final sweep: enqueue remaining raw_videos (limited batch)
+        {
+          const qSize = queues[stepsToRun[0]].size();
+          const dlActive = pools.download ? pools.download.activeCount : 0;
+          const finalSlots = DOWNLOAD_QUEUE_MAX - qSize - dlActive;
+          if (finalSlots > 0) {
+            const finalLimit = limitArg > 0 ? Math.min(finalSlots, limitArg - totalSeeded) : finalSlots;
+            const ids = await fetchPendingVideos(finalLimit > 0 ? finalLimit : finalSlots);
+            if (ids.length > 0) {
+              for (const id of ids) queues[stepsToRun[0]].enqueue(id);
+              totalSeeded += ids.length;
+              logger.info(`[final] +${ids.length} enqueued (total seeded: ${totalSeeded}, queue: ${qSize + ids.length}, active: ${dlActive})`);
+            }
+          }
         }
       } catch (e) {
         logger.error(`Scraper error: ${e.message}`);
@@ -2599,6 +2666,27 @@ async function main() {
 
     const totalQueued = stepsToRun.reduce((sum, name) => sum + queues[name].size(), 0);
     const totalActive = stepsToRun.reduce((sum, name) => sum + pools[name].activeCount, 0);
+
+    // Refill download queue from pending raw_videos (drip-feed, not flood)
+    if (scraperDone && queues[stepsToRun[0]] && stepsToRun[0] === 'download') {
+      try {
+        const dlQueueSize = queues.download.size();
+        const dlActive = pools.download.activeCount;
+        const totalInFlight = dlQueueSize + dlActive;
+        const dlSlots = DOWNLOAD_QUEUE_MAX - totalInFlight;
+        if (dlSlots > 0) {
+          const refillLimit = limitArg > 0 ? Math.min(dlSlots, limitArg - totalSeeded) : dlSlots;
+          if (refillLimit > 0) {
+            const refillIds = await fetchPendingVideos(refillLimit);
+            if (refillIds.length > 0) {
+              for (const id of refillIds) queues.download.enqueue(id);
+              totalSeeded += refillIds.length;
+              logger.info(`[refill] +${refillIds.length} enqueued (total seeded: ${totalSeeded}, queue: ${dlQueueSize + refillIds.length}, active: ${dlActive})`);
+            }
+          }
+        }
+      } catch {}
+    }
 
     // Poll DB for watermark_ready — claim for Contabo if free slots
     if (queues.watermark && pools.watermark) {

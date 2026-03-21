@@ -304,9 +304,17 @@ app.get('/api/pipeline/videos', async (req, res) => {
       LIMIT 200
     `);
 
-    res.json({
-      count: rows.length,
-      videos: rows.map(r => ({
+    // Read step-progress.json for each video (file-based progress from workers)
+    const PIPELINE_WORK_DIR = '/opt/celebskin/pipeline-work';
+    const videosWithProgress = rows.map(r => {
+      let progress = null;
+      try {
+        const progFile = join(PIPELINE_WORK_DIR, r.id, 'step-progress.json');
+        if (existsSync(progFile)) {
+          progress = JSON.parse(readFileSync(progFile, 'utf8'));
+        }
+      } catch {}
+      return {
         id: r.id,
         title: r.title_en || `${r.celebrity || 'Unknown'} in ${r.movie || 'Unknown'}${r.movie_year ? ` (${r.movie_year})` : ''}`,
         celebrity: r.celebrity || null,
@@ -317,7 +325,13 @@ app.get('/api/pipeline/videos', async (req, res) => {
         status: r.status,
         created_at: r.created_at,
         updated_at: r.updated_at,
-      })),
+        progress,
+      };
+    });
+
+    res.json({
+      count: rows.length,
+      videos: videosWithProgress,
     });
   } catch (err) {
     logger.error(`[pipeline-api] /videos error: ${err.message}`);
@@ -372,7 +386,8 @@ app.post('/api/pipeline/start', (req, res) => {
 
     const limit = parseInt(req.body?.limit) || 0;
     const source = req.body?.source || '';
-    const category = req.body?.category || '';
+    // Strip count suffix like "(280)" from category name sent by UI
+    const category = (req.body?.category || '').replace(/\s*\(\d+\)\s*$/, '').trim();
     const args = [];
     if (limit > 0) args.push(`--limit=${limit}`);
     if (source) args.push(`--source=${source}`);

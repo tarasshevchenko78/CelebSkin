@@ -191,3 +191,59 @@ export async function checkFileExists(remotePath) {
         return false;
     }
 }
+
+// ============================================
+// Get file size via Storage API (authoritative)
+// ============================================
+
+/**
+ * Get file size from Bunny Storage API (not CDN edge cache).
+ * CDN edge can return stale/cached content-length after upload.
+ * Storage API is the authoritative source.
+ *
+ * NOTE: Bunny Storage API returns 401 for HEAD on files.
+ * Must use GET on parent directory listing and find file by name.
+ *
+ * @param {string} remotePath - Path within storage zone (e.g. 'videos/{id}/watermarked.mp4')
+ * @returns {Promise<number>} File size in bytes, or 0 if not found/error
+ */
+export async function getStorageFileSize(remotePath) {
+    try {
+        // Extract directory and filename from remotePath
+        const lastSlash = remotePath.lastIndexOf('/');
+        const dirPath = lastSlash >= 0 ? remotePath.substring(0, lastSlash + 1) : '';
+        const fileName = lastSlash >= 0 ? remotePath.substring(lastSlash + 1) : remotePath;
+
+        // List directory via Storage API
+        const listUrl = getStorageUrl(dirPath);
+        const response = await axios.get(listUrl, {
+            headers: { 'AccessKey': config.bunny.storageKey, 'Accept': 'application/json' },
+            timeout: 15000,
+        });
+
+        // Find file in listing
+        const files = response.data || [];
+        const file = files.find(f => f.ObjectName === fileName);
+        return file ? (file.Length || 0) : 0;
+    } catch {
+        return 0;
+    }
+}
+
+/**
+ * Extract remote path from a CDN URL.
+ * e.g. 'https://celebskin-cdn.b-cdn.net/videos/abc/watermarked.mp4' → 'videos/abc/watermarked.mp4'
+ *
+ * @param {string} cdnUrl - Full CDN URL
+ * @returns {string|null} Remote path or null if not a CDN URL
+ */
+export function extractRemotePath(cdnUrl) {
+    if (!cdnUrl) return null;
+    const cdnBase = config.bunny.cdnUrl;
+    if (cdnUrl.startsWith(cdnBase)) {
+        return cdnUrl.substring(cdnBase.length + 1); // skip trailing '/'
+    }
+    // Try generic b-cdn.net pattern
+    const match = cdnUrl.match(/b-cdn\.net\/(.+)$/);
+    return match ? match[1] : null;
+}

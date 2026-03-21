@@ -326,6 +326,25 @@ async function main() {
 
   logger.info(`\nКатегорий для обработки: ${categories.length}`);
 
+  // Preload published video slugs + titles into Sets for fast dedup
+  const publishedSlugs = new Set();
+  const publishedTitles = new Set();
+  try {
+    const { rows: pubRows } = await query(
+      `SELECT rv.source_video_id, v.original_title
+       FROM videos v
+       LEFT JOIN raw_videos rv ON rv.id = v.raw_video_id
+       WHERE v.status = 'published'`
+    );
+    for (const r of pubRows) {
+      if (r.source_video_id) publishedSlugs.add(r.source_video_id);
+      if (r.original_title) publishedTitles.add(r.original_title.substring(0, 40).toLowerCase());
+    }
+    logger.info(`Preloaded ${publishedSlugs.size} slugs + ${publishedTitles.size} titles for dedup`);
+  } catch (e) {
+    logger.warn(`Failed to preload published: ${e.message}`);
+  }
+
   let totalProcessed = 0;
 
   // STEP 2: Обходим каждую категорию
@@ -359,6 +378,7 @@ async function main() {
     }
 
     // Обходим все страницы категории
+    let consecutiveFullSkipPages = 0;
     for (let page = 1; page <= maxPages; page++) {
       if (totalProcessed >= config.maxVideosTotal) break;
 
@@ -382,33 +402,42 @@ async function main() {
 
       // --- Собираем задачи для параллельной загрузки ---
       const tasks = [];
+      let pageSkipped = 0;
 
       for (const videoItem of pageData.videos) {
         if (totalProcessed + tasks.length >= config.maxVideosTotal) break;
 
         const videoSlug = extractSlugFromUrl(videoItem.url);
 
+        // Fast Set check — skip without DB query
+        if (publishedSlugs.has(videoSlug) || (videoItem.title && publishedTitles.has(videoItem.title.substring(0, 40).toLowerCase()))) {
+          pageSkipped++;
+          continue;
+        }
+
         // Пропускаем уже обработанные (для --resume)
         if (progress.processedVideos.includes(videoSlug)) {
-          logger.debug(`    Пропуск (уже обработано): ${videoSlug}`);
-          progress.stats.totalSkipped++;
+          pageSkipped++;
           continue;
         }
 
         // Проверяем в БД — не скачано ли уже (raw_videos + videos)
         try {
           const { rows: existingRows } = await query(
-            `SELECT 'raw' as src, id, status FROM raw_videos
-             WHERE source_video_id = $1 OR source_url = $2
+            `SELECT v.id, v.status FROM videos v
+             JOIN raw_videos rv ON rv.id = v.raw_video_id
+             WHERE (rv.source_video_id = $1 OR rv.source_url = $2)
+               AND v.status = 'published'
              UNION ALL
-             SELECT 'video' as src, id, status FROM videos
-             WHERE original_title ILIKE $3
+             SELECT v.id, v.status FROM videos v
+             WHERE v.status = 'published'
+               AND v.original_title ILIKE $3
              LIMIT 1`,
             [videoSlug, videoItem.url, `%${videoItem.title.substring(0, 40)}%`]
           );
           if (existingRows.length > 0) {
             const r = existingRows[0];
-            logger.info(`    Пропуск (уже в БД [${r.src}], status=${r.status}): ${videoSlug}`);
+            logger.info(`    Пропуск (уже опубликовано, id=${r.id}): ${videoSlug}`);
             progress.processedVideos.push(videoSlug);
             progress.stats.totalSkipped++;
             continue;
@@ -471,6 +500,17 @@ async function main() {
         }
       }
 
+      // Page-level early stop: if ALL videos on page were skipped, skip remaining pages
+      if (pageSkipped > 0 && tasks.length === 0 && pageData.videos.length > 0) {
+        consecutiveFullSkipPages = (consecutiveFullSkipPages || 0) + 1;
+        if (consecutiveFullSkipPages >= 2) {
+          logger.info(`  ⏩ 2 consecutive full-skip pages → moving to next category`);
+          break;
+        }
+      } else {
+        consecutiveFullSkipPages = 0;
+      }
+
       // --- Скачиваем параллельно батчами ---
       const BATCH = config.parallelDownloads;
       const totalTasks = tasks.length;
@@ -500,14 +540,10 @@ async function main() {
               }
             }
 
-            // Пропускаем если на странице нет ссылки на видео
-            if (!metadata.video_file_url) {
-              logger.warn(`${tag} Пропуск: нет video_file_url на странице`);
-              progress.stats.totalSkipped++;
-              return;
-            }
+            // Pipeline v2 gets video URL via Playwright — no need for video_file_url in scraper
+            // video_file_url is optional, just stored in raw_videos for reference
 
-            // Видео
+            // Видео (legacy direct download, only if video_file_url exists)
             if (!config.skipDownload && !config.skipVideo && metadata.video_file_url) {
               try {
                 const videoPath = join(videoDir, 'video.mp4');

@@ -128,7 +128,7 @@ PipelineQueue + WorkerPool. Шаги download→ai_vision используют i
 ### 8 шагов
 | # | Шаг | Workers | Описание |
 |---|------|---------|----------|
-| 1 | download | 6 | Playwright network intercept → axios stream, 5min timeout |
+| 1 | download | 3 | Playwright network intercept → axios stream, 5min timeout, DOWNLOAD_QUEUE_MAX=5 |
 | 2 | tmdb_enrich | 4 | TMDB API (Bearer JWT), nationality (ISO 2-letter), countries, draft статус |
 | 3 | ai_vision | 3 | subprocess ai-vision-analyze.js + generate-multilang.js (10 locales) |
 | 4 | watermark | 2 | FFmpeg veryfast CRF22, ATOMIC SQL claim (prevents double-processing with Home Worker) |
@@ -171,11 +171,14 @@ PipelineQueue + WorkerPool. Шаги download→ai_vision используют i
 - Публикуются в шаге publish только вместе с видео
 - Если CDN URLs отсутствуют → video → `needs_review` (не publish)
 
-### Auto-resume при рестарте
-- Сканирует `/opt/celebskin/pipeline-work/` при каждом старте (не нужен --resume)
-- Определяет шаг по файлам + DB: original.mp4, metadata.json, watermarked.mp4, thumb_*.jpg, preview.mp4, CDN URLs
-- Пустые/orphan workdirs удаляются автоматически
-- Published workdirs очищаются
+### Чистый старт (cleanupOnStart) — БЕЗ auto-resume
+- **Новый запуск = чистый старт.** Никаких процессов из предыдущих запусков
+- `cleanupOnStart()` при каждом старте:
+  1. Удаляет ВСЕ незавершённые видео из DB (не published/failed/needs_review)
+  2. Удаляет ВСЕ рабочие папки `/opt/celebskin/pipeline-work/` (ВРЕМЕННЫЕ файлы, не DB/CDN/scripts)
+  3. Сбрасывает raw_videos `processing` → `pending` если видео не опубликовано
+- **pipeline-work = ВРЕМЕННЫЕ файлы**: original.mp4, watermarked.mp4, thumbs, previews — всё что опубликовано уже на CDN
+- raw_videos lifecycle: `pending` → `processing` → `processed`. Не опубликовано = сброс в `pending`
 
 ### Retry и dead-letter
 - 3 retry на каждый шаг (5s, 15s, 45s delays)
@@ -184,7 +187,7 @@ PipelineQueue + WorkerPool. Шаги download→ai_vision используют i
 
 ### CLI
 ```bash
-node run-pipeline-v2.js                    # полный pipeline + auto-resume
+node run-pipeline-v2.js                    # полный pipeline (чистый старт)
 node run-pipeline-v2.js --limit=10         # макс 10 новых видео
 node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug)
 ```
@@ -219,6 +222,7 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - Publish автомодерация: полные → published, неполные → needs_review
 - Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
 - Документация деплоя: Web App НЕ на Vercel! Работает через PM2 на AbeloHost. Деплой: `cd /opt/celebskin/site && npm run build && pm2 restart celebskin`. Git push НЕ деплоит автоматически.
+- **PM2 auto-startup**: systemd `pm2-root.service` enabled. PM2 автоматически стартует при рестарте сервера. `pm2 save` обязателен после любых изменений процессов.
 - Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
 - **Watermark fix (13.03.2026)**: `-sar 1:1`, `-keyint_min 48 -sc_threshold 0`, `-af aresample=async=1:first_pts=0`, `-fflags +genpts+discardcorrupt`, `-max_muxing_queue_size 4096` — исправляет PIPELINE_ERROR_DECODE при seek в Chrome
 - Новые скрипты: `scan-broken-videos.js` (сканирование SAR), `reprocess-broken-videos.js` (перекодировка старых видео)
