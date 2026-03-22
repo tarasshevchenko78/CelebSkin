@@ -99,7 +99,9 @@ export default class BoobsRadarAdapter {
      * Fetch video list from a category page with pagination
      */
     async getVideoList(categoryUrl, page = 1) {
-        const url = page > 1 ? `${categoryUrl}?from=${page}` : categoryUrl;
+        // Pagination format: /nudes/slug/N/ where N is from-offset (not page number)
+        // categoryUrl = https://boobsradar.com/nudes/2015-before-nude-scenes/
+        const url = page > 1 ? `${categoryUrl.replace(/\/$/, '')}/${page}/` : categoryUrl;
         const html = await fetchHtml(url);
 
         const videos = [];
@@ -142,8 +144,8 @@ export default class BoobsRadarAdapter {
 
         // Determine last page from pagination
         let lastPage = page;
-        // Look for: ?from=N in pagination links
-        const pageRe = /[?&]from=(\d+)/g;
+        // Look for: from=N in pagination links or data-parameters
+        const pageRe = /from[=:]\s*(\d+)/g;
         let pm;
         while ((pm = pageRe.exec(html)) !== null) {
             const p = parseInt(pm[1]);

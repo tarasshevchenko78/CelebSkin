@@ -562,8 +562,8 @@ app.post('/api/pipeline/delete-bulk', async (req, res) => {
       return res.status(400).json({ error: 'videoIds array is required' });
     }
 
-    if (videoIds.length > 100) {
-      return res.status(400).json({ error: 'Maximum 100 videos per bulk delete' });
+    if (videoIds.length > 500) {
+      return res.status(400).json({ error: 'Maximum 500 videos per bulk delete' });
     }
 
     const results = [];
