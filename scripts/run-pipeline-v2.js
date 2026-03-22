@@ -293,7 +293,23 @@ class WorkerPool {
 
         if (success && resultVideoId === '__skip__') {
           // Skipped (duplicate etc) — don't pass to next step
-          // Note: activeCount decremented in finally block
+          // But if download created a video record on first attempt then retried and skipped,
+          // that video is now a zombie (status='new' forever). Mark it failed.
+          if (isRawId && this.name === 'download') {
+            const { rows: zombieRows } = await query(
+              `SELECT id FROM videos WHERE raw_video_id = $1 AND status = 'new' LIMIT 1`, [videoId]
+            );
+            if (zombieRows.length > 0) {
+              const zombieId = zombieRows[0].id;
+              await query(
+                `UPDATE videos SET status = 'failed', pipeline_error = $2, updated_at = NOW() WHERE id = $1`,
+                [zombieId, lastError?.message || 'Download skipped after retry (donor URL dead)']
+              );
+              logger.info(`[${this.name}:${shortId}] Marked zombie video ${zombieId.substring(0,8)} as failed`);
+            }
+            // Remove from enqueuedRawIds so refill won't skip this raw_video forever
+            enqueuedRawIds.delete(videoId);
+          }
           continue;
         }
 
@@ -352,21 +368,33 @@ class WorkerPool {
           const errMsg = lastError?.message || 'Unknown error';
           logger.error(`[${this.name}:${shortId}] ❌ Failed after ${RETRY_DELAYS.length + 1} attempts in ${stepDuration}s: ${errMsg}`);
 
+          // For download step with raw_video ID: find the actual video UUID created by claimRawVideoForDownload
+          let failVideoId = videoId;
+          if (isRawId) {
+            const { rows: vRows } = await query(`SELECT id FROM videos WHERE raw_video_id = $1 LIMIT 1`, [videoId]);
+            if (vRows.length > 0) {
+              failVideoId = vRows[0].id;
+              logger.info(`[${this.name}:${shortId}] Resolved raw_video → video ${failVideoId.substring(0,8)} for failure update`);
+            }
+          }
+
           await query(
             `UPDATE videos SET status = 'failed', pipeline_step = $2, pipeline_error = $3, updated_at = NOW() WHERE id = $1`,
-            [videoId, this.name, errMsg]
+            [failVideoId, this.name, errMsg]
           );
           // Write error to processing_log for investigation
           try {
             await query(
               `INSERT INTO processing_log (video_id, step, status, message, metadata)
                VALUES ($1, $2, 'failed', $3, $4::jsonb)`,
-              [videoId, this.name, errMsg, JSON.stringify({ duration_sec: parseFloat(stepDuration), attempts: RETRY_DELAYS.length + 1 })]
+              [failVideoId, this.name, errMsg, JSON.stringify({ duration_sec: parseFloat(stepDuration), attempts: RETRY_DELAYS.length + 1 })]
             );
           } catch {}
 
-          clearStepProgress(videoId);
-          await recordFailure(videoId, this.name, lastError, RETRY_DELAYS.length + 1);
+          clearStepProgress(failVideoId);
+          await recordFailure(failVideoId, this.name, lastError, RETRY_DELAYS.length + 1);
+          // Remove from enqueuedRawIds so failed downloads can be retried on next pipeline run
+          if (isRawId) enqueuedRawIds.delete(videoId);
         }
       } catch (err) {
         // Unexpected error in worker itself
@@ -2242,8 +2270,8 @@ async function cleanupOnStart() {
   try {
     const { rows: unpublished } = await query(
       `SELECT id FROM videos
-       WHERE status NOT IN ('published', 'failed', 'needs_review')
-         AND pipeline_step IS NOT NULL`
+       WHERE status NOT IN ('published', 'needs_review')
+         AND (pipeline_step IS NOT NULL OR status IN ('new', 'failed'))`
     );
     if (unpublished.length > 0) {
       const ids = unpublished.map(r => r.id);

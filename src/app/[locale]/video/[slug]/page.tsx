@@ -163,8 +163,8 @@ export default async function VideoDetailPage({
     }
 
     // JSON-LD structured data
-    const thumbUrl = video.thumbnail_url || (video.screenshots?.[0] as {url?: string})?.url || null;
-    const videoLd = title && thumbUrl ? {
+    const thumbUrl = video.thumbnail_url || (video.screenshots?.[0] as {url?: string})?.url || 'https://celeb.skin/og-default.jpg';
+    const videoLd = title ? {
         '@context': 'https://schema.org',
         '@type': 'VideoObject',
         name: title,

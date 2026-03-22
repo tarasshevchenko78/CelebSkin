@@ -203,6 +203,7 @@ app.get('/api/pipeline/status', async (req, res) => {
     const { rows: stepCounts } = await query(`
       SELECT pipeline_step, COUNT(*)::int AS cnt
       FROM videos WHERE pipeline_step IS NOT NULL
+        AND status NOT IN ('published', 'failed', 'needs_review')
       GROUP BY pipeline_step
     `);
 
@@ -211,7 +212,7 @@ app.get('/api/pipeline/status', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'published')::int AS published,
         COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
         COUNT(*) FILTER (WHERE status = 'needs_review')::int AS needs_review,
-        COUNT(*) FILTER (WHERE pipeline_step IS NOT NULL)::int AS in_progress
+        COUNT(*) FILTER (WHERE pipeline_step IS NOT NULL AND status NOT IN ('published', 'failed', 'needs_review'))::int AS in_progress
       FROM videos
     `);
 
@@ -294,7 +295,7 @@ app.get('/api/pipeline/videos', async (req, res) => {
         JOIN movie_scenes ms ON ms.movie_id = m2.id
         WHERE ms.video_id = v.id LIMIT 1
       ) m ON true
-      WHERE v.pipeline_step IS NOT NULL
+      WHERE (v.pipeline_step IS NOT NULL AND v.status NOT IN ('published'))
          OR v.status IN ('new', 'processing', 'downloading', 'downloaded',
                          'tmdb_enriching', 'tmdb_enriched', 'ai_analyzing', 'ai_analyzed',
                          'watermarking', 'media_generating', 'media_generated',
