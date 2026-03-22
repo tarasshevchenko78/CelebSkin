@@ -28,17 +28,32 @@ export default function Footer({ locale }: { locale: string }) {
                         </p>
                     </div>
 
-                    {/* Links */}
-                    <div className="flex flex-wrap gap-x-8 gap-y-2">
-                        {footerLinks.map((link) => (
-                            <a
-                                key={link.key}
-                                href={`/${locale}/${link.key}`}
-                                className="text-sm text-brand-secondary hover:text-brand-text transition-colors duration-200"
-                            >
-                                {(link.labels as Record<string, string>)[locale] || link.labels.en}
-                            </a>
-                        ))}
+                    {/* Main sections */}
+                    <div className="flex flex-col gap-4">
+                        <div className="flex flex-wrap gap-x-8 gap-y-2">
+                            {[
+                                { href: `/${locale}/video`, labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Videos', pt: 'Vídeos', it: 'Video', pl: 'Wideo', nl: 'Video\'s', tr: 'Videolar' } },
+                                { href: `/${locale}/celebrity`, labels: { en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités', es: 'Celebridades', pt: 'Celebridades', it: 'Celebrità', pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler' } },
+                                { href: `/${locale}/movie`, labels: { en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films', es: 'Películas', pt: 'Filmes', it: 'Film', pl: 'Filmy', nl: 'Films', tr: 'Filmler' } },
+                                { href: `/${locale}/collection`, labels: { en: 'Collections', ru: 'Коллекции', de: 'Sammlungen', fr: 'Collections', es: 'Colecciones', pt: 'Coleções', it: 'Collezioni', pl: 'Kolekcje', nl: 'Collecties', tr: 'Koleksiyonlar' } },
+                            ].map((item) => (
+                                <a key={item.href} href={item.href} className="text-sm font-medium text-brand-secondary hover:text-brand-accent transition-colors duration-200">
+                                    {(item.labels as Record<string, string>)[locale] || item.labels.en}
+                                </a>
+                            ))}
+                        </div>
+                        {/* Legal links */}
+                        <div className="flex flex-wrap gap-x-8 gap-y-2">
+                            {footerLinks.map((link) => (
+                                <a
+                                    key={link.key}
+                                    href={`/${locale}/${link.key}`}
+                                    className="text-sm text-brand-secondary hover:text-brand-text transition-colors duration-200"
+                                >
+                                    {(link.labels as Record<string, string>)[locale] || link.labels.en}
+                                </a>
+                            ))}
+                        </div>
                     </div>
                 </div>
 

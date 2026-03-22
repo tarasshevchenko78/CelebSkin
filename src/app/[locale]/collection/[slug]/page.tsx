@@ -118,13 +118,16 @@ export default async function CollectionDetailPage({ params }: { params: { local
         <div className="mx-auto max-w-[1600px] px-4 py-4 md:py-6">
             <JsonLd data={collectionLd} />
 
-            {/* Breadcrumb */}
-            <a
-                href={`/${locale}/collection`}
-                className="inline-block text-sm text-gray-500 hover:text-gray-300 transition-colors mb-4"
-            >
-                {backLabel[locale] || backLabel.en}
-            </a>
+            {/* Breadcrumbs */}
+            <nav className="mb-4 text-sm text-brand-muted" aria-label="Breadcrumb">
+                <ol className="flex flex-wrap items-center gap-1">
+                    <li><a href={`/${locale}`} className="hover:text-brand-accent transition-colors">Home</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li><a href={`/${locale}/collection`} className="hover:text-brand-accent transition-colors">{locale === 'ru' ? 'Коллекции' : 'Collections'}</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li className="text-brand-text">{title}</li>
+                </ol>
+            </nav>
 
             {/* ── HERO ── */}
             {collection.cover_url ? (

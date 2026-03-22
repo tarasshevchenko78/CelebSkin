@@ -8,7 +8,7 @@ export default function robots(): MetadataRoute.Robots {
       disallow: ['/admin/', '/api/'],
     },
     sitemap: [
-      'https://celeb.skin/sitemap.xml',
+      'https://celeb.skin/sitemap-index.xml',
       'https://celeb.skin/video-sitemap.xml',
     ],
   };

@@ -5,7 +5,7 @@ const SUPPORTED_LOCALES = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl',
 const DEFAULT_LOCALE = 'en';
 
 // Paths that should skip locale handling
-const SKIP_LOCALE_PATHS = ['/admin', '/api', '/_next', '/favicon.ico', '/robots.txt', '/sitemap', '/video-sitemap'];
+const SKIP_LOCALE_PATHS = ['/admin', '/api', '/_next', '/favicon.ico', '/robots.txt', '/sitemap', '/video-sitemap', '/sitemaps'];
 
 // ============================================
 // Rate limiting (in-memory, per-IP)

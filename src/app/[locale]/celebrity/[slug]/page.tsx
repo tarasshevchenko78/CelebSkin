@@ -176,6 +176,17 @@ export default async function CelebrityDetailPage({
         <div className="mx-auto max-w-6xl px-4 py-4 md:py-6">
             <JsonLd data={personLd} />
 
+            {/* Breadcrumbs */}
+            <nav className="mb-4 text-sm text-brand-muted" aria-label="Breadcrumb">
+                <ol className="flex flex-wrap items-center gap-1">
+                    <li><a href={`/${locale}`} className="hover:text-brand-accent transition-colors">Home</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li><a href={`/${locale}/celebrity`} className="hover:text-brand-accent transition-colors">{locale === 'ru' ? 'Знаменитости' : 'Celebrities'}</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li className="text-brand-text">{name}</li>
+                </ol>
+            </nav>
+
             {/* ── 1. HERO SECTION ── */}
             <div className="flex flex-col items-center md:items-start md:flex-row gap-5 md:gap-6">
                 {/* Photo */}

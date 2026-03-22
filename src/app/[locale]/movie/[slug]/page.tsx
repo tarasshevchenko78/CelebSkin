@@ -160,6 +160,17 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
         <div className="mx-auto max-w-6xl px-4 py-4 md:py-6">
             <JsonLd data={movieLd} />
 
+            {/* Breadcrumbs */}
+            <nav className="mb-4 text-sm text-brand-muted" aria-label="Breadcrumb">
+                <ol className="flex flex-wrap items-center gap-1">
+                    <li><a href={`/${locale}`} className="hover:text-brand-accent transition-colors">Home</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li><a href={`/${locale}/movie`} className="hover:text-brand-accent transition-colors">{locale === 'ru' ? 'Фильмы' : 'Movies'}</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li className="text-brand-text">{title}</li>
+                </ol>
+            </nav>
+
             {/* ── 1. HERO SECTION ── */}
             <div className="flex flex-col items-center md:items-start md:flex-row gap-6 md:gap-8">
                 {/* Poster */}

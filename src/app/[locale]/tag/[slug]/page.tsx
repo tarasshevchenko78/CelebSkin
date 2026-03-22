@@ -35,12 +35,23 @@ export default async function TagPage({ params }: { params: { locale: string; sl
 
     return (
         <div className="mx-auto max-w-[1600px] px-4 py-8">
+            {/* Breadcrumbs */}
+            <nav className="mb-4 text-sm text-brand-muted" aria-label="Breadcrumb">
+                <ol className="flex flex-wrap items-center gap-1">
+                    <li><a href={`/${locale}`} className="hover:text-brand-accent transition-colors">Home</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li><a href={`/${locale}/video`} className="hover:text-brand-accent transition-colors">{locale === 'ru' ? 'Видео' : 'Videos'}</a></li>
+                    <li className="text-brand-border">/</li>
+                    <li className="text-brand-text">#{tagName}</li>
+                </ol>
+            </nav>
+
             <h1 className="mb-6 text-2xl sm:text-3xl font-bold text-white">
                 <span className="text-brand-secondary font-normal mr-2">#</span>{tagName}
             </h1>
 
             {tag && (
-                <p className="text-sm text-brand-secondary mb-6">{tag.videos_count} videos</p>
+                <p className="text-sm text-brand-secondary mb-6">{tag.videos_count} {locale === 'ru' ? 'сцен' : 'scenes'}</p>
             )}
 
             {videos.length > 0 ? (
