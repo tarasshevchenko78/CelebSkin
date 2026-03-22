@@ -107,9 +107,10 @@ async function main() {
 
   if (!result || !result.title || !result.slug) throw new Error('Failed to generate');
 
+  // SEO: use ONE English slug for all locales (prevents canonical mismatch in Google)
+  const enSlug = slugify(result.slug.en || result.title.en || '', { lower: true, strict: true, locale: 'en' }).substring(0, 200);
   for (const loc of LOCALES) {
-    if (result.slug[loc]) result.slug[loc] = slugify(result.slug[loc], { lower: true, strict: true, locale: 'en' }).substring(0, 200);
-    if (!result.slug[loc] && result.title[loc]) result.slug[loc] = slugify(result.title[loc], { lower: true, strict: true, locale: 'en' }).substring(0, 200);
+    result.slug[loc] = enSlug;
   }
 
   log('Generated content for ' + LOCALES.length + ' locales');

@@ -81,7 +81,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     const videoEntries: MetadataRoute.Sitemap = videosResult.rows.flatMap(
       (video) =>
         LOCALES.map((locale) => {
-          const localizedSlug = video.slug[locale] || video.slug['en'];
+          const localizedSlug = video.slug['en'] || video.slug[locale];
           return {
             url: `${SITE_URL}/${locale}/video/${localizedSlug}`,
             lastModified: video.updated_at

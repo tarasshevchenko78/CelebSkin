@@ -49,7 +49,7 @@ export async function GET() {
 
         for (const video of rows) {
             for (const locale of LOCALES) {
-                const localizedSlug = video.slug[locale] || video.slug['en'];
+                const localizedSlug = video.slug['en'] || video.slug[locale];
                 if (!localizedSlug) continue;
 
                 const title = video.title[locale] || video.title['en'] || '';

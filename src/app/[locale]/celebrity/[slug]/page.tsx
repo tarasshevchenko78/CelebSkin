@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import { getLocalizedField } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
 import {
@@ -112,14 +113,7 @@ export default async function CelebrityDetailPage({
     }
 
     if (!celeb) {
-        return (
-            <div className="mx-auto max-w-6xl px-4 py-20 text-center">
-                <h1 className="text-2xl font-bold text-white mb-4">Celebrity not found</h1>
-                <a href={`/${locale}/celebrity`} className="text-red-400 hover:text-red-300 transition-colors">
-                    {locale === 'ru' ? '← К знаменитостям' : '← Back to celebrities'}
-                </a>
-            </div>
-        );
+        notFound();
     }
 
     const name = getLocalizedField(celeb.name_localized, locale) || celeb.name;

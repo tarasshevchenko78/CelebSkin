@@ -23,10 +23,12 @@ export function getLocalizedField(
  */
 export function getLocalizedSlug(
     slugJsonb: LocalizedField | null | undefined,
-    locale: string
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _locale: string
 ): string {
     if (!slugJsonb || typeof slugJsonb !== 'object') return '';
-    return slugJsonb[locale] || slugJsonb[DEFAULT_LOCALE] || Object.values(slugJsonb)[0] || '';
+    // SEO: always use EN slug for all locales to avoid canonical mismatch in Google
+    return slugJsonb[DEFAULT_LOCALE] || Object.values(slugJsonb)[0] || '';
 }
 
 /**

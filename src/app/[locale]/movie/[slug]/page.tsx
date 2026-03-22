@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { notFound } from 'next/navigation';
 import { getLocalizedField } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
 import {
@@ -113,14 +114,7 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
     }
 
     if (!movie) {
-        return (
-            <div className="mx-auto max-w-6xl px-4 py-20 text-center">
-                <h1 className="text-2xl font-bold text-white mb-4">Movie not found</h1>
-                <a href={`/${locale}/movie`} className="text-red-400 hover:text-red-300 transition-colors">
-                    {locale === 'ru' ? '← К фильмам' : '← Back to movies'}
-                </a>
-            </div>
-        );
+        notFound();
     }
 
     const title = getLocalizedField(movie.title_localized, locale) || movie.title;
