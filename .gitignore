@@ -51,3 +51,6 @@ scripts/logs/
 /backups/
 scripts/node_modules/
 scripts/tmp/
+
+# Pipeline scraper output
+/output/
