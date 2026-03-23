@@ -475,20 +475,22 @@ async function enrichVideoWithRelations(video: Video): Promise<Video> {
 
 export async function getAdjacentVideos(
     publishedAt: string,
-    locale: string
+    locale: string,
+    currentId?: string
 ): Promise<{ prevSlug: string | null; nextSlug: string | null }> {
+    const excludeId = currentId || '00000000-0000-0000-0000-000000000000';
     const [prevRes, nextRes] = await Promise.all([
         pool.query(
             `SELECT slug->>'en' as en, slug->>$2 as loc FROM videos
-             WHERE published_at < $1 AND status = 'published'
+             WHERE published_at < $1 AND status = 'published' AND id != $3
              ORDER BY published_at DESC LIMIT 1`,
-            [publishedAt, locale]
+            [publishedAt, locale, excludeId]
         ),
         pool.query(
             `SELECT slug->>'en' as en, slug->>$2 as loc FROM videos
-             WHERE published_at > $1 AND status = 'published'
+             WHERE published_at > $1 AND status = 'published' AND id != $3
              ORDER BY published_at ASC LIMIT 1`,
-            [publishedAt, locale]
+            [publishedAt, locale, excludeId]
         ),
     ]);
     const slug = (row: { loc: string; en: string } | undefined) =>
@@ -499,9 +501,9 @@ export async function getAdjacentVideos(
     if (!nextSlug) {
         const oldestRes = await pool.query(
             `SELECT slug->>'en' as en, slug->>$1 as loc FROM videos
-             WHERE status = 'published'
+             WHERE status = 'published' AND id != $2
              ORDER BY published_at ASC LIMIT 1`,
-            [locale]
+            [locale, excludeId]
         );
         nextSlug = slug(oldestRes.rows[0]);
     }

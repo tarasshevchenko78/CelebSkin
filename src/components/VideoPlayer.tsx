@@ -358,7 +358,7 @@ export default function VideoPlayer({
         <div ref={outerRef} className="relative aspect-video w-full bg-black rounded-xl">
         <div
             ref={containerRef}
-            className="absolute inset-0 rounded-xl overflow-hidden group/player select-none"
+            className="absolute inset-0 rounded-xl overflow-hidden group/player select-none" onContextMenu={(e) => e.preventDefault()}
             onMouseMove={resetHideTimer}
             onMouseLeave={() => { if (playing) setShowControls(false); }}
         >
@@ -380,6 +380,8 @@ export default function VideoPlayer({
                     crossOrigin="anonymous"
                     className="w-full h-full object-contain"
                     playsInline
+                    controlsList="nodownload"
+                    onContextMenu={(e) => e.preventDefault()}
                     onClick={togglePlay}
                     onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                     onProgress={(e) => {

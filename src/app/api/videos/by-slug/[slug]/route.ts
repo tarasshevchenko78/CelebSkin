@@ -17,7 +17,7 @@ export async function GET(
         }
 
         const adjacent = video.published_at
-            ? await getAdjacentVideos(video.published_at, locale)
+            ? await getAdjacentVideos(video.published_at, locale, video.id)
             : { prevSlug: null, nextSlug: null };
 
         return NextResponse.json({

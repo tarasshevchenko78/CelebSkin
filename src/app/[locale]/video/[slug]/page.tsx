@@ -136,7 +136,7 @@ export default async function VideoDetailPage({
                 ? getOtherVideosByMovie(video.movie.id, video.id, 4)
                 : Promise.resolve([]),
             video.published_at
-                ? getAdjacentVideos(video.published_at, locale)
+                ? getAdjacentVideos(video.published_at, locale, video.id)
                 : Promise.resolve({ prevSlug: null, nextSlug: null }),
         ]);
         similar     = sim;
