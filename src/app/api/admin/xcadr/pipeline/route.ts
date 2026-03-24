@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exec } from 'child_process';
+import { exec, spawn } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '@/lib/logger';
 
@@ -11,12 +11,13 @@ const CONTABO_HOST = 'root@161.97.142.117';
 const SSH_KEY      = '/root/.ssh/id_ed25519';
 const SSH_OPTS     = `-o ConnectTimeout=10 -o StrictHostKeyChecking=no -i ${SSH_KEY}`;
 const SCRIPTS_DIR  = '/opt/celebskin/scripts';
-const TIMEOUT_MS   = 30 * 60 * 1000; // 30 minutes (download step can take long)
+const TIMEOUT_MS   = 30 * 60 * 1000;
 
-type Step = 'parse' | 'translate' | 'match' | 'map-tags' | 'download' | 'test-connection' | 'list-categories';
+type Step = 'parse' | 'translate' | 'match' | 'map-tags' | 'download' | 'test-connection' | 'list-categories' | 'run-all';
 
 interface RequestBody {
     step: Step;
+    stream?: boolean;
     options?: {
         pages?: number;
         url?: string;
@@ -24,6 +25,14 @@ interface RequestBody {
         collectionUrl?: string;
         limit?: number;
         source?: string;
+        parsePages?: number;
+        translateLimit?: number;
+        matchLimit?: number;
+        downloadLimit?: number;
+        autoImport?: boolean;
+        autoDownload?: boolean;
+        autoAi?: boolean;
+        autoPublish?: boolean;
     };
 }
 
@@ -54,6 +63,18 @@ function buildCommand(step: Step, options: RequestBody['options'] = {}): string 
             if (options.source) cmd += ` --source ${options.source}`;
             return cmd;
         }
+        case 'run-all': {
+            const args: string[] = [];
+            args.push(`--parse-pages ${options.parsePages ?? 3}`);
+            args.push(`--translate-limit ${options.translateLimit ?? 100}`);
+            args.push(`--match-limit ${options.matchLimit ?? 100}`);
+            if (options.autoImport)   args.push('--auto-import');
+            if (options.autoDownload) args.push('--auto-download');
+            if (options.autoAi)       args.push('--auto-ai');
+            if (options.autoPublish)  args.push('--auto-publish');
+            if (options.downloadLimit) args.push(`--download-limit ${options.downloadLimit}`);
+            return `node xcadr/auto-import.js ${args.join(' ')}`;
+        }
         default:
             throw new Error(`Unknown step: ${step}`);
     }
@@ -68,6 +89,86 @@ async function runOnContabo(remoteCmd: string): Promise<{ stdout: string; stderr
     return { stdout, stderr };
 }
 
+function streamSshCommand(remoteCmd: string): { stream: ReadableStream; abort: () => void } {
+    let aborted = false;
+    let sshProcess: ReturnType<typeof spawn> | null = null;
+
+    const stream = new ReadableStream({
+        start(controller) {
+            const encoder = new TextEncoder();
+            sshProcess = spawn('ssh', [
+                '-o', 'ConnectTimeout=10',
+                '-o', 'StrictHostKeyChecking=no',
+                '-i', SSH_KEY,
+                CONTABO_HOST,
+                `cd ${SCRIPTS_DIR} && ${remoteCmd}`,
+            ], {
+                env: { ...process.env, HOME: '/root' },
+            });
+
+            const timeout = setTimeout(() => {
+                if (sshProcess) {
+                    sshProcess.kill('SIGTERM');
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: 'Timeout exceeded (30 min)' })}\n\n`));
+                    controller.close();
+                }
+            }, TIMEOUT_MS);
+
+            sshProcess.stdout?.on('data', (chunk: Buffer) => {
+                const lines = chunk.toString().split('\n');
+                for (const line of lines) {
+                    if (!line.trim()) continue;
+                    if (line.startsWith('XCADR_PROGRESS:')) {
+                        try {
+                            const progress = JSON.parse(line.substring('XCADR_PROGRESS:'.length));
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'progress', ...progress })}\n\n`));
+                        } catch {
+                            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', text: line })}\n\n`));
+                        }
+                    } else {
+                        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'log', text: line })}\n\n`));
+                    }
+                }
+            });
+
+            sshProcess.stderr?.on('data', (chunk: Buffer) => {
+                const text = chunk.toString().trim();
+                if (text) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'stderr', text })}\n\n`));
+                }
+            });
+
+            sshProcess.on('close', (code) => {
+                clearTimeout(timeout);
+                if (!aborted) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done', exitCode: code })}\n\n`));
+                    controller.close();
+                }
+            });
+
+            sshProcess.on('error', (err) => {
+                clearTimeout(timeout);
+                if (!aborted) {
+                    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', message: err.message })}\n\n`));
+                    controller.close();
+                }
+            });
+        },
+        cancel() {
+            aborted = true;
+            if (sshProcess) sshProcess.kill('SIGTERM');
+        },
+    });
+
+    return {
+        stream,
+        abort: () => {
+            aborted = true;
+            if (sshProcess) sshProcess.kill('SIGTERM');
+        },
+    };
+}
+
 // POST /api/admin/xcadr/pipeline
 export async function POST(request: NextRequest) {
     let body: RequestBody;
@@ -77,14 +178,14 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: 'Invalid JSON body' }, { status: 400 });
     }
 
-    const { step, options = {} } = body;
+    const { step, stream: useStream = false, options = {} } = body;
 
-    const validSteps: Step[] = ['parse', 'translate', 'match', 'map-tags', 'download', 'test-connection', 'list-categories'];
+    const validSteps: Step[] = ['parse', 'translate', 'match', 'map-tags', 'download', 'test-connection', 'list-categories', 'run-all'];
     if (!validSteps.includes(step)) {
         return NextResponse.json({ success: false, error: `Invalid step: ${step}` }, { status: 400 });
     }
 
-    // Special: test-connection — check SSH + DB + node on Contabo
+    // Special: test-connection
     if (step === 'test-connection') {
         const startedAt = Date.now();
         try {
@@ -113,7 +214,7 @@ export async function POST(request: NextRequest) {
         }
     }
 
-    // Special: list-categories — fetch available categories from xcadr.online
+    // Special: list-categories
     if (step === 'list-categories') {
         const startedAt = Date.now();
         try {
@@ -156,23 +257,31 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: String(err) }, { status: 400 });
     }
 
-    logger.info('xcadr pipeline step started on Contabo', { step, cmd: remoteCmd });
+    logger.info('xcadr pipeline step started on Contabo', { step, cmd: remoteCmd, stream: useStream });
 
+    // Streaming mode — SSE
+    if (useStream) {
+        const { stream } = streamSshCommand(remoteCmd);
+        return new Response(stream, {
+            headers: {
+                'Content-Type': 'text/event-stream',
+                'Cache-Control': 'no-cache',
+                Connection: 'keep-alive',
+            },
+        });
+    }
+
+    // Non-streaming mode (backwards compatible)
     const startedAt = Date.now();
-
     try {
         const { stdout, stderr } = await runOnContabo(remoteCmd);
         const duration = Date.now() - startedAt;
-
         const output = (stdout + (stderr ? `\n[stderr]\n${stderr}` : '')).slice(-4000);
-
         logger.info('xcadr pipeline step completed', { step, duration });
         return NextResponse.json({ success: true, step, output, duration });
     } catch (err) {
         const duration = Date.now() - startedAt;
         const execErr = err as ExecError;
-
-        // Extract useful fields from exec error
         const isTimeout = execErr.killed === true || (execErr.signal === 'SIGTERM' && duration >= TIMEOUT_MS - 5000);
         const errorMessage = isTimeout
             ? `Превышен лимит времени (${Math.round(TIMEOUT_MS / 60000)} мин)`
@@ -185,15 +294,7 @@ export async function POST(request: NextRequest) {
 
         logger.error('xcadr pipeline step failed', { step, error: errorMessage, exitCode, duration });
         return NextResponse.json(
-            {
-                success: false,
-                step,
-                error: errorMessage,
-                output: output || null,
-                stderr: stderr.slice(-2000) || null,
-                exitCode,
-                duration,
-            },
+            { success: false, step, error: errorMessage, output: output || null, stderr: stderr.slice(-2000) || null, exitCode, duration },
             { status: 500 }
         );
     }
