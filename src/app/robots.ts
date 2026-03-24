@@ -9,7 +9,6 @@ export default function robots(): MetadataRoute.Robots {
     },
     sitemap: [
       'https://celeb.skin/sitemap-index.xml',
-      'https://celeb.skin/video-sitemap.xml',
     ],
   };
 }
