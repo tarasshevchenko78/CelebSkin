@@ -179,6 +179,7 @@ async function main() {
     const row = rows.rows[i];
     const { celebrity_name_en, movie_title_en } = row;
 
+    console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'match', status: 'running', current: i + 1, total: rows.rows.length, item: celebrity_name_en || row.title_en }));
     process.stdout.write(`\r[${i + 1}/${rows.rows.length}] ${(celebrity_name_en || '?').substring(0, 40)}`);
 
     try {

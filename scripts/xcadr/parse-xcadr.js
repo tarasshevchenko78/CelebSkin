@@ -653,6 +653,7 @@ async function main() {
     console.log(`Scraping ${pageCount} listing page(s) from xcadr.online...`);
 
     for (let p = 1; p <= pageCount; p++) {
+      console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'parse', status: 'running', current: p, total: pageCount }));
       console.log(`\nFetching listing page ${p}/${pageCount}...`);
       let videoUrls = [];
       try {

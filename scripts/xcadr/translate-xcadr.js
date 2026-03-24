@@ -172,7 +172,9 @@ async function main() {
   let geminiFallbacks = 0;
   let errors     = 0;
 
-  for (const row of rows.rows) {
+  for (let _ti = 0; _ti < rows.rows.length; _ti++) {
+    const row = rows.rows[_ti];
+    console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'translate', status: 'running', current: _ti + 1, total: rows.rows.length, item: row.title_ru }));
     try {
       let title_en          = null;
       let celebrity_name_en = null;

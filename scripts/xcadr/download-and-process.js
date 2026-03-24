@@ -522,12 +522,14 @@ async function detectCrop(videoPath) {
 
 /**
  * Build an FFmpeg delogo filter that blurs all 4 corners where xcadr.online
- * places its floating watermark. Covers 22% width × 7% height in each corner.
+ * places its floating watermark. Covers 22% width × 6% height in each corner.
+ * Tested on 718×360 (157×21) and 640×360 (140×21) — removes "XCADR.ONLINE" cleanly
+ * with minimal affected area.
  */
 function buildDelogoFilter(width, height) {
     const logoW = Math.round(width  * 0.22);
-    const logoH = Math.round(height * 0.07); // slightly taller to be safe
-    const pad   = 2; // px from edge
+    const logoH = Math.round(height * 0.06);
+    const pad   = 4; // px from edge
     const rX    = width  - logoW - pad;      // right-edge x
     const bY    = height - logoH - pad;      // bottom-edge y
     return [
@@ -867,6 +869,8 @@ async function processItem(item) {
         const info = await stat(originalPath);
         if (info.size < 10000) throw new Error(`Downloaded file too small (${info.size} bytes) — likely an error page`);
 
+        console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'download', status: 'running', current: 0, total: 0, item: videoId.substring(0, 8), substep: 'downloaded' }));
+
         // 2A.1: Get video metadata
         const duration   = await getVideoDuration(originalPath);
         const { width }  = await getVideoResolution(originalPath);
@@ -882,11 +886,16 @@ async function processItem(item) {
             logger.info('  [Phase 2B] Running cropdetect (xcadr source)...');
             cropFilter = await detectCrop(originalPath);
 
-            // Always apply delogo to remove xcadr.online corner watermark.
-            // getVideoResolution() was already called above for quality — reuse width.
-            const { height } = await getVideoResolution(originalPath);
-            delogoFilter = buildDelogoFilter(width, height);
-            logger.info(`  [Phase 2B] delogo: ${width}x${height} → logoW=${Math.round(width*0.22)} logoH=${Math.round(height*0.07)}`);
+            // Delogo must use dimensions AFTER crop (delogo follows crop in filter chain).
+            // If crop is applied, parse cropped W×H; otherwise use original resolution.
+            let delogoW = width;
+            let delogoH = (await getVideoResolution(originalPath)).height;
+            if (cropFilter) {
+                const cm = cropFilter.match(/crop=(\d+):(\d+)/);
+                if (cm) { delogoW = Number(cm[1]); delogoH = Number(cm[2]); }
+            }
+            delogoFilter = buildDelogoFilter(delogoW, delogoH);
+            logger.info(`  [Phase 2B] delogo: ${delogoW}x${delogoH} (${cropFilter ? 'post-crop' : 'original'}) → logoW=${Math.round(delogoW*0.22)} logoH=${Math.round(delogoH*0.06)}`);
         }
 
         // 2C: Watermark (+ crop + delogo if xcadr source)
@@ -899,6 +908,7 @@ async function processItem(item) {
         );
         const wmInfo = await stat(watermarkedPath);
         logger.info(`  ✓ Watermarked: ${(wmInfo.size / 1024 / 1024).toFixed(1)} MB`);
+        console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'download', status: 'running', current: 0, total: 0, item: videoId.substring(0, 8), substep: 'watermarked' }));
 
         // 2D: Thumbnails — prefer xcadr screenshots over FFmpeg extraction
         let thumbPaths;
@@ -938,6 +948,7 @@ async function processItem(item) {
             cdnThumbUrls  = uploaded.thumbUrls;
             cdnPreviewUrl = uploaded.previewUrl;
             logger.info(`  ✓ CDN upload complete`);
+            console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'download', status: 'running', current: 0, total: 0, item: videoId.substring(0, 8), substep: 'uploaded' }));
         } else {
             logger.info('  [Phase 3] Skipping CDN upload (--skip-upload)');
             cdnVideoUrl   = `local:${watermarkedPath}`;
@@ -1055,7 +1066,9 @@ async function main() {
     const startedAt = Date.now();
     let ok = 0, noUrl = 0, errors = 0;
 
-    for (const item of items) {
+    for (let _di = 0; _di < items.length; _di++) {
+        const item = items[_di];
+        console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'download', status: 'running', current: _di + 1, total: items.length, item: item.title_en || item.title_ru, substep: 'starting' }));
         const result = await processItem(item);
         switch (result.status) {
             case 'ok':    ok++;    break;
