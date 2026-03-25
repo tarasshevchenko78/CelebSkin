@@ -291,6 +291,18 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - `[locale]/search/page.tsx`: полная страница результатов с гидрированными сущностями, горизонтальные скроллы, grid видео, noindex
   - Header обновлён: SearchDropdown вместо статичной формы
 
+- **Gemini API Key Fixes (25.03.2026)**:
+  - 3 Gemini API ключа (Paid Tier 1) — ротация через запятую в `GEMINI_API_KEY`
+  - Ключи хранятся в БД `settings.gemini_api_key` (через запятую) + `.env` на Contabo
+  - UI Настроек: 3 отдельных поля `gemini_api_key_1/2/3` → мержатся в одну строку `gemini_api_key`
+  - **CRITICAL FIX**: dotenv НЕ перезаписывает уже установленные `process.env` vars. Pipeline-api.js передаёт `env: {...process.env}` дочерним процессам. При обновлении ключей — **ОБЯЗАТЕЛЬНО перезапустить pipeline-api.js** на Contabo: `cd /opt/celebskin/scripts && kill $(pgrep -f pipeline-api) && nohup node pipeline-api.js > logs/pipeline-api.log 2>&1 &`
+  - `isTransientError`: добавлены `quota`, `exceeded`, `RESOURCE_EXHAUSTED` — quota ошибки → `error` (retryable), не `censored`
+  - Quota break: при 429/quota — break + sleep 15s → следующая модель с другим ключом
+  - Throttle 10s между моделями при ошибках
+  - AI Vision concurrency: 3 → 2 воркера
+  - DB constraint `videos_ai_vision_status_check`: добавлен статус `error`
+  - Pipeline-api.js запускать из `/opt/celebskin/scripts/` (там node_modules), НЕ из `/opt/celebskin/site/scripts/`
+
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса
 - НИКОГДА не запускать pipeline на AbeloHost — только на Contabo
@@ -302,4 +314,6 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - Промты для Sonnet давать КОРОТКИЕ — по 1 багу, иначе пропускает
 - Gemini AI Vision: gemini-3-flash-preview (pipeline v2). Legacy: gemini-2.5-flash (extractGeminiJSON)
 - video_url при создании = NULL, заполняется pipeline (cdn_upload шаг)
+- При смене Gemini API ключей — ОБЯЗАТЕЛЬНО перезапустить pipeline-api.js на Contabo (dotenv не перезаписывает process.env)
+- Pipeline-api.js запускать из `/opt/celebskin/scripts/` (НЕ из `site/scripts/` — там нет node_modules)
 - Админка на русском языке

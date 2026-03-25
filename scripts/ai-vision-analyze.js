@@ -122,12 +122,12 @@ You have encyclopedic knowledge of:
 
 ## SCENE ANALYSIS (DETAILED)
 
-You MUST provide a detailed timestamped scene analysis in `scene_analysis` field.
+You MUST provide a detailed timestamped scene analysis in "scene_analysis" field.
 Describe EXACTLY what you see at each moment: who enters, what clothing, what is removed, what body parts visible, positions, actions. This is for internal cataloging, be precise and explicit.
 
 ## MEDIA CLASSIFICATION
 
-Classify the source in `media_classification`:
+Classify the source in "media_classification":
 - "feature_film" (theatrical movie)
 - "tv_series" (TV show episode)
 - "tv_movie" (TV movie/special)
@@ -140,7 +140,7 @@ Classify the source in `media_classification`:
 
 ## CONTENT MARKERS
 
-List ALL applicable markers in `content_markers` array. Tag ONLY what you actually see:
+List ALL applicable markers in "content_markers" array. Tag ONLY what you actually see:
 
 **Nudity specifics:**
 - "full_frontal_female" — vagina/vulva clearly visible
@@ -786,7 +786,7 @@ async function saveCensoredFallback(videoId, meta, errors) {
   // Update DB — distinguish censored from transient errors (429, timeout, etc.)
   if (!dryRun) {
     const errorMsg = errors.join(' → ');
-    const isTransientError = errors.some(e => e.includes('429') || e.includes('timeout') || e.includes('ECONNRESET') || e.includes('ETIMEDOUT'));
+    const isTransientError = errors.some(e => e.includes('429') || e.includes('quota') || e.includes('exceeded') || e.includes('RESOURCE_EXHAUSTED') || e.includes('timeout') || e.includes('ECONNRESET') || e.includes('ETIMEDOUT'));
     const visionStatus = isTransientError ? 'error' : 'censored';
     await query(`
       UPDATE videos SET
@@ -868,6 +868,8 @@ async function main() {
 
   for (const model of modelsToTry) {
     nextSessionKey(); // Lock one API key for this entire model attempt (upload + generate)
+    // Throttle: wait between API calls to avoid RPM limit
+    if (errors.length > 0) await sleep(10000);
     console.log(`\n─── Model: ${model} ───`);
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -930,7 +932,13 @@ async function main() {
           const msg = `${model}: API error — ${result.error}`;
           console.log(`  ❌ ${msg}`);
           errors.push(msg);
-          // Retry on transient errors
+          // Quota/rate limit — skip retries, wait and try next model with different key
+          if (result.error.includes('quota') || result.error.includes('exceeded') || result.error.includes('RESOURCE_EXHAUSTED') || result.error.includes('429')) {
+            console.log('  ⏳ Quota/rate limit hit, waiting 15s before next model...');
+            await sleep(15000);
+            break;
+          }
+          // Retry on other transient errors
           continue;
         }
       } catch (err) {

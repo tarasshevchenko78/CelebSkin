@@ -86,7 +86,7 @@ const STEP_ORDER = [
 const STEP_CONCURRENCY = {
   download:     4,  // 4 concurrent downloads
   tmdb_enrich:  4,
-  ai_vision:    3,
+  ai_vision:    2,  // reduced from 3 — Gemini RPM limit with 3 keys
   watermark:    2,  // 4-core Contabo handles 2 concurrent FFmpeg watermark jobs
   media:        3,
   cdn_upload:   4,

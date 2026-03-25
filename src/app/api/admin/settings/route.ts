@@ -8,6 +8,9 @@ export const dynamic = 'force-dynamic';
 // Valid setting keys that can be updated via admin
 const EDITABLE_KEYS = new Set([
     'gemini_api_key',
+    'gemini_api_key_1',
+    'gemini_api_key_2',
+    'gemini_api_key_3',
     'tmdb_api_key',
     'watermark_type',
     'watermark_image_url',
@@ -31,6 +34,18 @@ export async function GET() {
                 ...info,
                 value: info.is_secret ? maskSecret(info.value) : info.value,
             };
+        }
+        // Split gemini_api_key into 3 separate fields for UI
+        if (settings.gemini_api_key) {
+            const keys = settings.gemini_api_key.value.split(',').map((k: string) => k.trim()).filter(Boolean);
+            for (let i = 0; i < 3; i++) {
+                const fieldKey = `gemini_api_key_${i + 1}`;
+                masked[fieldKey] = {
+                    value: keys[i] ? maskSecret(keys[i]) : '',
+                    is_secret: true,
+                    description: null,
+                };
+            }
         }
         return NextResponse.json({
             settings: masked,
@@ -86,6 +101,24 @@ export async function PUT(request: NextRequest) {
         }
         if (key === 'watermark_movement' && !['static', 'rotating_corners', 'diagonal_sweep', 'smooth_drift'].includes(value)) {
             return NextResponse.json({ error: 'Неверный паттерн движения' }, { status: 400 });
+        }
+
+        // Handle gemini_api_key_1/2/3 → merge into single gemini_api_key
+        if (key.startsWith('gemini_api_key_')) {
+            const idx = parseInt(key.slice(-1)) - 1; // 0, 1, or 2
+            const currentCombined = await getSetting('gemini_api_key') || '';
+            const keys = currentCombined.split(',').map((k: string) => k.trim());
+            // Ensure array has 3 slots
+            while (keys.length < 3) keys.push('');
+            keys[idx] = value.trim();
+            const merged = keys.filter(Boolean).join(',');
+            await setSetting('gemini_api_key', merged);
+
+            return NextResponse.json({
+                success: true,
+                key,
+                value: maskSecret(value),
+            });
         }
 
         await setSetting(key, value);
