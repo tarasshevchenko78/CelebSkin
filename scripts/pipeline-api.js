@@ -23,7 +23,7 @@
  */
 
 import express from 'express';
-import { readFileSync, existsSync, unlinkSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync, openSync, closeSync } from 'fs';
 import { spawn } from 'child_process';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -747,17 +747,16 @@ app.post('/api/xcadr-pipeline/start', (req, res) => {
     if (collection) args.push(`--collection=${collection}`);
     if (pages > 0) args.push(`--pages=${pages}`);
 
+    // Use file-based stdio so child survives parent restart
+    const logPath = join(__dirname, 'logs', 'xcadr-pipeline-' + Date.now() + '.log');
+    const logFd = openSync(logPath, 'a');
     const child = spawn('node', [XCADR_ORCHESTRATOR, ...args], {
       cwd: __dirname, detached: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
+      stdio: ['ignore', logFd, logFd],
       env: { ...process.env },
     });
-
-    child.stdout.on('data', (d) => logger.info(`[xcadr] ${d.toString().trimEnd()}`));
-    child.stderr.on('data', (d) => logger.warn(`[xcadr:err] ${d.toString().trimEnd()}`));
-    child.on('error', (err) => logger.error(`[xcadr] Failed to start: ${err.message}`));
-    child.on('exit', (code) => logger.info(`[xcadr] Exited with code ${code}`));
     child.unref();
+    closeSync(logFd);
 
     logger.info(`[pipeline-api] XCADR pipeline started pid=${child.pid} limit=${limit}`);
     res.json({ ok: true, pid: child.pid, args, message: `XCADR Pipeline started (pid=${child.pid})` });
@@ -772,6 +771,9 @@ app.post('/api/xcadr-pipeline/stop', (req, res) => {
   try {
     const pid = getXcadrPid();
     if (!pid) return res.status(404).json({ error: 'XCADR Pipeline not running' });
+    // Write 'stop' to PID file so pipeline knows it's intentional stop (not parent restart)
+    
+    try { writeFileSync(XCADR_PID_FILE, 'stop'); } catch(_) {}
     process.kill(pid, 'SIGTERM');
     logger.info(`[pipeline-api] XCADR: SIGTERM to pid=${pid}`);
     res.json({ ok: true, pid, message: `Stopping XCADR pipeline (pid=${pid})` });

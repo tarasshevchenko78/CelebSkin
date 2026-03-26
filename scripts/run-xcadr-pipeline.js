@@ -29,7 +29,7 @@
  *   node run-xcadr-pipeline.js --limit=10 --pages=5
  */
 
-import { existsSync, mkdirSync, writeFileSync, unlinkSync, readdirSync } from 'fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync, readdirSync } from 'fs';
 import { readFile, writeFile, rm, stat, mkdir } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -41,6 +41,10 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 const xcadrAgent = new SocksProxyAgent('socks5h://127.0.0.1:40000');
+
+// Ignore EPIPE errors (parent process restarted, pipe broken)
+process.stdout.on('error', (e) => { if (e.code !== 'EPIPE') throw e; });
+process.stderr.on('error', (e) => { if (e.code !== 'EPIPE') throw e; });
 
 // --- WARP auto-recovery ---
 let warpReconnecting = false;
@@ -1360,13 +1364,37 @@ Example: {"name_localized":{"en":"...","ru":"..."},"bio":{"en":"...","ru":"..."}
   if (!nameLocalized.en) nameLocalized.en = name;
   if (!bio.en) bio.en = bioEn;
 
+  let celebPhotoUrl = det.profile_path ? `https://image.tmdb.org/t/p/w500${det.profile_path}` : null;
+
+  // If TMDB has no photo, try xcadr fallback for photo only
+  if (!celebPhotoUrl && xcadrMeta?.celeb_xcadr_slug) {
+    try {
+      const xcResp = await axios.get(`https://xcadr.online/celebs/${xcadrMeta.celeb_xcadr_slug}/`, {
+        httpAgent: xcadrAgent, httpsAgent: xcadrAgent, timeout: 15000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      });
+      const $x = cheerio.load(xcResp.data);
+      let xcPhoto = null;
+      $x('img[src*="/contents/models/"]').each(function() { if (!xcPhoto) xcPhoto = $x(this).attr('src'); });
+      if (xcPhoto) {
+        if (!xcPhoto.startsWith('http')) xcPhoto = 'https://xcadr.online' + xcPhoto;
+        const photoResp = await axios.get(xcPhoto, { responseType: 'arraybuffer', timeout: 15000, httpAgent: xcadrAgent, httpsAgent: xcadrAgent, headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://xcadr.online/' } });
+        const pPath = '/tmp/celeb_photo_' + id + '.jpg';
+        writeFileSync(pPath, photoResp.data);
+        celebPhotoUrl = await uploadFile(pPath, 'celebrities/' + id + '/photo.jpg');
+        try { unlinkSync(pPath); } catch(_){}
+        logger.info(`[enrich-celeb] ${name}: TMDB found but no photo, got from xcadr`);
+      }
+    } catch(pe) { logger.warn(`[enrich-celeb] xcadr photo fallback for ${name}: ${pe.message}`); }
+  }
+
   await query(`UPDATE celebrities SET tmdb_id=$2, nationality=$3, photo_url=$4, birth_date=$5, 
     name_localized=$6::jsonb, bio=$7::jsonb, status='published', updated_at=NOW() WHERE id=$1`,
     [id, p.id, extractNationality(det.place_of_birth),
-     det.profile_path ? `https://image.tmdb.org/t/p/w500${det.profile_path}` : null,
+     celebPhotoUrl,
      det.birthday,
      JSON.stringify(nameLocalized), JSON.stringify(bio)]);
-  logger.info(`[enrich-celeb] ${name} (id=${id}): tmdb=${p.id}, bio=${Object.keys(bio).length} langs`);
+  logger.info(`[enrich-celeb] ${name} (id=${id}): tmdb=${p.id}, photo=${celebPhotoUrl ? 'yes' : 'no'}, bio=${Object.keys(bio).length} langs`);
 }
 
 async function enrichMovieTMDB(id, title, year, xcadrMeta) {
@@ -1422,11 +1450,9 @@ async function enrichMovieTMDB(id, title, year, xcadrMeta) {
         if (xcadrDesc) {
           try {
             const translated = await translateWithGemini(
-              'movie_desc',
               'Translate this movie description to these languages: ' + LOCALES.join(', ') + '.\n' +
               'Russian description: "' + xcadrDesc.substring(0, 2000) + '"\n' +
-              'Return ONLY valid JSON: {"en": "...", "ru": "...", "de": "...", ...}',
-              null
+              'Return ONLY valid JSON: {"en": "...", "ru": "...", "de": "...", ...}'
             );
             if (translated) descLocalized = translated;
           } catch(_) {}
@@ -1485,12 +1511,76 @@ Example: {"title_localized":{"en":"...","ru":"..."},"description":{"en":"...","r
   if (!titleLocalized.en) titleLocalized.en = title;
   if (!description.en) description.en = descEn;
 
+  // Extract countries from TMDB
+  const tmdbCountries = (det.data?.production_countries || det.data?.origin_country || [])
+    .map(c => typeof c === 'string' ? c : c.iso_3166_1)
+    .filter(c => c && c.length === 2);
+
   await query(`UPDATE movies SET tmdb_id=$2, poster_url=$3, title_localized=$4::jsonb, description=$5::jsonb,
-    genres=$6, studio=$7, year=COALESCE($8,year), status='published', updated_at=NOW() WHERE id=$1`,
+    genres=$6, studio=$7, year=COALESCE($8,year), countries=COALESCE($9,countries), status='published', updated_at=NOW() WHERE id=$1`,
     [id, m.id, m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
      JSON.stringify(titleLocalized), JSON.stringify(description),
-     genres, studio, year || (isTV ? parseInt(det.data?.first_air_date?.substring(0,4)) : parseInt(det.data?.release_date?.substring(0,4))) || null]);
-  logger.info(`[enrich-movie] ${title} (id=${id}): tmdb=${m.id}, desc=${Object.keys(description).length} langs`);
+     genres, studio, year || (isTV ? parseInt(det.data?.first_air_date?.substring(0,4)) : parseInt(det.data?.release_date?.substring(0,4))) || null,
+     tmdbCountries.length > 0 ? tmdbCountries : null]);
+  // If TMDB has no poster, try xcadr fallback
+  const tmdbPosterUrl = m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null;
+  let finalPosterUrl = tmdbPosterUrl;
+  if (!finalPosterUrl && xcadrMeta?.movie_xcadr_slug) {
+    try {
+      const xcResp = await axios.get(`https://xcadr.online/movies/${xcadrMeta.movie_xcadr_slug}/`, {
+        httpAgent: xcadrAgent, httpsAgent: xcadrAgent, timeout: 15000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      });
+      const $x = cheerio.load(xcResp.data);
+      let xcPoster = null;
+      $x('img[src*="/contents/categories/"]').each(function() { if (!xcPoster) xcPoster = $x(this).attr('src'); });
+      if (xcPoster) {
+        if (!xcPoster.startsWith('http')) xcPoster = 'https://xcadr.online' + xcPoster;
+        const posterResp = await axios.get(xcPoster, { responseType: 'arraybuffer', timeout: 15000, httpAgent: xcadrAgent, httpsAgent: xcadrAgent, headers: { 'User-Agent': 'Mozilla/5.0', 'Referer': 'https://xcadr.online/' } });
+        const ppPath = '/tmp/movie_poster_' + id + '.jpg';
+        writeFileSync(ppPath, posterResp.data);
+        finalPosterUrl = await uploadFile(ppPath, 'movies/' + id + '/poster.jpg');
+        try { unlinkSync(ppPath); } catch(_){}
+        logger.info(`[enrich-movie] ${title}: TMDB found but no poster, got from xcadr`);
+      }
+    } catch(pe) { logger.warn(`[enrich-movie] xcadr poster fallback for ${title}: ${pe.message}`); }
+  }
+
+  // Also get countries from xcadr if TMDB didn't provide them
+  if (tmdbCountries.length === 0 && xcadrMeta?.movie_xcadr_slug) {
+    try {
+      const xcResp2 = await axios.get(`https://xcadr.online/movies/${xcadrMeta.movie_xcadr_slug}/`, {
+        httpAgent: xcadrAgent, httpsAgent: xcadrAgent, timeout: 15000,
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' },
+      });
+      const $x2 = cheerio.load(xcResp2.data);
+      $x2('li').each(function() {
+        const text = $x2(this).text().trim();
+        const span = $x2(this).find('span').text().trim();
+        if (text.startsWith('Страна:') && span) {
+          const iso = countriesToISO(span);
+          if (iso && iso.length > 0) {
+            tmdbCountries.push(...iso);
+            logger.info(`[enrich-movie] ${title}: got countries from xcadr: ${iso.join(',')}`);
+          }
+        }
+      });
+    } catch(_) {}
+  }
+
+  // Re-update with poster and countries if we got them from xcadr fallback
+  if (finalPosterUrl !== tmdbPosterUrl || tmdbCountries.length > 0) {
+    const extraUpdates = [];
+    const extraParams = [id];
+    let epi = 2;
+    if (finalPosterUrl && finalPosterUrl !== tmdbPosterUrl) { extraUpdates.push('poster_url=$' + epi); extraParams.push(finalPosterUrl); epi++; }
+    if (tmdbCountries.length > 0) { extraUpdates.push('countries=$' + epi); extraParams.push(tmdbCountries); epi++; }
+    if (extraUpdates.length > 0) {
+      await query('UPDATE movies SET ' + extraUpdates.join(',') + ', updated_at=NOW() WHERE id=$1', extraParams);
+    }
+  }
+
+  logger.info(`[enrich-movie] ${title} (id=${id}): tmdb=${m.id}, poster=${finalPosterUrl ? 'yes' : 'no'}, countries=${tmdbCountries.join(',') || 'none'}, desc=${Object.keys(description).length} langs`);
 }
 
 // ============================================================
@@ -1695,8 +1785,23 @@ async function main(){
   const queues={};for(const n of STEP_ORDER)queues[n]=new PipelineQueue(n);
   const pools={};for(let i=0;i<STEP_ORDER.length;i++){const name=STEP_ORDER[i];pools[name]=new WorkerPool({name,concurrency:STEP_CONCURRENCY[name],processFn:STEP_PROCESSORS[name],inputQueue:queues[name],nextQueue:i<STEP_ORDER.length-1?queues[STEP_ORDER[i+1]]:null,signal,stats});}
 
-  const shutdown=()=>{if(signal.stopped)return;logger.info('Shutdown...');signal.stopped=true;for(const n of STEP_ORDER)queues[n].wakeAll();setTimeout(()=>{process.exit(1);},30000).unref();};
-  process.on('SIGINT',shutdown);process.on('SIGTERM',shutdown);
+  const shutdown=(sig)=>{
+    // If parent (pipeline-api) was restarted, we get SIGTERM but should continue
+    // Only stop if explicitly requested (via /stop endpoint which sets PID file to 'stop')
+    if(signal.stopped)return;
+    const pidFileContent = (() => { try { return readFileSync(PID_FILE,'utf8').trim(); } catch(_) { return ''; } })();
+    if (pidFileContent === 'stop') {
+      logger.info('Shutdown requested via stop endpoint...');
+      signal.stopped=true;for(const n of STEP_ORDER)queues[n].wakeAll();setTimeout(()=>{process.exit(1);},30000).unref();
+    } else {
+      logger.warn('Received ' + sig + ' but pipeline is running — ignoring (may be parent restart). Send again to force stop.');
+      // On second signal, actually stop
+      const forceShutdown = () => { logger.info('Force shutdown...'); signal.stopped=true;for(const n of STEP_ORDER)queues[n].wakeAll();setTimeout(()=>{process.exit(1);},30000).unref(); };
+      process.removeAllListeners('SIGTERM'); process.removeAllListeners('SIGINT');
+      process.on('SIGINT', forceShutdown); process.on('SIGTERM', forceShutdown);
+    }
+  };
+  process.on('SIGINT',()=>shutdown('SIGINT'));process.on('SIGTERM',()=>shutdown('SIGTERM'));
 
   writeFileSync(PID_FILE,String(process.pid));process.on('exit',()=>{try{unlinkSync(PID_FILE);}catch{}});
   if(!existsSync(WORK_DIR))mkdirSync(WORK_DIR,{recursive:true});

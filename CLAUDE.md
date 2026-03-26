@@ -138,8 +138,8 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 1. По английскому имени → 2. По русскому имени → 3. TMDB API → 4. Create new (EN name)
 
 ### Publish: обогащение
-- **enrichCelebTMDB**: фото, дата рождения, национальность, bio → перевод на 10 языков (Gemini)
-- **enrichMovieTMDB**: постер, жанры, студия, description → перевод на 10 языков (Gemini)
+- **enrichCelebTMDB**: фото, дата рождения, национальность, bio → перевод на 10 языков (Gemini). Если TMDB нашёл но нет фото → fallback на xcadr
+- **enrichMovieTMDB**: постер, жанры, студия, countries (production_countries ISO), description → перевод на 10 языков (Gemini). Если TMDB нашёл но нет постера/стран → fallback на xcadr
 - **Связи**: video_celebrities, movie_scenes, movie_celebrities, video_tags, collection_videos
 
 ### WARP auto-recovery
@@ -148,6 +148,11 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - `warpReconnecting` mutex — предотвращает параллельные reconnect (другие воркеры ждут)
 - Feeder авто-ресетит SOCKS-failed записи (`pipeline_error LIKE '%Socks%'`) обратно в `translated`
 - RETRY_DELAYS: `[10s, 30s, 60s, 120s]` — 4 ретрая с WARP recovery между попытками
+
+### Устойчивость к крэшам (ночной режим 1000+ видео)
+- **File-based stdio**: `pipeline-api.js` запускает дочерний процесс с логами в файл (`logs/xcadr-pipeline-{ts}.log`), не через pipe → выживает при `pm2 restart pipeline-api`
+- **EPIPE обработка**: `process.stdout/stderr.on('error')` игнорирует EPIPE (сломанный pipe от мёртвого родителя)
+- **Умный SIGTERM**: первый SIGTERM от рестарта pipeline-api **игнорируется** — pipeline продолжает работу. Кнопка "Стоп" в UI записывает `stop` в PID файл → тогда SIGTERM реально останавливает. Второй SIGTERM = force stop.
 
 ### Теги из xcadr
 - Парсер: `tags_ru[]` из `<a href="/tags/.../">` → `xcadr_imports.tags_ru`
