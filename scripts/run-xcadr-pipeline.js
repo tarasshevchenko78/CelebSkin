@@ -41,6 +41,49 @@ import crypto from 'crypto';
 import axios from 'axios';
 import { SocksProxyAgent } from 'socks-proxy-agent';
 const xcadrAgent = new SocksProxyAgent('socks5h://127.0.0.1:40000');
+
+// --- WARP auto-recovery ---
+let warpReconnecting = false;
+async function ensureWarpAlive() {
+  try {
+    const resp = await axios.get('https://xcadr.online/', {
+      httpAgent: xcadrAgent, httpsAgent: xcadrAgent,
+      timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' },
+      validateStatus: () => true
+    });
+    return true;
+  } catch (e) {
+    if (warpReconnecting) {
+      for (let w = 0; w < 12; w++) { await sleep(5000); if (!warpReconnecting) return true; }
+      return false;
+    }
+    warpReconnecting = true;
+    logger.warn('[WARP] Connection failed, auto-reconnecting...');
+    try {
+      await execFileAsync('warp-cli', ['--accept-tos', 'disconnect'], { timeout: 10000 }).catch(() => {});
+      await sleep(2000);
+      await execFileAsync('warp-cli', ['--accept-tos', 'connect'], { timeout: 10000 });
+      for (let i = 0; i < 12; i++) {
+        await sleep(5000);
+        try {
+          const { stdout } = await execFileAsync('warp-cli', ['--accept-tos', 'status'], { timeout: 5000 });
+          if (stdout.includes('Connected')) {
+            logger.info('[WARP] Reconnected successfully');
+            warpReconnecting = false;
+            return true;
+          }
+        } catch (_) {}
+      }
+      logger.error('[WARP] Failed to reconnect after 60s');
+      warpReconnecting = false;
+      return false;
+    } catch (e2) {
+      logger.error('[WARP] Reconnect error: ' + e2.message);
+      warpReconnecting = false;
+      return false;
+    }
+  }
+}
 import * as cheerio from 'cheerio';
 // ── Cyrillic → Latin transliteration for celebrity/movie names ──
 const TRANSLIT_MAP = {
@@ -107,7 +150,7 @@ import logger from './lib/logger.js';
 const WORK_DIR = '/opt/celebskin/xcadr-work';
 const V2_WORK_DIR = '/opt/celebskin/pipeline-work'; // shared with home workers
 const PID_FILE = join(__dirname, 'xcadr-pipeline.pid');
-const RETRY_DELAYS = [5000, 15000, 45000];
+const RETRY_DELAYS = [10000, 30000, 60000, 120000];
 const LOCALES = ["en", "ru", "de", "fr", "es", "pt", "it", "pl", "nl", "tr"];const GEMINI_API_KEYS = (config.ai.geminiApiKey || "").split(",").map(k => k.trim()).filter(Boolean);let _geminiKeyIdx = 0;function getGeminiKey() { return GEMINI_API_KEYS[_geminiKeyIdx++ % GEMINI_API_KEYS.length] || ""; }const GEMINI_MODEL = "gemini-3-flash-preview";
 const PROGRESS_INTERVAL_MS = 3000;
 const SUBPROCESS_TIMEOUT = 600000;
@@ -200,7 +243,14 @@ class WorkerPool {
         for (let att = 0; att <= RETRY_DELAYS.length; att++) {
           if (att > 0) { logger.warn(`[${this.name}:${xcadrId}] Retry ${att}/${RETRY_DELAYS.length}...`); await sleep(RETRY_DELAYS[att - 1]); }
           try { await this.processFn(xcadrId, this.name); ok = true; break; }
-          catch (e) { lastErr = e; logger.error(`[${this.name}:${xcadrId}] Attempt ${att + 1} failed: ${e.message}`); }
+          catch (e) {
+            lastErr = e;
+            logger.error(`[${this.name}:${xcadrId}] Attempt ${att + 1} failed: ${e.message}`);
+            if (e.message && (e.message.includes('Socks') || e.message.includes('ECONNREFUSED') || e.message.includes('Connection refused'))) {
+              logger.warn(`[${this.name}:${xcadrId}] Proxy error detected, attempting WARP recovery...`);
+              await ensureWarpAlive();
+            }
+          }
         }
         if (ok) {
           this.stats.byStep[this.name] = (this.stats.byStep[this.name] || 0) + 1;
@@ -274,6 +324,8 @@ async function processDownload(xcadrId, stepName) {
   if (!item.xcadr_url) throw new Error('No xcadr_url');
   const videoPath = join(workDir, 'original.mp4');
 
+  // Check WARP proxy before download
+  await ensureWarpAlive();
   // Use yt-dlp to download — handles KVS player JS, cookies, function/0/ prefix
   writeStepProgress(xcadrId, { step: 'download', status: 'running', percent: 30, detail: 'Downloading with yt-dlp...' });
   const ytdlpArgs = [
@@ -1524,6 +1576,14 @@ async function feedPipelineFromDb(queues, signal, limitArg) {
   const maxFeed = limitArg > 0 ? limitArg : 9999;
 
   while (!signal.stopped && totalFed < maxFeed) {
+    // Auto-reset SOCKS/proxy-failed downloads back to translated
+    try {
+      const { rowCount: resetCount } = await query(
+        "UPDATE xcadr_imports SET status='translated', pipeline_error=NULL WHERE status='failed' AND pipeline_step='download' AND (pipeline_error LIKE '%Socks%' OR pipeline_error LIKE '%ECONNREFUSED%' OR pipeline_error LIKE '%Connection refused%') AND updated_at > NOW() - INTERVAL '10 minutes'"
+      );
+      if (resetCount > 0) logger.info('[feeder] Auto-reset ' + resetCount + ' SOCKS-failed downloads back to translated');
+    } catch(_) {}
+
     // Find new parsed items that haven't been fed yet
     const { rows: parsed } = await query(
       `SELECT id FROM xcadr_imports WHERE status = 'parsed' AND xcadr_url IS NOT NULL ORDER BY id LIMIT 20`

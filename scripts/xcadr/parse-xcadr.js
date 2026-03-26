@@ -20,6 +20,7 @@
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
 import axios from 'axios';
+import { SocksProxyAgent } from 'socks-proxy-agent';
 import * as cheerio from 'cheerio';
 import { query, pool } from '../lib/db.js';
 
@@ -27,7 +28,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // --- CONFIGURATION ---
 const XCADR_BASE = 'https://xcadr.online';
-const REQUEST_DELAY_MS = 2000;
+const REQUEST_DELAY_MS = 3000;
 // Rotate User-Agents to reduce detection risk
 const USER_AGENTS = [
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
@@ -37,9 +38,12 @@ const USER_AGENTS = [
 ];
 const USER_AGENT = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
 
+const socksAgent = new SocksProxyAgent('socks5h://127.0.0.1:40000');
 const httpClient = axios.create({
   headers: { 'User-Agent': USER_AGENT },
   timeout: 15000,
+  httpAgent: socksAgent,
+  httpsAgent: socksAgent,
 });
 
 // --- CLI ARGS ---
@@ -187,12 +191,17 @@ async function parseVideoPage(url) {
   // Pattern: <a href="/celebs/{slug}/">Name</a>
   // Nav uses /celebs/ (no slug) → won't match
   let celebrity_name_ru = null;
+  let celeb_xcadr_slug = null;
   $('a[href]').each(function () {
     if (celebrity_name_ru) return false; // break
     const href = $(this).attr('href') || '';
     if (/\/celebs\/[^/]+\//.test(href)) {
       const text = $(this).text().trim();
-      if (text) celebrity_name_ru = text;
+      if (text) {
+        celebrity_name_ru = text;
+        const slugMatch = href.match(/\/celebs\/([^/]+)\//);
+        if (slugMatch) celeb_xcadr_slug = slugMatch[1];
+      }
     }
   });
 
@@ -201,6 +210,7 @@ async function parseVideoPage(url) {
   // Nav uses /movie/ (singular, no slug) → won't match /movies/{slug}/
   let movie_title_ru = null;
   let movie_year = null;
+  let movie_xcadr_slug = null;
   $('a[href]').each(function () {
     if (movie_title_ru) return false; // break
     const href = $(this).attr('href') || '';
@@ -210,6 +220,8 @@ async function parseVideoPage(url) {
         const yearMatch = text.match(/\((\d{4})\)/);
         movie_year = yearMatch ? parseInt(yearMatch[1]) : null;
         movie_title_ru = text.replace(/\s*\(\d{4}\)\s*$/, '').trim();
+        const slugMatch = href.match(/\/movies\/([^/]+)\//);
+        if (slugMatch) movie_xcadr_slug = slugMatch[1];
       }
     }
   });
@@ -270,6 +282,9 @@ async function parseVideoPage(url) {
     ''
   ).trim() || null;
 
+  // ── Thumbnail (og:image) — xcadr's best preview frame ──────────────────────
+  const thumbnail_url = $('meta[property="og:image"]').attr('content') || null;
+
   // ── Screenshots ────────────────────────────────────────────────────────────
   // Primary: #screenshots section — <a class="item" href=".../source/N.jpg">
   // These hrefs already point to source-size images!
@@ -321,6 +336,9 @@ async function parseVideoPage(url) {
     duration_seconds,
     screenshot_urls,
     description_ru,
+    thumbnail_url,
+    celeb_xcadr_slug,
+    movie_xcadr_slug,
   };
 }
 
@@ -330,7 +348,7 @@ async function parseVideoPage(url) {
 async function parseListPage(pageNum) {
   const url = pageNum <= 1
     ? `${XCADR_BASE}/`
-    : `${XCADR_BASE}/page/${pageNum}/`;
+    : `${XCADR_BASE}/video/${pageNum}/`;
 
   const html = await fetchHtml(url);
   const $ = cheerio.load(html);
@@ -414,12 +432,43 @@ async function parseCollectionPage(url) {
 
 // --- DATABASE ---
 
+async function batchExistsInDb(urls) {
+  if (urls.length === 0) return new Set();
+  // Check xcadr_imports (published/duplicate)
+  const r1 = await query(
+    "SELECT xcadr_url FROM xcadr_imports WHERE xcadr_url = ANY($1) AND status IN ('published','duplicate')",
+    [urls]
+  );
+  const exists = new Set(r1.rows.map(r => r.xcadr_url));
+  // Also check videos.source_url (already published on site)
+  const remaining = urls.filter(u => !exists.has(u));
+  if (remaining.length > 0) {
+    const r2 = await query(
+      "SELECT source_url FROM videos WHERE source_url = ANY($1)",
+      [remaining]
+    );
+    for (const r of r2.rows) exists.add(r.source_url);
+  }
+  return exists;
+}
+
 async function existsInDb(xcadr_url) {
+  // Check if already published in videos table
+  const vCheck = await query('SELECT id FROM videos WHERE source_url = $1 LIMIT 1', [xcadr_url]);
+  if (vCheck.rows.length > 0) return true;
   const result = await query(
-    'SELECT id FROM xcadr_imports WHERE xcadr_url = $1',
+    'SELECT id, status FROM xcadr_imports WHERE xcadr_url = $1',
     [xcadr_url]
   );
-  return result.rows.length > 0;
+  if (result.rows.length === 0) return false;
+  const st = result.rows[0].status;
+  // Only skip published/duplicate — everything else can be re-processed
+  if (st === 'published' || st === 'duplicate') return true;
+  // Already in pipeline (parsed/translated/matched/downloaded) — skip to avoid duplicates
+  if (st === 'parsed' || st === 'translated' || st === 'matched' || st === 'downloaded') return true;
+  // Failed/error — reset to parsed for re-processing
+  await query('UPDATE xcadr_imports SET status = \'parsed\', pipeline_step = NULL, pipeline_error = NULL, updated_at = NOW() WHERE id = $1', [result.rows[0].id]);
+  return true;
 }
 
 async function saveToDb(data) {
@@ -428,9 +477,9 @@ async function saveToDb(data) {
       xcadr_url, xcadr_video_id,
       title_ru, celebrity_name_ru, movie_title_ru, movie_year,
       tags_ru, collections_ru, duration_seconds, screenshot_urls,
-      description_ru, status
+      description_ru, thumbnail_url, celeb_xcadr_slug, movie_xcadr_slug, status
     ) VALUES (
-      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'parsed'
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, 'parsed'
     )
     ON CONFLICT (xcadr_url) DO NOTHING`,
     [
@@ -445,6 +494,9 @@ async function saveToDb(data) {
       data.duration_seconds,
       data.screenshot_urls,
       data.description_ru || null,
+      data.thumbnail_url || null,
+      data.celeb_xcadr_slug || null,
+      data.movie_xcadr_slug || null,
     ]
   );
 }
@@ -533,11 +585,17 @@ function printDebug(data) {
 
 // --- MAIN ---
 
-async function processVideoUrls(urls) {
+async function processVideoUrls(urls, maxNew = 0) {
   let parsed = 0;
   let skipped = 0;
 
   for (let i = 0; i < urls.length; i++) {
+    // Stop if we've reached the limit of new videos
+    if (maxNew > 0 && parsed >= maxNew) {
+      console.log(`\n  Reached limit of ${maxNew} new videos, stopping.`);
+      break;
+    }
+
     const url = urls[i];
 
     if (!DEBUG && await existsInDb(url)) {
@@ -584,6 +642,8 @@ async function main() {
   const celebArg = getArg('--celeb');
   const collArg  = getArg('--collection');
   const reparse  = hasFlag('--reparse');
+  const limitArg = getArg('--limit');
+  const maxNew   = limitArg ? parseInt(limitArg) : 0; // 0 = unlimited
 
   if (!pagesArg && !urlArg && !celebArg && !collArg && !reparse) {
     console.log('Usage:');
@@ -593,6 +653,7 @@ async function main() {
     console.log('  node xcadr/parse-xcadr.js --celeb "https://xcadr.online/celebs/..."');
     console.log('  node xcadr/parse-xcadr.js --collection "https://xcadr.online/podborki/..."');
     console.log('  node xcadr/parse-xcadr.js --reparse   (re-fetch all status=parsed rows)');
+    console.log('  node xcadr/parse-xcadr.js --pages 10 --limit 50  (stop after 50 new videos)');
     process.exit(0);
   }
 
@@ -609,7 +670,7 @@ async function main() {
   // --- Single video URL ---
   if (urlArg) {
     console.log(`Parsing single video: ${urlArg}`);
-    const { parsed, skipped } = await processVideoUrls([urlArg]);
+    const { parsed, skipped } = await processVideoUrls([urlArg], maxNew);
     totalParsed += parsed;
     totalSkipped += skipped;
   }
@@ -620,7 +681,7 @@ async function main() {
     try {
       const { celeb_name_ru, video_urls } = await parseCelebPage(celebArg);
       console.log(`Found celebrity: ${celeb_name_ru} — ${video_urls.length} videos`);
-      const { parsed, skipped } = await processVideoUrls(video_urls);
+      const { parsed, skipped } = await processVideoUrls(video_urls, maxNew > 0 ? maxNew - totalParsed : 0);
       totalParsed += parsed;
       totalSkipped += skipped;
     } catch (err) {
@@ -634,7 +695,7 @@ async function main() {
     try {
       const { collection_name_ru, video_urls } = await parseCollectionPage(collArg);
       console.log(`Found collection: ${collection_name_ru} — ${video_urls.length} videos`);
-      const { parsed, skipped } = await processVideoUrls(video_urls);
+      const { parsed, skipped } = await processVideoUrls(video_urls, maxNew > 0 ? maxNew - totalParsed : 0);
       totalParsed += parsed;
       totalSkipped += skipped;
     } catch (err) {
@@ -669,9 +730,16 @@ async function main() {
         break;
       }
 
-      const { parsed, skipped } = await processVideoUrls(videoUrls);
+      const remaining = maxNew > 0 ? maxNew - totalParsed : 0;
+      const { parsed, skipped } = await processVideoUrls(videoUrls, remaining);
       totalParsed += parsed;
       totalSkipped += skipped;
+
+      // Early stop: reached limit
+      if (maxNew > 0 && totalParsed >= maxNew) {
+        console.log(`\nReached limit of ${maxNew} new videos. Stopping pagination.`);
+        break;
+      }
 
       if (p < pageCount) {
         await delay(REQUEST_DELAY_MS);

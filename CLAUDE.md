@@ -142,9 +142,26 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 - **enrichMovieTMDB**: постер, жанры, студия, description → перевод на 10 языков (Gemini)
 - **Связи**: video_celebrities, movie_scenes, movie_celebrities, video_tags, collection_videos
 
+### WARP auto-recovery
+- `ensureWarpAlive()` — проверяет xcadr.online через SOCKS5 прокси, автоматически `warp-cli disconnect && connect` при падении
+- Вызывается перед каждым yt-dlp в download step и при SOCKS ошибках в retry loop
+- `warpReconnecting` mutex — предотвращает параллельные reconnect (другие воркеры ждут)
+- Feeder авто-ресетит SOCKS-failed записи (`pipeline_error LIKE '%Socks%'`) обратно в `translated`
+- RETRY_DELAYS: `[10s, 30s, 60s, 120s]` — 4 ретрая с WARP recovery между попытками
+
+### Теги из xcadr
+- Парсер: `tags_ru[]` из `<a href="/tags/.../">` → `xcadr_imports.tags_ru`
+- `map-tags.js`: хардкодный словарь RU→EN + Gemini fallback → `xcadr_tag_mapping` + `xcadr_collection_mapping`
+- Publish: AI теги (приоритет) + xcadr теги (всегда дополнительно) → `video_tags`; коллекции → `collection_videos`
+
+### AI Vision описание
+- Gemini 3-flash-preview: ~4000 слов промпт → JSON с description_en, scene_analysis, all_tags, hot_moments, nudity_level, content_markers
+- Результат: `videos.ai_raw_response` (полный JSON), `videos.ai_tags`, `videos.hot_moments`, `videos.best_thumbnail_sec`
+
 ### Дедупликация
 - `source_url` (xcadr URL) — уникальный индекс в `videos`
-- При старте/завершении: DELETE из `xcadr_imports` всё кроме `published`/`duplicate`
+- Тройная проверка в publish: source_url → xcadr video ID pattern → xcadr_imports published
+- При старте: UPDATE status='failed' (НЕ DELETE) для записей старше 24ч
 
 ### Кодирование видео
 libx264, preset `fast`, CRF `19`, aac 128k, mp4 faststart
@@ -359,7 +376,7 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - `run-xcadr-pipeline.js` и `pipeline-api.js` — ХАРДЛИНКИ, менять в `/opt/celebskin/scripts/`
 - Актрисы и фильмы хранятся с АНГЛИЙСКИМИ именами, локализация в JSONB (name_localized, title_localized)
 - Дедупликация xcadr видео по `source_url` (уникальный индекс), НЕ по original_title
-- xcadr_imports: только `published` и `duplicate` остаются, остальное удаляется при старте/завершении
+- xcadr_imports: Cleanup — UPDATE status='failed' (НЕ DELETE) для записей старше 24ч, не трогает in-progress
 - Pipeline запускается ТОЛЬКО из UI (`/admin/xcadr-pipeline`), НЕ из CLI
 - Админка на русском языке
 - Полное ТЗ XCADR Pipeline: `/opt/celebskin/XCADR_PIPELINE_TZ.md`
