@@ -196,6 +196,7 @@ export default function XcadrPipelinePage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [limit, setLimit] = useState(10);
+  const [downloadThreads, setDownloadThreads] = useState(1);
   const [xcadrUrl, setXcadrUrl] = useState('');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [filter, setFilter] = useState<FilterTab>('all');
@@ -221,7 +222,7 @@ export default function XcadrPipelinePage() {
   const handleStart = async () => {
     setLoading(true);
     try {
-      const body: Record<string, unknown> = { action: 'start', limit };
+      const body: Record<string, unknown> = { action: 'start', limit, download_threads: downloadThreads };
       if (xcadrUrl) {
         if (xcadrUrl.includes('/celebs/')) body.celeb = xcadrUrl;
         else if (xcadrUrl.includes('/collection/')) body.collection = xcadrUrl;
@@ -332,6 +333,11 @@ export default function XcadrPipelinePage() {
             <label className="block text-xs text-gray-400 mb-1">Лимит</label>
             <input type="number" value={limit} onChange={e => setLimit(parseInt(e.target.value) || 10)} min={1} max={1000}
               className="bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white w-[80px]" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">Потоки</label>
+            <input type="number" value={downloadThreads} onChange={e => setDownloadThreads(parseInt(e.target.value) || 1)} min={1} max={5}
+              className="bg-gray-900 border border-gray-700 rounded px-2 py-1.5 text-sm text-white w-[60px]" />
           </div>
           {!isRunning ? (
             <button onClick={handleStart} disabled={loading}

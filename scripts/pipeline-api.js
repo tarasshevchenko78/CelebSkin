@@ -723,13 +723,25 @@ app.post('/api/xcadr-pipeline/start', (req, res) => {
     const pid = getXcadrPid();
     if (pid) return res.status(409).json({ error: 'XCADR Pipeline already running', pid });
 
+    // Ensure Cloudflare WARP proxy is running (xcadr blocks Contabo IP)
+    try {
+      const { execSync } = require('child_process');
+      const warpStatus = execSync("warp-cli --accept-tos status 2>&1 || true", { encoding: 'utf8' });
+      if (!warpStatus.includes('Connected')) {
+        execSync("warp-cli --accept-tos connect", { timeout: 10000 });
+        logger.info('[pipeline-api] Connected Cloudflare WARP proxy');
+      }
+    } catch (e) { logger.warn('[pipeline-api] WARP check failed: ' + e.message); }
+
     const limit = parseInt(req.body?.limit) || 10;
     const url = req.body?.url || '';
     const celeb = req.body?.celeb || '';
     const collection = req.body?.collection || '';
     const pages = parseInt(req.body?.pages) || 0;
+    const downloadThreads = parseInt(req.body?.download_threads) || 0;
 
     const args = [`--limit=${limit}`];
+    if (downloadThreads > 0) args.push(`--download-threads=${downloadThreads}`);
     if (url) args.push(`--url=${url}`);
     if (celeb) args.push(`--celeb=${celeb}`);
     if (collection) args.push(`--collection=${collection}`);

@@ -65,8 +65,8 @@ export async function POST(req: NextRequest) {
 
     switch (action) {
       case 'start': {
-        const { limit, url, celeb, collection, pages } = body;
-        const data = await proxyPost('start', { limit: limit || 10, url, celeb, collection, pages });
+        const { limit, url, celeb, collection, pages, download_threads } = body;
+        const data = await proxyPost('start', { limit: limit || 10, url, celeb, collection, pages, download_threads: download_threads || 1 });
         return NextResponse.json(data);
       }
       case 'stop': {
