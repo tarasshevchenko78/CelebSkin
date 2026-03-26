@@ -45,6 +45,9 @@ export interface Video {
     ai_model: string | null;
     ai_confidence: number | null;
     ai_raw_response: Record<string, unknown> | null;
+    ai_vision_status: string | null;
+    ai_vision_model: string | null;
+    source_url: string | null;
     enrichment_layers_used: string[] | null;
     views_count: number;
     likes_count: number;

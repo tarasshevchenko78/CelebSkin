@@ -65,6 +65,11 @@ export default function VideoPlayer({
     const recsStartX     = useRef(0);
     const recsScrollLeft = useRef(0);
 
+    // Guard against false pause triggers during seek
+    const seekingRef = useRef(false);
+    const lastTapRef = useRef<{ time: number; x: number }>({ time: 0, x: 0 });
+    const singleTapTimer = useRef<NodeJS.Timeout | null>(null);
+
     // Fix 2: in-player navigation state
     const [curSrc,       setCurSrc]       = useState(src || null);
     const [curPoster,    setCurPoster]    = useState(poster || null);
@@ -89,6 +94,7 @@ export default function VideoPlayer({
     const [previewThumb,  setPreviewThumb]  = useState<PreviewThumb | null>(null);
     const [hoveredMoment, setHoveredMoment] = useState<number | null>(null);
     const [showRecs,      setShowRecs]      = useState(false);
+    const [skipIndicator, setSkipIndicator] = useState<{ dir: 'fwd' | 'bwd'; key: number } | null>(null);
 
     useEffect(() => {
         if (durationSeconds && duration === 0) setDuration(durationSeconds);
@@ -113,13 +119,19 @@ export default function VideoPlayer({
         return () => { if (pauseTimer.current) clearTimeout(pauseTimer.current); };
     }, [playing, relatedVideos.length]);
 
+    // Auto-hide skip indicator
+    useEffect(() => {
+        if (!skipIndicator) return;
+        const t = setTimeout(() => setSkipIndicator(null), 600);
+        return () => clearTimeout(t);
+    }, [skipIndicator]);
+
     // Fix 2: fullscreen exit — if slug changed, navigate to correct page URL
     useEffect(() => {
         const onFSChange = () => {
             const el = document.fullscreenElement ||
                 ((document as unknown) as Record<string, unknown>)['webkitFullscreenElement'] as Element | null;
             setIsFullscreen(!!el);
-            // On exit: sync URL to current video if it changed
             if (!el && curSlug && curSlug !== initialSlug) {
                 router.replace(`/${locale}/video/${curSlug}`);
             }
@@ -133,6 +145,8 @@ export default function VideoPlayer({
     }, [curSlug, initialSlug, locale, router]);
 
     const togglePlay = useCallback(() => {
+        // Block false triggers during seek operations
+        if (seekingRef.current) return;
         const v = videoRef.current;
         if (!v) return;
         if (v.paused) { v.play().then(() => setPlaying(true)).catch(() => setPlaying(false)); }
@@ -147,7 +161,6 @@ export default function VideoPlayer({
     }, []);
 
     const toggleFullscreen = useCallback(() => {
-        // Use outerRef so recommendations (outside inner container) are visible in fullscreen
         const c = outerRef.current;
         if (!c) return;
         const fsEl = document.fullscreenElement ||
@@ -164,12 +177,16 @@ export default function VideoPlayer({
     const skip = useCallback((delta: number) => {
         const v = videoRef.current;
         if (!v) return;
+        seekingRef.current = true;
         v.currentTime = Math.max(0, Math.min(v.duration || duration, v.currentTime + delta));
+        setSkipIndicator({ dir: delta > 0 ? 'fwd' : 'bwd', key: Date.now() });
+        setTimeout(() => { seekingRef.current = false; }, 300);
     }, [duration]);
 
     const seekToRatio = useCallback((ratio: number) => {
         const v = videoRef.current;
         if (!v) return;
+        seekingRef.current = true;
         const d = v.duration || duration;
         if (!d) return;
         const targetTime = Math.max(0, Math.min(d, ratio * d));
@@ -179,6 +196,7 @@ export default function VideoPlayer({
         } else {
             v.currentTime = targetTime;
         }
+        setTimeout(() => { seekingRef.current = false; }, 300);
     }, [duration]);
 
     const getRatio = (clientX: number): number => {
@@ -203,8 +221,41 @@ export default function VideoPlayer({
 
     const handleTouchSeek = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
         e.preventDefault();
+        e.stopPropagation();
         seekToRatio(getRatio(e.touches[0].clientX));
     }, [seekToRatio]);
+
+    // Unified touch handler: single tap = toggle play (delayed), double tap = skip
+    const handleDoubleTap = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+        // Ignore taps on controls bar or buttons
+        const target = e.target as HTMLElement;
+        if (target.closest('button') || target.closest('input') || target.closest('[data-controls]')) return;
+
+        const now = Date.now();
+        const touch = e.changedTouches[0];
+        const last = lastTapRef.current;
+        const isDoubleTap = now - last.time < 300 && Math.abs(touch.clientX - last.x) < 50;
+
+        if (isDoubleTap) {
+            // Cancel pending single-tap (togglePlay)
+            if (singleTapTimer.current) { clearTimeout(singleTapTimer.current); singleTapTimer.current = null; }
+            e.preventDefault();
+            const rect = containerRef.current?.getBoundingClientRect();
+            if (!rect) return;
+            const x = touch.clientX - rect.left;
+            skip(x < rect.width / 2 ? -10 : 10);
+            // Reset so triple-tap doesn't count as another double
+            lastTapRef.current = { time: 0, x: 0 };
+        } else {
+            // Schedule single-tap action (togglePlay) with delay
+            lastTapRef.current = { time: now, x: touch.clientX };
+            if (singleTapTimer.current) clearTimeout(singleTapTimer.current);
+            singleTapTimer.current = setTimeout(() => {
+                singleTapTimer.current = null;
+                togglePlay();
+            }, 300);
+        }
+    }, [skip, togglePlay]);
 
     const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const v = videoRef.current;
@@ -243,13 +294,11 @@ export default function VideoPlayer({
         try {
             const res = await fetch(`/api/videos/by-slug/${encodeURIComponent(slug)}?locale=${locale}`);
             if (!res.ok) {
-                // Fallback: regular navigation
                 router.push(`/${locale}/video/${slug}`);
                 return;
             }
             const data = await res.json();
 
-            // Update video element in-place
             const v = videoRef.current;
             if (v && data.video_url) {
                 v.src = data.video_url;
@@ -260,7 +309,6 @@ export default function VideoPlayer({
                 }, { once: true });
             }
 
-            // Update all metadata state
             const localizedTitle = data.title
                 ? (typeof data.title === 'object' ? (data.title[locale] || data.title['en'] || slug) : data.title)
                 : slug;
@@ -280,7 +328,6 @@ export default function VideoPlayer({
             setShowRecs(false);
             setPreviewThumb(null);
 
-            // Update browser URL without full navigation
             window.history.replaceState(null, '', `/${locale}/video/${data.slug || slug}`);
         } catch {
             router.push(`/${locale}/video/${slug}`);
@@ -289,26 +336,17 @@ export default function VideoPlayer({
         }
     }, [navLoading, locale, router]);
 
-    // Prev/Next with in-player nav (fullscreen) or router.push (normal)
     const goToPrev = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
         if (!curPrevSlug || curPrevSlug === curSlug) return;
-        if (isFullscreen) {
-            goToVideo(curPrevSlug);
-        } else {
-            router.push(`/${locale}/video/${curPrevSlug}`);
-        }
-    }, [curPrevSlug, isFullscreen, goToVideo, locale, router]);
+        if (isFullscreen) { goToVideo(curPrevSlug); } else { router.push(`/${locale}/video/${curPrevSlug}`); }
+    }, [curPrevSlug, curSlug, isFullscreen, goToVideo, locale, router]);
 
     const goToNext = useCallback((e: React.MouseEvent) => {
         e.stopPropagation();
         if (!curNextSlug || curNextSlug === curSlug) return;
-        if (isFullscreen) {
-            goToVideo(curNextSlug);
-        } else {
-            router.push(`/${locale}/video/${curNextSlug}`);
-        }
-    }, [curNextSlug, isFullscreen, goToVideo, locale, router]);
+        if (isFullscreen) { goToVideo(curNextSlug); } else { router.push(`/${locale}/video/${curNextSlug}`); }
+    }, [curNextSlug, curSlug, isFullscreen, goToVideo, locale, router]);
 
     // Drag-scroll handlers for recommendations
     const onRecsMD = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
@@ -361,6 +399,7 @@ export default function VideoPlayer({
             className="absolute inset-0 rounded-xl overflow-hidden group/player select-none" onContextMenu={(e) => e.preventDefault()}
             onMouseMove={resetHideTimer}
             onMouseLeave={() => { if (playing) setShowControls(false); }}
+            onTouchEnd={handleDoubleTap}
         >
             {/* Video */}
             {videoError ? (
@@ -382,7 +421,6 @@ export default function VideoPlayer({
                     playsInline
                     controlsList="nodownload"
                     onContextMenu={(e) => e.preventDefault()}
-                    onClick={togglePlay}
                     onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
                     onProgress={(e) => {
                         const v = e.currentTarget;
@@ -402,9 +440,21 @@ export default function VideoPlayer({
                 />
             )}
 
-            {/* Click-to-play overlay (no button — use controls) */}
+            {/* Click-to-play overlay — desktop only (touch handled by handleDoubleTap) */}
             {!playing && !showRecs && (
-                <div className="absolute inset-0 cursor-pointer z-10" onClick={togglePlay} />
+                <div className="absolute inset-0 cursor-pointer z-10 hidden md:block" onClick={togglePlay} />
+            )}
+
+            {/* Skip indicator overlay */}
+            {skipIndicator && (
+                <div
+                    key={skipIndicator.key}
+                    className={`absolute top-1/2 -translate-y-1/2 ${skipIndicator.dir === 'bwd' ? 'left-8' : 'right-8'} pointer-events-none z-40 animate-ping`}
+                >
+                    <div className="bg-white/20 backdrop-blur-sm rounded-full w-14 h-14 flex items-center justify-center">
+                        <span className="text-white text-sm font-medium">{skipIndicator.dir === 'bwd' ? '−10с' : '+10с'}</span>
+                    </div>
+                </div>
             )}
 
             {/* Nav loading indicator */}
@@ -439,12 +489,12 @@ export default function VideoPlayer({
             )}
 
             {/* Controls bar */}
-            <div className={`absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-10 pb-2.5 px-3 transition-opacity duration-300 ${ctrlVis ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
+            <div data-controls className={`absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/90 via-black/50 to-transparent pt-10 pb-2.5 px-3 transition-opacity duration-300 ${ctrlVis ? 'opacity-100' : 'opacity-0 pointer-events-none'}`}>
 
                 {/* Progress area */}
                 <div className="relative mb-2.5">
 
-                    {/* Fix 1: Screenshot preview popup — smaller on mobile */}
+                    {/* Screenshot preview popup */}
                     {previewThumb && (
                         <div className="absolute bottom-full mb-3 pointer-events-none z-40"
                             style={{ left: `clamp(60px, ${previewThumb.xPct * 100}%, calc(100% - 60px))`, transform: 'translateX(-50%)' }}>
@@ -486,7 +536,7 @@ export default function VideoPlayer({
                             </div>
                         </div>
 
-                        {/* Fix 1: Hot moment dots — 6px on mobile, 8px on desktop */}
+                        {/* Hot moment dots */}
                         {duration > 0 && curMoments.map((moment, i) => {
                             const pos = (moment.timestamp_sec / duration) * 100;
                             if (pos < 0 || pos > 100) return null;
@@ -521,13 +571,23 @@ export default function VideoPlayer({
                             ? <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z" /></svg>
                             : <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z" /></svg>}
                     </button>
-                    {/* Fix 1: skip buttons hidden on mobile */}
-                    <button onClick={() => skip(-5)} title="-5s" className="hidden md:flex text-white/60 hover:text-white transition-colors">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M11 18V6l-8.5 6 8.5 6zm.5-6 8.5 6V6l-8.5 6z" /></svg>
+
+                    {/* Skip backward -10s — visible on all devices */}
+                    <button onClick={() => skip(-10)} title="−10 сек" className="text-white/70 hover:text-white transition-colors shrink-0">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M11.99 5V1l-5 5 5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6h-2c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z" />
+                            <text x="10" y="15.5" fontSize="7" fontWeight="bold" textAnchor="middle" fill="currentColor">10</text>
+                        </svg>
                     </button>
-                    <button onClick={() => skip(5)} title="+5s" className="hidden md:flex text-white/60 hover:text-white transition-colors">
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M4 18l8.5-6L4 6v12zm9-12v12l8.5-6L13 6z" /></svg>
+
+                    {/* Skip forward +10s — visible on all devices */}
+                    <button onClick={() => skip(10)} title="+10 сек" className="text-white/70 hover:text-white transition-colors shrink-0">
+                        <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M12.01 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6s2.69 6 6 6 6-2.69 6-6h2c0 4.42-3.58 8-8 8s-8-3.58-8-8 3.58-8 8-8z" />
+                            <text x="14" y="15.5" fontSize="7" fontWeight="bold" textAnchor="middle" fill="currentColor">10</text>
+                        </svg>
                     </button>
+
                     <button onClick={toggleMute} className="text-white hover:text-brand-accent transition-colors shrink-0">
                         {muted || volume === 0
                             ? <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M16.5 12A4.5 4.5 0 0014 7.97v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.796 8.796 0 0021 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 003.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z" /></svg>

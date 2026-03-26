@@ -76,6 +76,7 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                             <th className="text-left p-3 text-gray-400 font-medium">Актриса</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Фильм</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Статус</th>
+                            <th className="text-left p-3 text-gray-400 font-medium">Источник</th>
                             <th className="text-left p-3 text-gray-400 font-medium">AI</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Просмотры</th>
                             <th className="text-left p-3 text-gray-400 font-medium">Создано</th>
@@ -123,6 +124,15 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                                     </span>
                                 </td>
                                 <td className="p-3">
+                                    {video.source_url?.includes('xcadr') ? (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-cyan-900/50 text-cyan-400">xcadr</span>
+                                    ) : video.raw_video_id ? (
+                                        <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-900/50 text-indigo-400">boobsradar</span>
+                                    ) : (
+                                        <span className="text-xs text-gray-600">{'\u2014'}</span>
+                                    )}
+                                </td>
+                                <td className="p-3">
                                     {video.ai_confidence != null ? (
                                         <div className="flex items-center gap-1.5">
                                             <div className="w-12 h-1.5 rounded-full bg-gray-800 overflow-hidden">
@@ -135,6 +145,20 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                                             </div>
                                             <span className="text-[10px] text-gray-500">{Math.round(video.ai_confidence * 100)}%</span>
                                         </div>
+                                    ) : video.ai_vision_status ? (
+                                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                            video.ai_vision_status === 'completed' ? 'bg-green-900/50 text-green-400' :
+                                            video.ai_vision_status === 'censored' ? 'bg-orange-900/50 text-orange-400' :
+                                            video.ai_vision_status === 'timeout_fallback' ? 'bg-yellow-900/50 text-yellow-400' :
+                                            video.ai_vision_status === 'error' ? 'bg-red-900/50 text-red-400' :
+                                            'bg-gray-800 text-gray-400'
+                                        }`}>
+                                            {video.ai_vision_status === 'completed' ? 'AI OK' :
+                                             video.ai_vision_status === 'censored' ? 'Цензура' :
+                                             video.ai_vision_status === 'timeout_fallback' ? 'Таймаут' :
+                                             video.ai_vision_status === 'error' ? 'Ошибка' :
+                                             video.ai_vision_status}
+                                        </span>
                                     ) : (
                                         <span className="text-xs text-gray-600">{'\u2014'}</span>
                                     )}
@@ -147,7 +171,7 @@ export default function AdminVideosTable({ videos }: { videos: VideoRow[] }) {
                         ))}
                         {videos.length === 0 && (
                             <tr>
-                                <td colSpan={9} className="p-8 text-center text-gray-500">
+                                <td colSpan={10} className="p-8 text-center text-gray-500">
                                     Видео не найдены
                                 </td>
                             </tr>

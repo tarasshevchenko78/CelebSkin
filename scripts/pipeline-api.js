@@ -597,11 +597,269 @@ app.post('/api/pipeline/delete-bulk', async (req, res) => {
 });
 
 // ============================================================
+// XCADR Pipeline endpoints
+// ============================================================
+
+const XCADR_PID_FILE = join(__dirname, 'xcadr-pipeline.pid');
+const XCADR_PROGRESS_FILE = join(__dirname, 'logs', 'xcadr-progress.json');
+const XCADR_ORCHESTRATOR = join(__dirname, 'run-xcadr-pipeline.js');
+const XCADR_WORK_DIR = '/opt/celebskin/xcadr-work';
+const XCADR_V2_WORK_DIR = '/opt/celebskin/pipeline-work';
+
+app.use('/api/xcadr-pipeline', authMiddleware);
+
+function getXcadrPid() {
+  try {
+    if (!existsSync(XCADR_PID_FILE)) return null;
+    const pid = parseInt(readFileSync(XCADR_PID_FILE, 'utf8').trim());
+    if (!pid || isNaN(pid)) return null;
+    process.kill(pid, 0);
+    return pid;
+  } catch { return null; }
+}
+
+function readXcadrProgress() {
+  try { return JSON.parse(readFileSync(XCADR_PROGRESS_FILE, 'utf8')); }
+  catch { return {}; }
+}
+
+// GET /api/xcadr-pipeline/status
+app.get('/api/xcadr-pipeline/status', async (req, res) => {
+  try {
+    const pid = getXcadrPid();
+    const progress = readXcadrProgress();
+
+    const stepNames = ['download', 'ai_vision', 'watermark', 'media', 'cdn_upload', 'publish', 'cleanup'];
+    const queues = {};
+    for (const name of stepNames) {
+      const step = progress.steps?.[name] || {};
+      queues[name] = {
+        queued: step.queued || 0,
+        active: step.active || 0,
+        completed: step.completed || 0,
+      };
+    }
+
+    const { rows: [counts] } = await query(`
+      SELECT
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'published')::int AS published,
+        COUNT(*) FILTER (WHERE status = 'failed')::int AS failed,
+        COUNT(*) FILTER (WHERE status IN ('parsed','translated','matched'))::int AS parsed,
+        COUNT(*) FILTER (WHERE status = 'translated')::int AS translated,
+        COUNT(*) FILTER (WHERE status = 'matched')::int AS matched,
+        COUNT(*) FILTER (WHERE status NOT IN ('published','failed','parsed','translated','matched','imported','no_match','duplicate'))::int AS in_progress
+      FROM xcadr_imports
+    `);
+
+    res.json({
+      running: !!pid,
+      pid,
+      pipeline_status: progress.status || (pid ? 'running' : 'stopped'),
+      queues,
+      totals: {
+        total: counts?.total || 0,
+        published: counts?.published || 0,
+        failed: counts?.failed || 0,
+        parsed: counts?.parsed || 0,
+        translated: counts?.translated || 0,
+        matched: counts?.matched || 0,
+        in_progress: counts?.in_progress || 0,
+      },
+      completed: progress.completed || 0,
+      failed_count: progress.failed || 0,
+      elapsed: progress.elapsed || 0,
+    });
+  } catch (err) {
+    logger.error(`[pipeline-api] /xcadr-pipeline/status error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/xcadr-pipeline/videos
+app.get('/api/xcadr-pipeline/videos', async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT id, title_ru, title_en, celebrity_name_ru, celebrity_name_en,
+             movie_title_ru, movie_title_en, status, pipeline_step, pipeline_error,
+             xcadr_url, matched_video_id, created_at, updated_at
+      FROM xcadr_imports
+      ORDER BY updated_at DESC
+      LIMIT 200
+    `);
+
+    const videosWithProgress = rows.map(r => {
+      let step_progress = null;
+      let ai_vision_status = null;
+      let ai_vision_error = null;
+      const wdir = join(XCADR_WORK_DIR, String(r.id));
+      try {
+        const progFile = join(wdir, 'step-progress.json');
+        if (existsSync(progFile)) step_progress = JSON.parse(readFileSync(progFile, 'utf8'));
+      } catch {}
+      try {
+        const aiFile = join(wdir, 'ai-results.json');
+        if (existsSync(aiFile)) {
+          const aiData = JSON.parse(readFileSync(aiFile, 'utf8'));
+          ai_vision_status = aiData.ai_vision_status || null;
+          ai_vision_error = aiData.ai_vision_error || null;
+        }
+      } catch {}
+      // Also check step_progress for ai_vision_status (set during processing)
+      if (!ai_vision_status && step_progress?.ai_vision_status) ai_vision_status = step_progress.ai_vision_status;
+      return { ...r, step_progress, ai_vision_status, ai_vision_error };
+    });
+
+    res.json({ count: rows.length, videos: videosWithProgress });
+  } catch (err) {
+    logger.error(`[pipeline-api] /xcadr-pipeline/videos error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/xcadr-pipeline/start
+app.post('/api/xcadr-pipeline/start', (req, res) => {
+  try {
+    const pid = getXcadrPid();
+    if (pid) return res.status(409).json({ error: 'XCADR Pipeline already running', pid });
+
+    const limit = parseInt(req.body?.limit) || 10;
+    const url = req.body?.url || '';
+    const celeb = req.body?.celeb || '';
+    const collection = req.body?.collection || '';
+    const pages = parseInt(req.body?.pages) || 0;
+
+    const args = [`--limit=${limit}`];
+    if (url) args.push(`--url=${url}`);
+    if (celeb) args.push(`--celeb=${celeb}`);
+    if (collection) args.push(`--collection=${collection}`);
+    if (pages > 0) args.push(`--pages=${pages}`);
+
+    const child = spawn('node', [XCADR_ORCHESTRATOR, ...args], {
+      cwd: __dirname, detached: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env },
+    });
+
+    child.stdout.on('data', (d) => logger.info(`[xcadr] ${d.toString().trimEnd()}`));
+    child.stderr.on('data', (d) => logger.warn(`[xcadr:err] ${d.toString().trimEnd()}`));
+    child.on('error', (err) => logger.error(`[xcadr] Failed to start: ${err.message}`));
+    child.on('exit', (code) => logger.info(`[xcadr] Exited with code ${code}`));
+    child.unref();
+
+    logger.info(`[pipeline-api] XCADR pipeline started pid=${child.pid} limit=${limit}`);
+    res.json({ ok: true, pid: child.pid, args, message: `XCADR Pipeline started (pid=${child.pid})` });
+  } catch (err) {
+    logger.error(`[pipeline-api] /xcadr-pipeline/start error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/xcadr-pipeline/stop
+app.post('/api/xcadr-pipeline/stop', (req, res) => {
+  try {
+    const pid = getXcadrPid();
+    if (!pid) return res.status(404).json({ error: 'XCADR Pipeline not running' });
+    process.kill(pid, 'SIGTERM');
+    logger.info(`[pipeline-api] XCADR: SIGTERM to pid=${pid}`);
+    res.json({ ok: true, pid, message: `Stopping XCADR pipeline (pid=${pid})` });
+  } catch (err) {
+    if (err.code === 'ESRCH') {
+      try { unlinkSync(XCADR_PID_FILE); } catch {}
+      return res.json({ ok: true, message: 'XCADR pipeline was already stopped. PID file cleaned.' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/xcadr-pipeline/delete — full cleanup of xcadr_import + temp video + workdirs
+app.post('/api/xcadr-pipeline/delete', async (req, res) => {
+  try {
+    const id = parseInt(req.body?.id);
+    if (!id) return res.status(400).json({ error: 'id is required' });
+    const result = await deleteXcadrImport(id);
+    res.json(result);
+  } catch (err) {
+    logger.error(`[pipeline-api] /xcadr-pipeline/delete error: ${err.message}`);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/xcadr-pipeline/delete-bulk
+app.post('/api/xcadr-pipeline/delete-bulk', async (req, res) => {
+  try {
+    const ids = req.body?.ids;
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'ids array is required' });
+    }
+    if (ids.length > 500) return res.status(400).json({ error: 'Maximum 500 per bulk delete' });
+
+    let deleted = 0, failed = 0;
+    for (const id of ids) {
+      try { await deleteXcadrImport(parseInt(id)); deleted++; }
+      catch { failed++; }
+    }
+    logger.info(`[pipeline-api] XCADR bulk delete: ${deleted} deleted, ${failed} failed`);
+    res.json({ ok: true, deleted, failed, total: ids.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Delete an xcadr_import and ALL associated data:
+ * - If published: delete the created video + all relations
+ * - Always: delete temp video record from videos table (ai_vision temp)
+ * - Always: delete workdirs (xcadr-work/{id}, pipeline-work/{tempVideoId})
+ * - Always: delete the xcadr_imports row
+ */
+async function deleteXcadrImport(xcadrId) {
+  const { rows: [item] } = await query(`SELECT * FROM xcadr_imports WHERE id = $1`, [xcadrId]);
+  if (!item) return { deleted: false, error: 'Not found' };
+
+  // 1. If published, delete the created video and all relations
+  if (item.matched_video_id) {
+    try { await deleteVideoFull(item.matched_video_id); } catch {}
+  }
+
+  // 2. Delete temp video record (created during ai_vision for watermark queue)
+  const workDir = join(XCADR_WORK_DIR, String(xcadrId));
+  let tempVideoId = null;
+  try {
+    tempVideoId = readFileSync(join(workDir, 'temp-video-id.txt'), 'utf8').trim();
+  } catch {}
+  if (tempVideoId) {
+    try { await query(`DELETE FROM video_celebrities WHERE video_id = $1`, [tempVideoId]); } catch {}
+    try { await query(`DELETE FROM movie_scenes WHERE video_id = $1`, [tempVideoId]); } catch {}
+    try { await query(`DELETE FROM video_tags WHERE video_id = $1`, [tempVideoId]); } catch {}
+    try { await query(`DELETE FROM collection_videos WHERE video_id = $1`, [tempVideoId]); } catch {}
+    try { await query(`DELETE FROM videos WHERE id = $1`, [tempVideoId]); } catch {}
+    // Delete pipeline-work dir for temp video
+    try {
+      const { rm } = await import('fs/promises');
+      await rm(join(XCADR_V2_WORK_DIR, tempVideoId), { recursive: true, force: true });
+    } catch {}
+  }
+
+  // 3. Delete xcadr-work dir
+  try {
+    const { rm } = await import('fs/promises');
+    await rm(workDir, { recursive: true, force: true });
+  } catch {}
+
+  // 4. Delete the xcadr_imports row
+  await query(`DELETE FROM xcadr_imports WHERE id = $1`, [xcadrId]);
+  logger.info(`[pipeline-api] Deleted xcadr #${xcadrId}${tempVideoId ? ` + temp ${tempVideoId.substring(0,8)}` : ''}${item.matched_video_id ? ` + video ${item.matched_video_id.substring(0,8)}` : ''}`);
+
+  return { deleted: true, id: xcadrId };
+}
+
+// ============================================================
 // Health check (no auth)
 // ============================================================
 
 app.get('/api/pipeline/health', (req, res) => {
-  res.json({ ok: true, version: '2.2', uptime: process.uptime() });
+  res.json({ ok: true, version: '2.3', uptime: process.uptime() });
 });
 
 // ============================================================

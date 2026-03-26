@@ -55,6 +55,9 @@ export default async function AdminLayout({
                             <a href="/admin/pipeline-v2" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 {'\uD83D\uDE80'} Pipeline v2
                             </a>
+                            <a href="/admin/xcadr-pipeline" className="rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
+                                XCADR Pipeline
+                            </a>
                             <a href="/admin/xcadr" className="flex items-center justify-between rounded-lg px-3 py-2 text-sm text-gray-300 hover:bg-gray-800 hover:text-white transition-colors">
                                 <span>Импорт xcadr</span>
                                 {xcadrPendingCount > 0 && (

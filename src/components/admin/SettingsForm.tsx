@@ -19,7 +19,9 @@ interface FieldConfig {
 }
 
 const API_KEY_FIELDS: FieldConfig[] = [
-    { key: 'gemini_api_key', label: 'Ключ Gemini API', type: 'password' },
+    { key: 'gemini_api_key_1', label: 'Ключ Gemini API #1', type: 'password' },
+    { key: 'gemini_api_key_2', label: 'Ключ Gemini API #2', type: 'password' },
+    { key: 'gemini_api_key_3', label: 'Ключ Gemini API #3', type: 'password' },
     { key: 'tmdb_api_key', label: 'Ключ TMDB API', type: 'password' },
 ];
 

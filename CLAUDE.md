@@ -55,13 +55,14 @@ scripts/
     tags.js            — Tag system v3: 32 тега, 4 измерения, COUNTRY_GROUPS, normalizeTags()
   run-pipeline-v2.js   — Pipeline v2.0 оркестратор (8 in-memory queues, auto-resume)
   ai-vision-analyze.js — AI Vision анализ видео (Gemini 3-flash-preview, File API)
+  run-xcadr-pipeline.js — XCADR Pipeline оркестратор (7 in-memory queues, данные в БД только при publish)
   xcadr/
     parse-xcadr.js     — парсер xcadr.online
     translate-xcadr.js — перевод через TMDB + Gemini
     match-xcadr.js     — поиск совпадений в БД
     map-tags.js        — маппинг тегов и коллекций
-    download-and-process.js — скачивание + обработка видео
-    auto-import.js     — автоматический оркестратор
+    download-and-process.js — скачивание + обработка видео (legacy)
+    auto-import.js     — автоматический оркестратор (legacy)
     test-gemini.js     — тест Gemini API
   watermark.js         — наложение водяного знака (ultrafast + threads 0)
   generate-thumbnails.js — скриншоты + sprites + GIF (с CDN fallback)
@@ -111,14 +112,54 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 ### scripts/.env (НЕ в git, нужен на ОБОИХ серверах)
 Обязательные ключи: `DB_HOST`, `DB_PASSWORD`, `BUNNY_STORAGE_KEY`, `BUNNY_CDN_URL`, `GEMINI_API_KEY`, `TMDB_API_KEY`
 
-## xcadr Pipeline (Contabo)
-Порядок: parse → translate → match → map-tags → import (из админки) → download-and-process
-- parse: парсит xcadr.online, сохраняет метаданные в xcadr_imports
-- translate: переводит через TMDB + Gemini
-- match: ищет совпадения в нашей БД
-- map-tags: маппит русские теги на наши
-- import: создаёт записи video/celebrity/movie в БД (из админки)
-- download: скачивает видео, обрабатывает FFmpeg, заливает на CDN
+## XCADR Pipeline (Contabo) — АКТУАЛЬНЫЙ (март 2026)
+
+> Полное ТЗ: `/opt/celebskin/XCADR_PIPELINE_TZ.md`
+
+### Оркестратор: `run-xcadr-pipeline.js` (1324 строки)
+Единый pipeline с in-memory queues. **Данные в БД (videos/celebrities/movies) только при publish.**
+
+### Pre-pipeline
+- `parse-xcadr.js`: парсит xcadr.online → `xcadr_imports` staging
+- Дедупликация: `published`/`duplicate` → пропуск; `failed`/`error` → сброс в `parsed`
+
+### 7 worker шагов
+| # | Шаг | Workers | Описание |
+|---|------|---------|----------|
+| 1 | download | 2 | KVS patterns → yt-dlp → video.mp4 (fallback boobsradar) |
+| 2 | ai_vision | 2 | Temp video → Gemini 3-flash-preview → ai-results.json → cleanup temp |
+| 3 | watermark | 2 | FFmpeg delogo xcadr + overlay celeb.skin (preset fast, CRF 19) |
+| 4 | media | 2 | 8 screenshots, preview.mp4 (6s), preview.gif (4s) |
+| 5 | cdn_upload | 3 | Все файлы → Bunny CDN |
+| 6 | publish | 2 | CREATE video/celebrity/movie + TMDB enrich + bio/desc 10 langs + link all |
+| 7 | cleanup | 2 | rm workdir |
+
+### Publish: 4-шаговый поиск актрис/фильмов
+1. По английскому имени → 2. По русскому имени → 3. TMDB API → 4. Create new (EN name)
+
+### Publish: обогащение
+- **enrichCelebTMDB**: фото, дата рождения, национальность, bio → перевод на 10 языков (Gemini)
+- **enrichMovieTMDB**: постер, жанры, студия, description → перевод на 10 языков (Gemini)
+- **Связи**: video_celebrities, movie_scenes, movie_celebrities, video_tags, collection_videos
+
+### Дедупликация
+- `source_url` (xcadr URL) — уникальный индекс в `videos`
+- При старте/завершении: DELETE из `xcadr_imports` всё кроме `published`/`duplicate`
+
+### Кодирование видео
+libx264, preset `fast`, CRF `19`, aac 128k, mp4 faststart
+
+### UI + API
+- Admin UI: `/admin/xcadr-pipeline` — прогресс-бары, вкладки Pipeline/Published/Failed/Import
+- API proxy: `/api/admin/xcadr-pipeline/route.ts` → Contabo :3100
+- AdminVideosTable: колонки «Источник» (xcadr/boobsradar) и «AI» (confidence bar / vision badge)
+- Фильтрация по текущему запуску (`started_at`)
+
+### ХАРДЛИНКИ (ВАЖНО!)
+`run-xcadr-pipeline.js` и `pipeline-api.js` — хардлинки между `/opt/celebskin/scripts/` и `/opt/celebskin/site/scripts/`. Один файл = один inode. Менять в `/opt/celebskin/scripts/`.
+
+### Legacy xcadr (deprecated)
+Файлы: xcadr/auto-import.js, xcadr/download-and-process.js — не используются
 
 ## Pipeline v2.0 (Contabo) — НОВЫЙ
 
@@ -199,16 +240,16 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 `movies.countries`: VARCHAR(2)[] массив ISO кодов
 
 ## Известные баги (март 2026)
-1. ~~Import пишет boobsradar URL в video_url — должен быть NULL~~ — ИСПРАВЛЕНО: убран fallback на raw?.video_file_url в enrichVideoWithRelations()
-2. ~~Скачивается 480p~~ — Boobsradar отдаёт один URL без выбора качества. quality теперь всегда определяется ffprobe (1080p/720p/480p/360p)
-3. Водяной знак xcadr.online не убирается — delogo не реализован
-4. ~~Коллекции не привязываются к видео при Import~~ — ИСПРАВЛЕНО
-5. ~~Draft статус для актрис/фильмов не реализован~~ — РЕАЛИЗОВАНО в Pipeline v2 (tmdb_enrich → draft, publish → published)
+1. ~~Import пишет boobsradar URL в video_url~~ — ИСПРАВЛЕНО
+2. ~~Скачивается 480p~~ — quality определяется ffprobe
+3. ~~Водяной знак xcadr.online не убирается~~ — ИСПРАВЛЕНО: delogo в watermark шаге XCADR pipeline
+4. ~~Коллекции не привязываются~~ — ИСПРАВЛЕНО
+5. ~~Draft статус для актрис/фильмов~~ — РЕАЛИЗОВАНО
 6. AI описание — промт не обновлён на эротический стиль
 7. Удаление видео из админки может не работать
 8. Часть админки всё ещё на английском
-9. ~~PIPELINE_ERROR_DECODE при перемотке видео в Chrome~~ — ИСПРАВЛЕНО в watermark.js (SAR=1:1, фиксированные keyframes, audio resample). Старые 303 видео всё ещё имеют нестандартный SAR — нужна перекодировка через `reprocess-broken-videos.js`
-10. 53 видео привязаны к 2+ фильмам (дубли: оригинал + перевод названия) — AI/TMDB создают дубликаты фильмов
+9. ~~PIPELINE_ERROR_DECODE при перемотке~~ — ИСПРАВЛЕНО (SAR=1:1). 303 старых видео нужна перекодировка
+10. ~~Дубликаты фильмов с русскими названиями~~ — ИСПРАВЛЕНО: 4-шаговый поиск EN→RU→TMDB→create
 
 ## Реализовано (март 2026)
 - Settings table: управление API ключами (Gemini, TMDB) из админки `/admin/settings`
@@ -309,11 +350,16 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - НИКОГДА не записывать boobsradar search URL в video_url
 - НИКОГДА не публиковать видео без русских переводов (title.ru, review.ru, seo_title.ru)
 - НИКОГДА не использовать `process-with-ai.js` в pipeline v2 (это v1 скрипт для raw_videos)
-- `generate-multilang.js` — единственный скрипт для переводов в pipeline v2 (в git с коммита 43f6ca5)
+- `generate-multilang.js` — единственный скрипт для переводов в pipeline v2
 - Gemini File API: upload и generateContent ОБЯЗАНЫ использовать ОДИН И ТОТ ЖЕ API ключ
-- Промты для Sonnet давать КОРОТКИЕ — по 1 багу, иначе пропускает
-- Gemini AI Vision: gemini-3-flash-preview (pipeline v2). Legacy: gemini-2.5-flash (extractGeminiJSON)
+- Gemini AI Vision: gemini-3-flash-preview. Legacy: gemini-2.5-flash
 - video_url при создании = NULL, заполняется pipeline (cdn_upload шаг)
-- При смене Gemini API ключей — ОБЯЗАТЕЛЬНО перезапустить pipeline-api.js на Contabo (dotenv не перезаписывает process.env)
-- Pipeline-api.js запускать из `/opt/celebskin/scripts/` (НЕ из `site/scripts/` — там нет node_modules)
+- При смене Gemini API ключей — ОБЯЗАТЕЛЬНО: `pm2 restart pipeline-api --update-env`
+- Pipeline-api.js управляется через PM2 на Contabo (process name: `pipeline-api`)
+- `run-xcadr-pipeline.js` и `pipeline-api.js` — ХАРДЛИНКИ, менять в `/opt/celebskin/scripts/`
+- Актрисы и фильмы хранятся с АНГЛИЙСКИМИ именами, локализация в JSONB (name_localized, title_localized)
+- Дедупликация xcadr видео по `source_url` (уникальный индекс), НЕ по original_title
+- xcadr_imports: только `published` и `duplicate` остаются, остальное удаляется при старте/завершении
+- Pipeline запускается ТОЛЬКО из UI (`/admin/xcadr-pipeline`), НЕ из CLI
 - Админка на русском языке
+- Полное ТЗ XCADR Pipeline: `/opt/celebskin/XCADR_PIPELINE_TZ.md`

@@ -261,10 +261,10 @@ export async function POST(request: NextRequest) {
                     // boobsradar_url from xcadr_imports is NOT written to videos.video_url.
                     const placeholderSlug = buildJsonb(allLocalesOf('importing'));
                     const videoRes = await client.query(
-                        `INSERT INTO videos (title, slug, original_title, duration_seconds, seo_description, status)
-                         VALUES ($1::jsonb, $2::jsonb, $3, $4, $5::jsonb, 'new')
+                        `INSERT INTO videos (title, slug, original_title, duration_seconds, seo_description, donor_tags, status)
+                         VALUES ($1::jsonb, $2::jsonb, $3, $4, $5::jsonb, $6, 'new')
                          RETURNING id`,
-                        [videoTitle, placeholderSlug, titleEn, row.duration_seconds || null, seoDescJson]
+                        [videoTitle, placeholderSlug, titleEn, row.duration_seconds || null, seoDescJson, Array.isArray(row.tags_ru) && row.tags_ru.length > 0 ? row.tags_ru : null]
                     );
                     const videoId: string = videoRes.rows[0].id;
                     const shortId = videoId.replace(/-/g, '').substring(0, 8);
