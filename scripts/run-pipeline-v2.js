@@ -1213,6 +1213,30 @@ async function processWatermark(videoId, stepName) {
   const wmCfg = await loadWatermarkSettings();
   logger.info(`[${stepName}:${shortId}] Watermark type=${wmCfg.watermarkType}, opacity=${wmCfg.opacity}, movement=${wmCfg.watermarkMovement}`);
 
+  // Detect video resolution for delogo (remove donor watermarks)
+  let vWidth = 0, vHeight = 0;
+  try {
+    const { stdout } = await execFileAsync('ffprobe', ['-v','quiet','-select_streams','v:0','-show_entries','stream=width,height','-of','csv=p=0', inputPath], { timeout: 15000 });
+    const [w, h] = stdout.trim().split(',').map(Number);
+    if (w && h) { vWidth = w; vHeight = h; }
+  } catch {}
+
+  // Build delogo filters for donor watermarks (ALL 4 corners)
+  let delogoFilter = '';
+  if (vWidth > 0 && vHeight > 0) {
+    const dW = Math.round(vWidth * 0.28);
+    const dH = Math.round(vHeight * 0.10);
+    const m = 2;
+    const corners = [
+      { x: vWidth - dW - m, y: m },
+      { x: vWidth - dW - m, y: vHeight - dH - m },
+      { x: m, y: vHeight - dH - m },
+      { x: m, y: m },
+    ];
+    delogoFilter = corners.map(c => `delogo=x=${c.x}:y=${c.y}:w=${dW}:h=${dH}:show=0`).join(',');
+    logger.info(`[${stepName}:${shortId}] Delogo 4 corners: ${vWidth}x${vHeight}, w=${dW} h=${dH}`);
+  }
+
   // Build FFmpeg args
   let ffmpegArgs;
   const baseArgs = [
@@ -1244,12 +1268,14 @@ async function processWatermark(videoId, stepName) {
       const filterComplex = buildImageOverlayFilter(
         wmCfg.margin, wmCfg.opacity, wmCfg.watermarkScale, wmCfg.watermarkMovement
       );
-      ffmpegArgs = [...baseArgs, '-i', inputPath, '-i', wmPngPath, '-filter_complex', filterComplex, ...outputArgs];
+      const fullFilter = delogoFilter ? `[0:v]${delogoFilter}[delogoed];${filterComplex.replace('[0:v]', '[delogoed]')}` : filterComplex;
+      ffmpegArgs = [...baseArgs, '-i', inputPath, '-i', wmPngPath, '-filter_complex', fullFilter, ...outputArgs];
     }
   }
   if (!useImage) {
     const textFilter = buildTextFilter(wmCfg);
-    ffmpegArgs = [...baseArgs, '-i', inputPath, '-vf', textFilter, ...outputArgs];
+    const fullVf = delogoFilter ? `${delogoFilter},${textFilter}` : textFilter;
+    ffmpegArgs = [...baseArgs, '-i', inputPath, '-vf', fullVf, ...outputArgs];
   }
 
   // Run FFmpeg with 30 min timeout + progress tracking

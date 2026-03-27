@@ -162,7 +162,7 @@ const SUBPROCESS_TIMEOUT = 600000;
 const STEP_ORDER = ['download', 'ai_vision', 'watermark', 'media', 'cdn_upload', 'publish', 'cleanup'];
 
 let STEP_CONCURRENCY = {
-  download: 3, ai_vision: 3, watermark: 2, media: 3, cdn_upload: 3, publish: 3, cleanup: 3,
+  download: 3, ai_vision: 3, watermark: 1, media: 3, cdn_upload: 3, publish: 3, cleanup: 3,
 };
 
 function writeStepProgress(xcadrId, data) {
@@ -560,49 +560,98 @@ async function processWatermark(xcadrId, stepName) {
 
   const v2Dir = join(V2_WORK_DIR, tempVideoId);
 
-  // Atomic claim: only watermark if not already claimed by home worker
-  const { rowCount } = await query(
-    `UPDATE videos SET status = 'watermarking', pipeline_step = 'watermark', updated_at = NOW()
-     WHERE id = $1
-       AND status NOT IN ('watermarking', 'watermarking_home', 'watermarked', 'published', 'failed', 'needs_review')
-       AND pipeline_step NOT IN ('watermarking_home', 'watermarked', 'media', 'cdn_upload', 'publish', 'cleanup')`,
-    [tempVideoId]
-  );
+  // Check current status before claiming (same approach as pipeline v2)
+  const { rows: [wmChk] } = await query('SELECT status, pipeline_step FROM videos WHERE id = $1', [tempVideoId]);
+  if (!wmChk) throw new Error('Temp video disappeared from DB');
 
-  if (rowCount === 0) {
-    // Home worker already claimed or finished — wait for completion then copy result
-    logger.info(`[${stepName}:${xcadrId}] Temp video ${tempVideoId.substring(0,8)} already claimed — waiting for home worker...`);
+  // Skip if already past watermark stage (another Contabo worker finished it)
+  if (['watermarked', 'published', 'failed', 'needs_review'].includes(wmChk.status)) {
+    logger.info(`[${stepName}:${xcadrId}] Already ${wmChk.status} — skipping watermark`);
+    // If watermarked file exists in xcadr-work or pipeline-work, copy it
+    const v2Watermarked = join(v2Dir, 'watermarked.mp4');
+    if (existsSync(outputPath)) {
+      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Already done' });
+      return;
+    } else if (existsSync(v2Watermarked)) {
+      await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
+      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Copied from other worker' });
+      return;
+    }
+    // Fall through to do it locally if no file found
+  }
+  if (['watermarked', 'media', 'cdn_upload', 'publish', 'cleanup'].includes(wmChk.pipeline_step)) {
+    logger.info(`[${stepName}:${xcadrId}] Already at step=${wmChk.pipeline_step} — skipping watermark`);
+    const v2Watermarked = join(v2Dir, 'watermarked.mp4');
+    if (existsSync(outputPath)) {
+      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Already done' });
+      return;
+    } else if (existsSync(v2Watermarked)) {
+      await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
+      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Copied from other worker' });
+      return;
+    }
+  }
+
+  // If another Contabo worker is currently watermarking — just skip, don't wait
+  if (wmChk.status === 'watermarking') {
+    logger.info(`[${stepName}:${xcadrId}] Another Contabo worker is watermarking ${tempVideoId.substring(0,8)} — skipping`);
+    writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Other worker processing' });
+    return;
+  }
+
+  // If home worker claimed it — wait for completion then copy result
+  if (wmChk.status === 'watermarking_home') {
+    logger.info(`[${stepName}:${xcadrId}] Home worker claimed ${tempVideoId.substring(0,8)} — waiting...`);
     writeStepProgress(xcadrId, { step: 'watermark', status: 'running', percent: 10, detail: 'Waiting for home worker...' });
 
-    // Poll until watermarked or timeout (30 min)
     const wmTimeout = Date.now() + 30 * 60 * 1000;
+    let homeWorkerDone = false;
     while (Date.now() < wmTimeout) {
       const { rows: [check] } = await query(
         `SELECT status, pipeline_step FROM videos WHERE id = $1`, [tempVideoId]
       );
       if (!check) throw new Error('Temp video disappeared from DB');
       const ps = check.pipeline_step, st = check.status;
-      if (ps === 'watermarked' || st === 'watermarked' ||
-          (st === 'watermarking_home' && ps === 'watermarked') ||
-          (st === 'watermarked' && ps === 'watermarking_home')) {
+      if (ps === 'watermarked' || st === 'watermarked') {
         logger.info(`[${stepName}:${xcadrId}] Home worker completed watermark for ${tempVideoId.substring(0,8)}`);
+        homeWorkerDone = true;
         break;
       }
-      if (st === 'failed') throw new Error('Home worker failed watermark');
+      if (st === 'failed' || ps === 'watermark_failed') break;
       await sleep(5000);
     }
 
-    // Copy watermarked.mp4 from pipeline-work to xcadr-work
-    const v2Watermarked = join(v2Dir, 'watermarked.mp4');
-    if (existsSync(v2Watermarked)) {
-      await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
-      const s = await stat(outputPath);
-      logger.info(`[${stepName}:${xcadrId}] Copied home watermark: ${(s.size/1048576).toFixed(1)}MB`);
-    } else {
-      throw new Error('Home worker watermarked.mp4 not found in pipeline-work');
+    if (homeWorkerDone) {
+      const v2Watermarked = join(v2Dir, 'watermarked.mp4');
+      if (existsSync(v2Watermarked)) {
+        await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
+        const s = await stat(outputPath);
+        logger.info(`[${stepName}:${xcadrId}] Copied home watermark: ${(s.size/1048576).toFixed(1)}MB`);
+      } else if (existsSync(outputPath)) {
+        logger.info(`[${stepName}:${xcadrId}] Home watermark already in xcadr-work`);
+      } else {
+        throw new Error('Home worker watermarked.mp4 not found');
+      }
+      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Done (home worker)' });
+      return;
     }
+    // Home worker timed out or failed — fall through to do it locally
+    logger.warn(`[${stepName}:${xcadrId}] Home worker timed out/failed — processing locally`);
+  }
 
-    writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Done (home worker)' });
+  // Atomic claim for local processing
+  const { rowCount } = await query(
+    `UPDATE videos SET status = 'watermarking', pipeline_step = 'watermark', updated_at = NOW()
+     WHERE id = $1
+       AND status NOT IN ('watermarking', 'watermarking_home', 'watermarked', 'published', 'failed', 'needs_review')
+       AND pipeline_step NOT IN ('watermarked', 'media', 'cdn_upload', 'publish', 'cleanup')`,
+    [tempVideoId]
+  );
+
+  if (rowCount === 0) {
+    // Could not claim — another worker just grabbed it, skip
+    logger.info(`[${stepName}:${xcadrId}] Could not claim ${tempVideoId.substring(0,8)} — another worker took it`);
+    writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Claimed by other worker' });
     return;
   }
 

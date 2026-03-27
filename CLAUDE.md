@@ -128,7 +128,7 @@ Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Pr
 |---|------|---------|----------|
 | 1 | download | 2 | KVS patterns → yt-dlp → video.mp4 (fallback boobsradar) |
 | 2 | ai_vision | 2 | Temp video → Gemini 3-flash-preview → ai-results.json → cleanup temp |
-| 3 | watermark | 2 | FFmpeg delogo xcadr + overlay celeb.skin (preset fast, CRF 19) |
+| 3 | watermark | 1 | FFmpeg delogo xcadr 4 corners + overlay celeb.skin (preset fast, CRF 19). 1 слот Contabo, остальное → Home Worker |
 | 4 | media | 2 | 8 screenshots, preview.mp4 (6s), preview.gif (4s) |
 | 5 | cdn_upload | 3 | Все файлы → Bunny CDN |
 | 6 | publish | 2 | CREATE video/celebrity/movie + TMDB enrich + bio/desc 10 langs + link all |
@@ -310,13 +310,19 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - File size limit: `maxSizeMb` param, HEAD request check before download
   - Start button: source default `''` → `'boobsradar'`
   - Category counts: query fix `collections WHERE is_auto = true` → `collections`
-- **Home Watermark Worker (16.03.2026)**:
-  - Python script on user's Windows PC, web dashboard on `:8585`
-  - Shared DB queue: both Contabo (2 slots) and home worker poll `watermark_ready` with `FOR UPDATE SKIP LOCKED`
-  - Flow: SCP download → FFmpeg veryfast CRF22 → BunnyCDN upload → SCP back → DB update
+- **Home Watermark Worker (16.03.2026, updated 27.03.2026)**:
+  - `watermark_worker.py` — Python script on user's Windows PC, web dashboard on `:8585`
+  - Shared DB queue: Contabo (1 slot) + home worker poll `watermark_ready` with `FOR UPDATE SKIP LOCKED`
+  - **Delogo**: 4 corners (28% width, 10% height, margin=2) — same algorithm as Contabo
+  - Flow: SCP download → FFmpeg (delogo + overlay) → BunnyCDN upload → SCP back → DB update
   - Pipeline polls for `watermarked` videos from home worker → enqueues to `media` step
   - Error retry: 3 attempts, then `watermark_failed`. CDN upload: 3 retries with 10s delay
   - Pipeline completion waits for `watermarking_home` videos in DB
+- **Watermark Race Condition Fix (27.03.2026)**:
+  - XCADR pipeline watermark claim rewritten to match pipeline v2 approach
+  - SELECT status check before atomic UPDATE claim (was: only UPDATE, rowCount=0 assumed home worker)
+  - Now correctly distinguishes: another Contabo worker (skip) vs home worker (wait) vs already done (copy)
+  - Contabo watermark concurrency reduced to 1 slot — rest goes to Home Worker for CPU offload
 - **Pipeline Hardening & Data Quality (18.03.2026)**:
   - Scraper speedup: page-level early stop (2 consecutive full-skip pages → stop), Set preloading, silent skipping
   - Broken thumbnails: `repair-thumbnails.js` + API endpoint + admin UI (scan/repair buttons)
