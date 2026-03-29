@@ -711,10 +711,13 @@ async function main() {
       process.exit(1);
     }
 
-    console.log(`Scraping ${pageCount} listing page(s) from xcadr.online...`);
+    console.log(`Scraping ${pageCount} listing page(s) from xcadr.online (limit=${maxNew || 'unlimited'})...`);
+
+    let consecutiveEmptyPages = 0;
+    const MAX_EMPTY_PAGES = maxNew >= 1000 ? 200 : maxNew >= 100 ? 50 : 5; // 200 for huge batches (69k videos = 3450 pages)
 
     for (let p = 1; p <= pageCount; p++) {
-      console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'parse', status: 'running', current: p, total: pageCount }));
+      console.log('XCADR_PROGRESS:' + JSON.stringify({ step: 'parse', status: 'running', current: p, total: maxNew > 0 ? `~${maxNew}` : pageCount }));
       console.log(`\nFetching listing page ${p}/${pageCount}...`);
       let videoUrls = [];
       try {
@@ -722,6 +725,18 @@ async function main() {
         console.log(`  Found ${videoUrls.length} video links on page ${p}`);
       } catch (err) {
         console.warn(`[WARN] Failed to fetch listing page ${p}: ${err.message}`);
+        // If proxy/WARP has transient error, wait and retry (don't restart warp-svc — pipeline handles that)
+        if (err.message && (err.message.includes('ECONNREFUSED') || err.message.includes('Socks') || err.message.includes('Connection refused') || err.message.includes('502'))) {
+          console.warn('[WARP] Proxy error, waiting 10s before retry...');
+          await new Promise(r => setTimeout(r, 10000));
+          p--; // retry this page
+          continue;
+        }
+        consecutiveEmptyPages++;
+        if (consecutiveEmptyPages >= MAX_EMPTY_PAGES) {
+          console.log(`\n${MAX_EMPTY_PAGES} consecutive failed/empty pages. Stopping.`);
+          break;
+        }
         continue;
       }
 
@@ -734,6 +749,18 @@ async function main() {
       const { parsed, skipped } = await processVideoUrls(videoUrls, remaining);
       totalParsed += parsed;
       totalSkipped += skipped;
+
+      // Track consecutive pages with zero new videos
+      if (parsed === 0) {
+        consecutiveEmptyPages++;
+        console.log(`  0 new videos on page ${p} (${consecutiveEmptyPages}/${MAX_EMPTY_PAGES} consecutive empty)`);
+        if (consecutiveEmptyPages >= MAX_EMPTY_PAGES) {
+          console.log(`\n${MAX_EMPTY_PAGES} consecutive pages with no new videos. All recent content already imported. Stopping.`);
+          break;
+        }
+      } else {
+        consecutiveEmptyPages = 0;
+      }
 
       // Early stop: reached limit
       if (maxNew > 0 && totalParsed >= maxNew) {

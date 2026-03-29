@@ -48,9 +48,21 @@ process.stderr.on('error', (e) => { if (e.code !== 'EPIPE') throw e; });
 
 // --- WARP auto-recovery ---
 let warpReconnecting = false;
+let lastWarpRestart = 0;
+const WARP_RESTART_COOLDOWN = 60000; // min 60s between restarts
 async function ensureWarpAlive() {
+  // First check warp-cli status (fast, no network)
   try {
-    const resp = await axios.get('https://xcadr.online/', {
+    const { stdout } = await execFileAsync('warp-cli', ['--accept-tos', 'status'], { timeout: 5000 });
+    if (stdout.includes('Connected')) {
+      // WARP daemon is connected — transient 502 errors resolve themselves, don't restart
+      return true;
+    }
+  } catch (_) {}
+
+  // WARP daemon is NOT connected — try HTTP probe to confirm
+  try {
+    await axios.get('https://xcadr.online/', {
       httpAgent: xcadrAgent, httpsAgent: xcadrAgent,
       timeout: 8000, headers: { 'User-Agent': 'Mozilla/5.0' },
       validateStatus: () => true
@@ -61,24 +73,31 @@ async function ensureWarpAlive() {
       for (let w = 0; w < 12; w++) { await sleep(5000); if (!warpReconnecting) return true; }
       return false;
     }
+    // Enforce cooldown — don't restart more than once per 60s
+    if (Date.now() - lastWarpRestart < WARP_RESTART_COOLDOWN) {
+      logger.warn('[WARP] Cooldown active, waiting for previous restart to take effect...');
+      await sleep(10000);
+      return false;
+    }
     warpReconnecting = true;
-    logger.warn('[WARP] Connection failed, auto-reconnecting...');
+    lastWarpRestart = Date.now();
+    logger.warn('[WARP] Daemon disconnected, restarting warp-svc...');
     try {
-      await execFileAsync('warp-cli', ['--accept-tos', 'disconnect'], { timeout: 10000 }).catch(() => {});
-      await sleep(2000);
-      await execFileAsync('warp-cli', ['--accept-tos', 'connect'], { timeout: 10000 });
-      for (let i = 0; i < 12; i++) {
+      await execFileAsync('systemctl', ['restart', 'warp-svc'], { timeout: 15000 }).catch(() => {});
+      await sleep(5000);
+      await execFileAsync('warp-cli', ['--accept-tos', 'connect'], { timeout: 10000 }).catch(() => {});
+      for (let i = 0; i < 24; i++) {
         await sleep(5000);
         try {
           const { stdout } = await execFileAsync('warp-cli', ['--accept-tos', 'status'], { timeout: 5000 });
           if (stdout.includes('Connected')) {
-            logger.info('[WARP] Reconnected successfully');
+            logger.info('[WARP] Reconnected successfully after daemon restart');
             warpReconnecting = false;
             return true;
           }
         } catch (_) {}
       }
-      logger.error('[WARP] Failed to reconnect after 60s');
+      logger.error('[WARP] Failed to reconnect after 120s');
       warpReconnecting = false;
       return false;
     } catch (e2) {
@@ -162,7 +181,7 @@ const SUBPROCESS_TIMEOUT = 600000;
 const STEP_ORDER = ['download', 'ai_vision', 'watermark', 'media', 'cdn_upload', 'publish', 'cleanup'];
 
 let STEP_CONCURRENCY = {
-  download: 3, ai_vision: 3, watermark: 1, media: 3, cdn_upload: 3, publish: 3, cleanup: 3,
+  download: 3, ai_vision: 3, watermark: 2, media: 3, cdn_upload: 3, publish: 3, cleanup: 3,
 };
 
 function writeStepProgress(xcadrId, data) {
@@ -195,7 +214,7 @@ const celebArg = getArg('celeb') || '';
 const collArg = getArg('collection') || '';
 const pagesArg = parseInt(getArg('pages')) || 0;
 const downloadThreads = parseInt(getArg("download-threads")) || 0;
-if (downloadThreads > 0) { for (const k of Object.keys(STEP_CONCURRENCY)) STEP_CONCURRENCY[k] = downloadThreads; }
+if (downloadThreads > 0) { for (const k of Object.keys(STEP_CONCURRENCY)) { if (k !== 'watermark') STEP_CONCURRENCY[k] = downloadThreads; } }
 
 // ============================================================
 // PipelineQueue + WorkerPool (same as pipeline-v2)
@@ -220,6 +239,8 @@ class PipelineQueue {
   wakeAll() { while (this._waiters.length > 0) this._waiters.shift()(); }
 }
 
+class SkipError extends Error { constructor(msg) { super(msg); this.name = 'SkipError'; } }
+
 class WorkerPool {
   constructor({ name, concurrency, processFn, inputQueue, nextQueue, signal, stats }) {
     Object.assign(this, { name, concurrency, processFn, inputQueue, nextQueue, signal, stats });
@@ -243,11 +264,12 @@ class WorkerPool {
         if (this.name !== 'cleanup') {
           await query(`UPDATE xcadr_imports SET status=$2, pipeline_step=$3, pipeline_error=NULL, updated_at=NOW() WHERE id=$1`, [xcadrId, STATUS_MAP[this.name] || 'downloading', this.name]);
         }
-        let lastErr = null, ok = false;
+        let lastErr = null, ok = false, skipped = false;
         for (let att = 0; att <= RETRY_DELAYS.length; att++) {
           if (att > 0) { logger.warn(`[${this.name}:${xcadrId}] Retry ${att}/${RETRY_DELAYS.length}...`); await sleep(RETRY_DELAYS[att - 1]); }
           try { await this.processFn(xcadrId, this.name); ok = true; break; }
           catch (e) {
+            if (e.name === 'SkipError') { skipped = true; logger.info(`[${this.name}:${xcadrId}] ⏭ Skipped: ${e.message}`); break; }
             lastErr = e;
             logger.error(`[${this.name}:${xcadrId}] Attempt ${att + 1} failed: ${e.message}`);
             if (e.message && (e.message.includes('Socks') || e.message.includes('ECONNREFUSED') || e.message.includes('Connection refused'))) {
@@ -256,7 +278,18 @@ class WorkerPool {
             }
           }
         }
-        if (ok) {
+        if (skipped) {
+          // Home worker handling this — sync xcadr_imports if video already done
+          try {
+            const { rows: [xi] } = await query('SELECT matched_video_id FROM xcadr_imports WHERE id=$1', [xcadrId]);
+            if (xi?.matched_video_id) {
+              const { rows: [v] } = await query('SELECT status FROM videos WHERE id=$1', [xi.matched_video_id]);
+              if (v?.status === 'published') {
+                await query(`UPDATE xcadr_imports SET status='published', pipeline_step='cleanup', updated_at=NOW() WHERE id=$1 AND status != 'published'`, [xcadrId]);
+              }
+            }
+          } catch(_) {}
+        } else if (ok) {
           this.stats.byStep[this.name] = (this.stats.byStep[this.name] || 0) + 1;
           if (this.nextQueue) this.nextQueue.enqueue(xcadrId); else this.stats.completed++;
           logger.info(`[${this.name}:${xcadrId}] ✅ Done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
@@ -286,6 +319,56 @@ class WorkerPool {
 // ============================================================
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Validate TMDB result: pick best by year, check title similarity
+function pickBestResult(results, expectedYear, dateField, expectedTitle) {
+  if (!results || results.length === 0) return null;
+  // Filter by year first (exact or ±2)
+  let candidates = results;
+  if (expectedYear) {
+    const exact = results.filter(r => parseInt((r[dateField]||'').substring(0,4)) === expectedYear);
+    if (exact.length > 0) candidates = exact;
+    else {
+      const close = results.filter(r => Math.abs(parseInt((r[dateField]||'').substring(0,4)) - expectedYear) <= 2);
+      if (close.length > 0) candidates = close;
+    }
+  }
+  // If we have expected title, validate similarity
+  if (expectedTitle && expectedTitle.length > 2) {
+    const expLower = expectedTitle.toLowerCase().trim();
+    const titleMatch = candidates.find(r => {
+      const t = (r.title || r.name || '').toLowerCase().trim();
+      return t === expLower || t.includes(expLower) || expLower.includes(t);
+    });
+    if (titleMatch) return titleMatch;
+  }
+  // Avoid very old films when no year specified
+  const first = candidates[0];
+  if (!expectedYear) {
+    const firstYear = parseInt((first[dateField]||'').substring(0,4));
+    if (firstYear && firstYear < 1970 && candidates.length > 1) {
+      const recent = candidates.find(r => parseInt((r[dateField]||'').substring(0,4)) >= 1970);
+      if (recent) return recent;
+    }
+  }
+  return first;
+}
+
+// Check TMDB result title matches xcadr expected title
+function tmdbTitleMatchesXcadr(tmdbTitle, xcadrTitleEn, xcadrTitleRu) {
+  if (!tmdbTitle) return true; // no TMDB title = nothing to mismatch
+  const t = tmdbTitle.toLowerCase().trim();
+  if (xcadrTitleEn && xcadrTitleEn.length > 2) {
+    const x = xcadrTitleEn.toLowerCase().trim();
+    if (t === x || t.includes(x) || x.includes(t)) return true;
+  }
+  if (xcadrTitleRu && xcadrTitleRu.length > 2) {
+    const x = xcadrTitleRu.toLowerCase().trim();
+    if (t === x || t.includes(x) || x.includes(t)) return true;
+  }
+  // Neither EN nor RU matches
+  return !(xcadrTitleEn && xcadrTitleEn.length > 2);
+}
 
 async function runScript(scriptName, scriptArgs = [], stepName = '', xcadrId = '') {
   const scriptPath = join(__dirname, scriptName);
@@ -556,106 +639,43 @@ async function processWatermark(xcadrId, stepName) {
   // Read temp video ID (created during ai_vision for shared DB queue)
   let tempVideoId = null;
   try { tempVideoId = (await readFile(join(workDir, 'temp-video-id.txt'), 'utf8')).trim(); } catch {}
-  if (!tempVideoId) throw new Error('temp-video-id.txt not found — ai_vision step failed?');
+  if (!tempVideoId) throw new SkipError('temp-video-id.txt not found — home worker already processed and cleaned up');
 
   const v2Dir = join(V2_WORK_DIR, tempVideoId);
 
-  // Check current status before claiming (same approach as pipeline v2)
+  // Check current status (same as pipeline v2 — skip, don't wait)
   const { rows: [wmChk] } = await query('SELECT status, pipeline_step FROM videos WHERE id = $1', [tempVideoId]);
-  if (!wmChk) throw new Error('Temp video disappeared from DB');
+  if (!wmChk) throw new SkipError('Temp video gone from DB — home worker already processed and cleaned up');
 
-  // Skip if already past watermark stage (another Contabo worker finished it)
+  // Skip if already past watermark stage — home worker or previous run handled it
   if (['watermarked', 'published', 'failed', 'needs_review'].includes(wmChk.status)) {
-    logger.info(`[${stepName}:${xcadrId}] Already ${wmChk.status} — skipping watermark`);
-    // If watermarked file exists in xcadr-work or pipeline-work, copy it
-    const v2Watermarked = join(v2Dir, 'watermarked.mp4');
-    if (existsSync(outputPath)) {
-      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Already done' });
-      return;
-    } else if (existsSync(v2Watermarked)) {
-      await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
-      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Copied from other worker' });
-      return;
-    }
-    // Fall through to do it locally if no file found
+    throw new SkipError(`Already ${wmChk.status} — handled elsewhere`);
   }
-  if (['watermarked', 'media', 'cdn_upload', 'publish', 'cleanup'].includes(wmChk.pipeline_step)) {
-    logger.info(`[${stepName}:${xcadrId}] Already at step=${wmChk.pipeline_step} — skipping watermark`);
-    const v2Watermarked = join(v2Dir, 'watermarked.mp4');
-    if (existsSync(outputPath)) {
-      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Already done' });
-      return;
-    } else if (existsSync(v2Watermarked)) {
-      await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
-      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Copied from other worker' });
-      return;
-    }
+  if (['watermarked', 'media', 'cdn_upload', 'publish', 'cleanup', 'media_cdn_done'].includes(wmChk.pipeline_step)) {
+    throw new SkipError(`Already at step=${wmChk.pipeline_step} — handled elsewhere`);
   }
-
-  // If another Contabo worker is currently watermarking — just skip, don't wait
+  // Skip if another Contabo worker is watermarking
   if (wmChk.status === 'watermarking') {
-    logger.info(`[${stepName}:${xcadrId}] Another Contabo worker is watermarking ${tempVideoId.substring(0,8)} — skipping`);
-    writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Other worker processing' });
-    return;
+    throw new SkipError(`Another worker watermarking ${tempVideoId.substring(0,8)} — home-poll will handle`);
   }
-
-  // If home worker claimed it — wait for completion then copy result
+  // Skip if home worker claimed it — home-poll will handle completion (watermark + media + CDN)
   if (wmChk.status === 'watermarking_home') {
-    logger.info(`[${stepName}:${xcadrId}] Home worker claimed ${tempVideoId.substring(0,8)} — waiting...`);
-    writeStepProgress(xcadrId, { step: 'watermark', status: 'running', percent: 10, detail: 'Waiting for home worker...' });
-
-    const wmTimeout = Date.now() + 30 * 60 * 1000;
-    let homeWorkerDone = false;
-    while (Date.now() < wmTimeout) {
-      const { rows: [check] } = await query(
-        `SELECT status, pipeline_step FROM videos WHERE id = $1`, [tempVideoId]
-      );
-      if (!check) throw new Error('Temp video disappeared from DB');
-      const ps = check.pipeline_step, st = check.status;
-      if (ps === 'watermarked' || st === 'watermarked') {
-        logger.info(`[${stepName}:${xcadrId}] Home worker completed watermark for ${tempVideoId.substring(0,8)}`);
-        homeWorkerDone = true;
-        break;
-      }
-      if (st === 'failed' || ps === 'watermark_failed') break;
-      await sleep(5000);
-    }
-
-    if (homeWorkerDone) {
-      const v2Watermarked = join(v2Dir, 'watermarked.mp4');
-      if (existsSync(v2Watermarked)) {
-        await execFileAsync('cp', [v2Watermarked, outputPath], { timeout: 120000 });
-        const s = await stat(outputPath);
-        logger.info(`[${stepName}:${xcadrId}] Copied home watermark: ${(s.size/1048576).toFixed(1)}MB`);
-      } else if (existsSync(outputPath)) {
-        logger.info(`[${stepName}:${xcadrId}] Home watermark already in xcadr-work`);
-      } else {
-        throw new Error('Home worker watermarked.mp4 not found');
-      }
-      writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Done (home worker)' });
-      return;
-    }
-    // Home worker timed out or failed — fall through to do it locally
-    logger.warn(`[${stepName}:${xcadrId}] Home worker timed out/failed — processing locally`);
+    throw new SkipError(`Home worker processing ${tempVideoId.substring(0,8)} (wm+media+cdn) — home-poll will handle`);
   }
 
-  // Atomic claim for local processing
+  // Atomic claim for local Contabo FFmpeg (fallback if home worker didn't claim)
   const { rowCount } = await query(
     `UPDATE videos SET status = 'watermarking', pipeline_step = 'watermark', updated_at = NOW()
      WHERE id = $1
        AND status NOT IN ('watermarking', 'watermarking_home', 'watermarked', 'published', 'failed', 'needs_review')
-       AND pipeline_step NOT IN ('watermarked', 'media', 'cdn_upload', 'publish', 'cleanup')`,
+       AND pipeline_step NOT IN ('watermarking_home', 'watermarked', 'media', 'cdn_upload', 'publish', 'cleanup')`,
     [tempVideoId]
   );
-
   if (rowCount === 0) {
-    // Could not claim — another worker just grabbed it, skip
-    logger.info(`[${stepName}:${xcadrId}] Could not claim ${tempVideoId.substring(0,8)} — another worker took it`);
-    writeStepProgress(xcadrId, { step: 'watermark', status: 'done', percent: 100, detail: 'Claimed by other worker' });
-    return;
+    throw new SkipError(`Could not claim ${tempVideoId.substring(0,8)} — another worker/home got it`);
   }
 
-  // ── Local watermark on Contabo (2 slots) ──
+  // ── Local watermark on Contabo ──
   if (!existsSync(inputPath)) throw new Error(`original.mp4 not found in workdir`);
 
   const wmCfg = await loadWatermarkSettings();
@@ -770,6 +790,19 @@ function formatDuration(seconds) {
 
 async function processMedia(xcadrId, stepName) {
   const workDir = join(WORK_DIR, String(xcadrId));
+
+  // Skip if home worker already generated media (media-results.json exists)
+  const mediaResultsPath = join(workDir, 'media-results.json');
+  if (existsSync(mediaResultsPath)) {
+    try {
+      const mr = JSON.parse(await readFile(mediaResultsPath, 'utf8'));
+      if (mr.screenshotFiles && mr.screenshotFiles.length >= 2) {
+        logger.info(`[${stepName}:${xcadrId}] Home worker already generated media (${mr.screenshotFiles.length} thumbs) — skipping`);
+        return;
+      }
+    } catch {}
+  }
+
   const videoPath = join(workDir, 'watermarked.mp4');
   if (!existsSync(videoPath)) throw new Error('watermarked.mp4 not found — media step ran before watermark completed');
 
@@ -915,6 +948,18 @@ async function processMedia(xcadrId, stepName) {
 
 async function processCdnUpload(xcadrId, stepName) {
   const workDir = join(WORK_DIR, String(xcadrId));
+
+  // Skip if home worker already uploaded to CDN (cdn-urls.json exists)
+  const cdnUrlsPath = join(workDir, 'cdn-urls.json');
+  if (existsSync(cdnUrlsPath)) {
+    try {
+      const urls = JSON.parse(await readFile(cdnUrlsPath, 'utf8'));
+      if (urls.video_url && urls.thumbnail_url) {
+        logger.info(`[${stepName}:${xcadrId}] Home worker already uploaded to CDN — skipping`);
+        return;
+      }
+    } catch {}
+  }
 
   const videoId = crypto.randomUUID();
   await writeFile(join(workDir, 'video-id.txt'), videoId);
@@ -1132,12 +1177,17 @@ Return ONLY valid JSON:
         if(k){
           // Try movie search first
           const tr=await axios.get('https://api.themoviedb.org/3/search/movie',{params:{query:mtRu,year:my,language:'en-US'},headers:{Authorization:`Bearer ${k}`},timeout:10000});
-          let tp=tr.data?.results?.[0];
+          let tp=pickBestResult(tr.data?.results, my, 'release_date', mtEn);
           // Fallback: TV show search (xcadr often has series)
           if(!tp){
             const tvr=await axios.get('https://api.themoviedb.org/3/search/tv',{params:{query:mtRu,first_air_date_year:my,language:'en-US'},headers:{Authorization:`Bearer ${k}`},timeout:10000});
-            tp=tvr.data?.results?.[0];
+            tp=pickBestResult(tvr.data?.results, my, 'first_air_date', mtEn);
             if(tp) tp.title=tp.name; // TV uses 'name' instead of 'title'
+          }
+          // Validate TMDB title matches xcadr
+          if(tp && !tmdbTitleMatchesXcadr(tp.title, mtEn, mtRu)){
+            logger.warn(`[publish] TMDB title mismatch: xcadr="${mtEn||mtRu}" vs tmdb="${tp.title}" — skipping TMDB`);
+            tp = null;
           }
           if(tp){
             tmdbMovieTitleEn = tp.title || '';
@@ -1157,11 +1207,13 @@ Return ONLY valid JSON:
         const k=config.ai.tmdbApiKey;
         if(k){
           const tr=await axios.get('https://api.themoviedb.org/3/search/movie',{params:{query:mtEn,year:my,language:'en-US'},headers:{Authorization:`Bearer ${k}`},timeout:10000});
-          const tp=tr.data?.results?.[0];
+          let tp=pickBestResult(tr.data?.results, my, 'release_date', mtEn);
+          if(tp && !tmdbTitleMatchesXcadr(tp.title, mtEn, mtRu)){ logger.warn(`[publish] TMDB EN title mismatch: "${mtEn}" vs "${tp.title}"`); tp=null; }
           if(tp) tmdbMovieTitleEn = tp.title || '';
           if(!tp){
             const tvr=await axios.get('https://api.themoviedb.org/3/search/tv',{params:{query:mtEn,first_air_date_year:my,language:'en-US'},headers:{Authorization:`Bearer ${k}`},timeout:10000});
-            const tvp=tvr.data?.results?.[0];
+            let tvp=pickBestResult(tvr.data?.results, my, 'first_air_date', mtEn);
+            if(tvp && !tmdbTitleMatchesXcadr(tvp.name, mtEn, mtRu)) tvp=null;
             if(tvp) tmdbMovieTitleEn = tvp.name || '';
           }
         }
@@ -1448,13 +1500,20 @@ Example: {"name_localized":{"en":"...","ru":"..."},"bio":{"en":"...","ru":"..."}
 
 async function enrichMovieTMDB(id, title, year, xcadrMeta) {
   const k = config.ai.tmdbApiKey; if (!k) return;
+  const xcadrEn = xcadrMeta?.movie_title_en || '';
+  const xcadrRu = xcadrMeta?.movie_title_ru || '';
   let r = await axios.get("https://api.themoviedb.org/3/search/movie", { params: { query: title, year, language: "en-US" }, headers: { Authorization: `Bearer ${k}` }, timeout: 10000 });
-  let m = r.data?.results?.[0];
+  let m = pickBestResult(r.data?.results, year, 'release_date', xcadrEn || title);
   let isTV = false;
   if (!m) {
     r = await axios.get("https://api.themoviedb.org/3/search/tv", { params: { query: title, first_air_date_year: year, language: "en-US" }, headers: { Authorization: `Bearer ${k}` }, timeout: 10000 });
-    m = r.data?.results?.[0];
+    m = pickBestResult(r.data?.results, year, 'first_air_date', xcadrEn || title);
     isTV = !!m;
+  }
+  // Validate TMDB result matches xcadr title
+  if (m && !tmdbTitleMatchesXcadr(m.title || m.name, xcadrEn, xcadrRu)) {
+    logger.warn(`[enrich-movie] TMDB title mismatch: xcadr="${xcadrEn||xcadrRu}" vs tmdb="${m.title||m.name}" — skipping TMDB, using xcadr only`);
+    m = null;
   }
   if (!m) {
     // FALLBACK: try xcadr movie page for poster
@@ -1565,8 +1624,10 @@ Example: {"title_localized":{"en":"...","ru":"..."},"description":{"en":"...","r
     .map(c => typeof c === 'string' ? c : c.iso_3166_1)
     .filter(c => c && c.length === 2);
 
-  await query(`UPDATE movies SET tmdb_id=$2, poster_url=$3, title_localized=$4::jsonb, description=$5::jsonb,
-    genres=$6, studio=$7, year=COALESCE($8,year), countries=COALESCE($9,countries), status='published', updated_at=NOW() WHERE id=$1`,
+  await query(`UPDATE movies SET tmdb_id=COALESCE(tmdb_id,$2), poster_url=COALESCE(NULLIF(poster_url,''),$3),
+    title_localized=CASE WHEN title_localized IS NULL OR title_localized='{}' THEN $4::jsonb ELSE title_localized || $4::jsonb END,
+    description=CASE WHEN description IS NULL OR description='{}' THEN $5::jsonb ELSE description || $5::jsonb END,
+    genres=COALESCE(genres,$6), studio=COALESCE(studio,$7), year=COALESCE($8,year), countries=COALESCE($9,countries), status='published', updated_at=NOW() WHERE id=$1`,
     [id, m.id, m.poster_path ? `https://image.tmdb.org/t/p/w500${m.poster_path}` : null,
      JSON.stringify(titleLocalized), JSON.stringify(description),
      genres, studio, year || (isTV ? parseInt(det.data?.first_air_date?.substring(0,4)) : parseInt(det.data?.release_date?.substring(0,4))) || null,
@@ -1639,7 +1700,7 @@ Example: {"title_localized":{"en":"...","ru":"..."},"description":{"en":"...","r
 async function processCleanup(xcadrId){
   const workDir=join(WORK_DIR,String(xcadrId));
   const{rows:[item]}=await query(`SELECT status FROM xcadr_imports WHERE id=$1`,[xcadrId]);
-  if(item?.status!=='published'){logger.warn(`[cleanup:${xcadrId}] Not published — keeping`);return;}
+  if(!['published','duplicate'].includes(item?.status)){logger.warn(`[cleanup:${xcadrId}] Status=${item?.status} — keeping`);return;}
 
   // Delete temp video record from videos table + pipeline-work dir
   try {
@@ -1786,24 +1847,105 @@ async function main(){
   const signal={stopped:false};
   const stats={completed:0,failed:0,byStep:{},startedAt:new Date().toISOString(),startedAtMs:Date.now()};
 
+  // Ensure WARP is running at startup
+  logger.info('[WARP] Ensuring WARP proxy is alive at startup...');
+  try {
+    const warpOk = await ensureWarpAlive();
+    if (warpOk) logger.info('[WARP] Proxy is alive and ready');
+    else logger.warn('[WARP] Proxy may not be ready — pipeline will retry on failures');
+  } catch (e) { logger.warn('[WARP] Startup check failed: ' + e.message); }
+
+  // WARP keepalive: ping every 4s to prevent MASQUE idle timeout (5s)
+  const warpKeepaliveInterval = setInterval(async () => {
+    try {
+      await axios.get('https://xcadr.online/robots.txt', {
+        httpAgent: xcadrAgent, httpsAgent: xcadrAgent,
+        timeout: 4000, headers: { 'User-Agent': 'Mozilla/5.0' },
+        validateStatus: () => true
+      });
+    } catch (_) {}
+  }, 4000);
+  warpKeepaliveInterval.unref();
+
   // Add pipeline columns if missing
   try{await query(`ALTER TABLE xcadr_imports ADD COLUMN IF NOT EXISTS pipeline_step TEXT`);
   await query(`ALTER TABLE xcadr_imports ADD COLUMN IF NOT EXISTS thumbnail_url TEXT`);
   await query(`ALTER TABLE xcadr_imports ADD COLUMN IF NOT EXISTS celeb_xcadr_slug TEXT`);
   await query(`ALTER TABLE xcadr_imports ADD COLUMN IF NOT EXISTS movie_xcadr_slug TEXT`);await query(`ALTER TABLE xcadr_imports ADD COLUMN IF NOT EXISTS pipeline_error TEXT`);}catch(_){}
 
-  // Cleanup on start: delete orphan temp videos from previous sessions
-  logger.info('Cleanup: removing orphan temp videos from previous sessions...');
+  // Recovery + Cleanup on start
+  logger.info('Cleanup: recovering stuck items and removing orphans...');
+  const _mediaCdnRecovery = []; // xcadr_import IDs to enqueue to publish after queues start
   try {
-    // Delete non-published xcadr_imports so parser can re-discover failed videos
-    const { rowCount: cleanedCount } = await query(
-      `UPDATE xcadr_imports SET status='failed' WHERE status NOT IN ('published', 'duplicate', 'matched', 'translated', 'downloaded', 'parsed', 'failed') AND created_at < NOW() - INTERVAL '24 hours'`
+    // 1. Recovery: link media_cdn_done videos to their xcadr_imports and prepare for publish
+    const { rows: mediaCdnVideos } = await query(
+      `SELECT v.id as video_id, v.original_title FROM videos v
+       WHERE v.pipeline_step = 'media_cdn_done' AND v.status NOT IN ('published', 'failed', 'needs_review')`
     );
-    if (cleanedCount > 0) logger.info(`Cleanup: removed ${cleanedCount} non-published from xcadr_imports`);
-    // Delete orphan temp video records (from ai_vision watermark queue) — not published/failed/needs_review
+    for (const v of mediaCdnVideos) {
+      // Find matching xcadr_import by original_title
+      const { rows: [xi] } = await query(
+        `SELECT * FROM xcadr_imports WHERE (title_ru = $1 OR title_en = $1) LIMIT 1`, [v.original_title]
+      );
+      if (xi) {
+        await query(`UPDATE xcadr_imports SET matched_video_id=$1, status='publishing', pipeline_step='publish' WHERE id=$2`, [v.video_id, xi.id]);
+        await query(`UPDATE videos SET status='watermarked' WHERE id=$1`, [v.video_id]);
+        // Recreate xcadr-work dir with all needed files from pipeline-work and DB
+        const xcadrDir = join(WORK_DIR, String(xi.id));
+        const v2Dir = join(V2_WORK_DIR, v.video_id);
+        await mkdir(xcadrDir, { recursive: true });
+        // Write xcadr-meta.json from DB
+        await writeFile(join(xcadrDir, 'xcadr-meta.json'), JSON.stringify(xi, null, 2));
+        // Copy files from pipeline-work if available
+        const filesToCopy = ['cdn-urls.json', 'media-results.json', 'metadata.json', 'ai-results.json', 'video-id.txt'];
+        for (const f of filesToCopy) {
+          const src = join(v2Dir, f);
+          const dst = join(xcadrDir, f);
+          if (existsSync(src) && !existsSync(dst)) {
+            try { await execFileAsync('cp', [src, dst], { timeout: 10000 }); } catch(_) {}
+          }
+        }
+        // Also copy thumb files, previews
+        if (existsSync(v2Dir)) {
+          try {
+            const v2Files = readdirSync(v2Dir);
+            for (const f of v2Files) {
+              if ((f.startsWith('thumb_') || f === 'preview.mp4' || f === 'preview.gif') && !existsSync(join(xcadrDir, f))) {
+                try { await execFileAsync('cp', [join(v2Dir, f), join(xcadrDir, f)], { timeout: 60000 }); } catch(_) {}
+              }
+            }
+          } catch(_) {}
+        }
+        // Write temp-video-id.txt
+        await writeFile(join(xcadrDir, 'temp-video-id.txt'), v.video_id);
+        _mediaCdnRecovery.push(xi.id);
+        logger.info(`[recovery] media_cdn_done video ${v.video_id.substring(0,8)} → xcadr:${xi.id} → publish (workdir restored)`);
+      }
+    }
+    if (_mediaCdnRecovery.length > 0) logger.info(`[recovery] ${_mediaCdnRecovery.length} media_cdn_done videos queued for publish`);
+
+    // 2. Reset ALL stuck xcadr_imports from previous interrupted runs back to translated
+    const { rowCount: resetStuck } = await query(
+      `UPDATE xcadr_imports SET status='translated', pipeline_step=NULL, pipeline_error=NULL, matched_video_id=NULL
+       WHERE status NOT IN ('published', 'duplicate', 'parsed', 'translated', 'matched', 'failed')
+       ${_mediaCdnRecovery.length > 0 ? `AND id NOT IN (${_mediaCdnRecovery.join(',')})` : ''}`
+    );
+    if (resetStuck > 0) logger.info(`[recovery] Reset ${resetStuck} stuck xcadr_imports → translated`);
+
+    // 3. Mark very old non-terminal items as failed
+    const { rowCount: cleanedCount } = await query(
+      `UPDATE xcadr_imports SET status='failed' WHERE status NOT IN ('published', 'duplicate', 'matched', 'translated', 'downloaded', 'parsed', 'failed', 'publishing') AND created_at < NOW() - INTERVAL '24 hours'`
+    );
+    if (cleanedCount > 0) logger.info(`Cleanup: marked ${cleanedCount} old non-published as failed`);
+
+    // 4. Delete orphan temp video records — exclude recovered media_cdn_done IDs
+    const _recoveredVideoIds = _mediaCdnRecovery.length > 0
+      ? (await query(`SELECT matched_video_id FROM xcadr_imports WHERE id = ANY($1::int[])`, [_mediaCdnRecovery])).rows.map(r => r.matched_video_id).filter(Boolean)
+      : [];
     const { rows: orphanVideos } = await query(
       `SELECT id FROM videos WHERE pipeline_step IN ('watermark_ready','watermark','watermarking_home','watermarked','ai_vision')
-       AND status NOT IN ('published', 'failed', 'needs_review')`
+       AND status NOT IN ('published', 'failed', 'needs_review')
+       ${_recoveredVideoIds.length > 0 ? `AND id NOT IN (${_recoveredVideoIds.map(id => `'${id}'`).join(',')})` : ''}`
     );
     for (const v of orphanVideos) {
       try { await query(`DELETE FROM video_celebrities WHERE video_id = $1`, [v.id]); } catch {}
@@ -1815,14 +1957,14 @@ async function main(){
     }
     if (orphanVideos.length > 0) logger.info(`Cleanup: deleted ${orphanVideos.length} orphan temp videos`);
 
-    // Clean xcadr-work dirs for non-published items
+    // 5. Clean xcadr-work dirs for non-published items (but keep publishing ones for media_cdn_done recovery)
     if (existsSync(WORK_DIR)) {
       const dirs = readdirSync(WORK_DIR).filter(d => /^\d+$/.test(d));
       let cleaned = 0;
       for (const d of dirs) {
         const xcadrId = parseInt(d);
         const { rows: [item] } = await query(`SELECT status FROM xcadr_imports WHERE id = $1`, [xcadrId]);
-        if (!item || (item.status !== 'published')) {
+        if (!item || !['published', 'publishing'].includes(item.status)) {
           await rm(join(WORK_DIR, d), { recursive: true, force: true });
           cleaned++;
         }
@@ -1833,6 +1975,11 @@ async function main(){
 
   const queues={};for(const n of STEP_ORDER)queues[n]=new PipelineQueue(n);
   const pools={};for(let i=0;i<STEP_ORDER.length;i++){const name=STEP_ORDER[i];pools[name]=new WorkerPool({name,concurrency:STEP_CONCURRENCY[name],processFn:STEP_PROCESSORS[name],inputQueue:queues[name],nextQueue:i<STEP_ORDER.length-1?queues[STEP_ORDER[i+1]]:null,signal,stats});}
+
+  // Enqueue recovered media_cdn_done items to publish queue
+  for (const xcadrId of _mediaCdnRecovery) {
+    queues.publish.enqueue(xcadrId);
+  }
 
   const shutdown=(sig)=>{
     // If parent (pipeline-api) was restarted, we get SIGTERM but should continue
@@ -1888,8 +2035,9 @@ async function main(){
     try {
       const { rows: homeCompleted } = await query(
         `SELECT id FROM videos WHERE
-         (status = 'watermarking_home' AND pipeline_step = 'watermarked')
-         OR (status = 'watermarked' AND pipeline_step = 'watermarking_home')
+         (status = 'watermarking_home' AND pipeline_step IN ('watermarked', 'media_cdn_done'))
+         OR (status = 'watermarked' AND pipeline_step IN ('watermarking_home', 'media_cdn_done'))
+         OR (pipeline_step = 'media_cdn_done')
          LIMIT 10`
       );
       for (const r of homeCompleted) {
@@ -1904,16 +2052,46 @@ async function main(){
               const tvId = (await readFile(tvFile, 'utf8')).trim();
               if (tvId === tempVideoId) {
                 const xcadrId = parseInt(d);
-                const v2Wm = join(V2_WORK_DIR, tempVideoId, 'watermarked.mp4');
-                const xcadrWm = join(WORK_DIR, d, 'watermarked.mp4');
-                if (existsSync(v2Wm) && !existsSync(xcadrWm)) {
-                  await execFileAsync('cp', [v2Wm, xcadrWm], { timeout: 120000 });
-                  logger.info(`[home-poll] xcadr:${xcadrId} ← home watermark ${tempVideoId.substring(0,8)}`);
+                const v2Dir2 = join(V2_WORK_DIR, tempVideoId);
+                const xcadrDir2 = join(WORK_DIR, d);
+                // Copy all files from pipeline-work to xcadr-work
+                const filesToCopy = ['watermarked.mp4', 'media-results.json', 'cdn-urls.json', 'video-id.txt'];
+                for (const f of filesToCopy) {
+                  const src = join(v2Dir2, f);
+                  const dst = join(xcadrDir2, f);
+                  if (existsSync(src) && !existsSync(dst)) {
+                    try { await execFileAsync('cp', [src, dst], { timeout: 120000 }); } catch(_) {}
+                  }
                 }
-                // Mark in DB so we don't re-process
-                await query(`UPDATE videos SET pipeline_step = 'watermarked', status = 'watermarked', updated_at = NOW() WHERE id = $1`, [tempVideoId]);
-                // If this xcadr item is stuck in watermark queue waiting, the worker will see
-                // the watermarked.mp4 and finish. No need to re-enqueue.
+                // Also copy thumb files and previews
+                try {
+                  const v2Files = readdirSync(v2Dir2);
+                  for (const f of v2Files) {
+                    if ((f.startsWith('thumb_') || f === 'preview.mp4' || f === 'preview.gif') && !existsSync(join(xcadrDir2, f))) {
+                      try { await execFileAsync('cp', [join(v2Dir2, f), join(xcadrDir2, f)], { timeout: 60000 }); } catch(_) {}
+                    }
+                  }
+                } catch(_) {}
+                const hasCdnUrls = existsSync(join(xcadrDir2, 'cdn-urls.json'));
+                const hasMediaRes = existsSync(join(xcadrDir2, 'media-results.json'));
+                if (hasCdnUrls && hasMediaRes) {
+                  // Home worker did everything (watermark + media + CDN) — skip to publish
+                  logger.info(`[home-poll] xcadr:${xcadrId} ← home media_cdn_done ${tempVideoId.substring(0,8)} → publish`);
+                  await query(`UPDATE videos SET pipeline_step = 'publish', status = 'watermarked', updated_at = NOW() WHERE id = $1`, [tempVideoId]);
+                  await query(`UPDATE xcadr_imports SET status='publishing', pipeline_step='publish', updated_at=NOW() WHERE id=$1`, [xcadrId]);
+                  queues.publish.enqueue(xcadrId);
+                } else {
+                  // Only watermark done — enqueue to media step for Contabo to handle
+                  logger.info(`[home-poll] xcadr:${xcadrId} ← home watermark only ${tempVideoId.substring(0,8)} → media`);
+                  await query(`UPDATE videos SET pipeline_step = 'watermarked', status = 'watermarked', updated_at = NOW() WHERE id = $1`, [tempVideoId]);
+                  // Copy watermarked.mp4 if available
+                  const v2Wm = join(v2Dir2, 'watermarked.mp4');
+                  const xcadrWm = join(xcadrDir2, 'watermarked.mp4');
+                  if (existsSync(v2Wm) && !existsSync(xcadrWm)) {
+                    try { await execFileAsync('cp', [v2Wm, xcadrWm], { timeout: 120000 }); } catch(_) {}
+                  }
+                  queues.media.enqueue(xcadrId);
+                }
                 break;
               }
             }

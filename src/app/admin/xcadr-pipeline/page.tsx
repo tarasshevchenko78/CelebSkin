@@ -5,7 +5,9 @@ import { useState, useEffect, useCallback } from 'react';
 // ── Types ──────────────────────────────────────────────────
 interface StepInfo { queued: number; active: number; completed: number; }
 interface PipelineProgress { status: string; steps: Record<string, StepInfo>; completed: number; failed: number; elapsed: number; }
-interface PipelineStatus { running: boolean; pid: number | null; started_at: string | null; progress: PipelineProgress | null; counts: Record<string, number>; }
+interface HomeWorkerTask { worker: number; video_id: string; title: string; step: string; percent: number; speed_info: string; elapsed: number; }
+interface HomeWorkerStatus { online: boolean; max_workers?: number; done?: number; errors?: number; uptime?: number; queue_size?: number | null; tasks?: HomeWorkerTask[]; }
+interface PipelineStatus { running: boolean; pid: number | null; started_at: string | null; progress: PipelineProgress | null; counts: Record<string, number>; home_worker?: HomeWorkerStatus; }
 interface StepProgress { step: string; status: string; percent: number; detail: string; started_at?: string; updated_at?: string; elapsed_sec?: number; }
 interface XcadrVideo {
   id: number; title_ru: string; title_en: string; celebrity_name_en: string; celebrity_name_ru: string;
@@ -21,6 +23,7 @@ const STEP_ORDER = ['download', 'ai_vision', 'watermark', 'media', 'cdn_upload',
 const STEP_LABELS: Record<string, string> = {
   download: 'Download', ai_vision: 'AI Vision', watermark: 'Watermark',
   media: 'Media', cdn_upload: 'CDN', publish: 'Publish', cleanup: 'Cleanup',
+  watermarking_home: 'Home Worker', media_cdn_done: 'Home Done',
 };
 
 const STEP_ICONS: Record<string, string> = {
@@ -31,6 +34,7 @@ const STEP_ICONS: Record<string, string> = {
   cdn_upload: '\u2601', cdn_uploading: '\u2601',
   publish: '\u2705', publishing: '\u2705', published: '\u2705',
   cleanup: '\uD83E\uDDF9',
+  watermarking_home: '\uD83C\uDFE0', media_cdn_done: '\uD83C\uDFE0',
   failed: '\u274C', processing: '\u23F3',
   parsed: '\uD83D\uDCC4', translated: '\uD83C\uDF10', matched: '\uD83D\uDD17',
   imported: '\uD83D\uDCE5', no_match: '\u2754', duplicate: '\uD83D\uDD04',
@@ -44,6 +48,7 @@ const STEP_COLORS: Record<string, string> = {
   cdn_upload: 'text-green-400', cdn_uploading: 'text-green-400',
   publish: 'text-emerald-400', publishing: 'text-emerald-400', published: 'text-emerald-400',
   cleanup: 'text-gray-400',
+  watermarking_home: 'text-indigo-400', media_cdn_done: 'text-indigo-400',
   failed: 'text-red-400', processing: 'text-yellow-400',
   parsed: 'text-gray-400', translated: 'text-purple-400', matched: 'text-cyan-400',
   imported: 'text-blue-400', no_match: 'text-gray-500', duplicate: 'text-gray-500',
@@ -153,6 +158,73 @@ function StepProgressBar({ progress, step }: { progress: StepProgress | null; st
       <div className="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
         <div className={`h-full rounded-full ${barColor} transition-all duration-1000`} style={{ width: `${pct}%` }} />
       </div>
+    </div>
+  );
+}
+
+// ── Home Worker Panel ────────────────────────────────────────
+function HomeWorkerPanel({ hw }: { hw: HomeWorkerStatus }) {
+  if (!hw.online) {
+    return (
+      <div className="bg-gray-800/30 border border-gray-700/50 rounded-lg p-3 mb-4">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-gray-500">{'\uD83C\uDFE0'} Home Worker</span>
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-700 text-gray-400">Offline</span>
+        </div>
+      </div>
+    );
+  }
+
+  const tasks = hw.tasks || [];
+  return (
+    <div className="bg-indigo-950/20 border border-indigo-500/30 rounded-lg p-3 mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-indigo-300">{'\uD83C\uDFE0'} Home Worker</span>
+          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-green-500/20 text-green-400">Online</span>
+        </div>
+        <div className="flex gap-3 text-xs">
+          <span className="text-gray-400">Workers: <b className="text-white">{hw.max_workers}</b></span>
+          <span className="text-green-400">Готово: <b>{hw.done}</b></span>
+          {(hw.errors || 0) > 0 && <span className="text-red-400">Ошибок: <b>{hw.errors}</b></span>}
+          {hw.queue_size != null && <span className="text-yellow-400">Очередь: <b>{hw.queue_size}</b></span>}
+          {hw.uptime != null && hw.uptime > 0 && <span className="text-gray-500">Аптайм: {formatElapsed(Math.floor(hw.uptime))}</span>}
+        </div>
+      </div>
+      {tasks.length === 0 ? (
+        <div className="text-xs text-gray-500 py-1">Ожидание задач...</div>
+      ) : (
+        <div className="space-y-2">
+          {tasks.map(t => {
+            const stepColor = t.step.toLowerCase().includes('download') ? 'text-blue-400' :
+              t.step.toLowerCase().includes('ffmpeg') ? 'text-yellow-400' :
+              t.step.toLowerCase().includes('cdn') ? 'text-green-400' :
+              t.step.toLowerCase().includes('media') ? 'text-cyan-400' :
+              t.step.toLowerCase().includes('scp') ? 'text-purple-400' : 'text-gray-400';
+            const barColor = t.step.toLowerCase().includes('download') ? 'bg-blue-500' :
+              t.step.toLowerCase().includes('ffmpeg') ? 'bg-yellow-500' :
+              t.step.toLowerCase().includes('cdn') ? 'bg-green-500' :
+              t.step.toLowerCase().includes('media') ? 'bg-cyan-500' :
+              t.step.toLowerCase().includes('scp') ? 'bg-purple-500' : 'bg-gray-500';
+
+            return (
+              <div key={t.worker} className="bg-black/20 rounded-lg p-2">
+                <div className="flex items-center gap-2 text-xs mb-1">
+                  <span className="text-indigo-400 font-semibold">W{t.worker}</span>
+                  <span className="text-white truncate max-w-[250px]" title={t.title}>{t.title || t.video_id?.substring(0, 8) || '...'}</span>
+                  <span className={`${stepColor} font-medium`}>{t.step}</span>
+                  <span className="text-white font-semibold">{t.percent}%</span>
+                  {t.speed_info && <span className="text-gray-500 truncate max-w-[200px]" title={t.speed_info}>{t.speed_info}</span>}
+                  {t.elapsed > 0 && <span className="text-gray-600 ml-auto">{formatElapsed(Math.floor(t.elapsed))}</span>}
+                </div>
+                <div className="h-1.5 w-full rounded-full bg-gray-800 overflow-hidden">
+                  <div className={`h-full rounded-full ${barColor} transition-all duration-1000`} style={{ width: `${Math.min(t.percent, 100)}%` }} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -369,6 +441,9 @@ export default function XcadrPipelinePage() {
         </div>
       )}
 
+      {/* Home Worker Panel */}
+      {status?.home_worker && <HomeWorkerPanel hw={status.home_worker} />}
+
       {/* AI Vision Issues Summary */}
       {aiIssues.length > 0 && (
         <div className="bg-orange-950/20 border border-orange-700/30 rounded-lg p-3 mb-4">
@@ -454,9 +529,21 @@ export default function XcadrPipelinePage() {
                         <div>
                           <StepProgressBar progress={v.step_progress} step={v.step_progress.step || step} />
                           {v.ai_vision_status && v.ai_vision_status !== 'completed' && <div className="mt-1"><AiVisionBadge video={v} /></div>}
+                          {(v.status === 'watermarking_home' || v.pipeline_step === 'watermarking_home') && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border-indigo-500/30 mt-1">
+                              {'\uD83C\uDFE0'} Home Worker
+                            </span>
+                          )}
                         </div>
                       ) : v.pipeline_step && !v.pipeline_error && !['failed', 'published', 'parsed', 'translated', 'matched', 'imported', 'no_match', 'duplicate'].includes(v.status) ? (
-                        <StepProgressBar progress={null} step={step} />
+                        <div>
+                          <StepProgressBar progress={null} step={step} />
+                          {(v.status === 'watermarking_home' || v.pipeline_step === 'watermarking_home' || v.pipeline_step === 'media_cdn_done') && (
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] font-medium bg-indigo-500/20 text-indigo-300 border-indigo-500/30 mt-1">
+                              {'\uD83C\uDFE0'} Home Worker
+                            </span>
+                          )}
+                        </div>
                       ) : (
                         <>
                           <span className={`text-sm ${color}`} title={v.pipeline_error || step}>

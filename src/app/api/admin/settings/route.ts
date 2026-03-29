@@ -3,6 +3,22 @@ import { config } from '@/lib/config';
 import { getAllSettings, setSetting, getSetting } from '@/lib/db/settings';
 import { logger } from '@/lib/logger';
 
+const CONTABO_API = 'http://161.97.142.117:3100/api/xcadr-pipeline';
+const PIPELINE_TOKEN = process.env.PIPELINE_API_TOKEN || '';
+
+async function notifyPipelineKeysChanged() {
+    try {
+        await fetch(`${CONTABO_API}/reload-keys`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${PIPELINE_TOKEN}` },
+            signal: AbortSignal.timeout(5000),
+        });
+        logger.info('Pipeline notified: keys reloaded');
+    } catch (e) {
+        logger.warn('Pipeline reload-keys failed (pipeline may be offline)', { error: e instanceof Error ? e.message : String(e) });
+    }
+}
+
 export const dynamic = 'force-dynamic';
 
 // Valid setting keys that can be updated via admin
@@ -114,6 +130,9 @@ export async function PUT(request: NextRequest) {
             const merged = keys.filter(Boolean).join(',');
             await setSetting('gemini_api_key', merged);
 
+            // Notify Contabo pipeline to reload keys
+            notifyPipelineKeysChanged();
+
             return NextResponse.json({
                 success: true,
                 key,
@@ -125,6 +144,11 @@ export async function PUT(request: NextRequest) {
 
         const current = await getSetting(key);
         const isSecret = ['gemini_api_key', 'tmdb_api_key'].includes(key);
+
+        // Notify pipeline about API key changes
+        if (['gemini_api_key', 'tmdb_api_key'].includes(key)) {
+            notifyPipelineKeysChanged();
+        }
 
         logger.info('Setting updated', { key, isSecret });
 

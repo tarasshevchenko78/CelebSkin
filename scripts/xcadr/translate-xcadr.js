@@ -23,9 +23,15 @@ const LIMIT = limitArg
 
 // --- CONFIG ---
 const TMDB_KEY  = config.ai.tmdbApiKey;
-const GEMINI_KEY = config.ai.geminiApiKey;
+const GEMINI_KEYS = (config.ai.geminiApiKey || '').split(',').map(k => k.trim()).filter(Boolean);
+let geminiKeyIndex = 0;
+function nextGeminiUrl() {
+  if (GEMINI_KEYS.length === 0) return null;
+  const key = GEMINI_KEYS[geminiKeyIndex % GEMINI_KEYS.length];
+  geminiKeyIndex++;
+  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`;
+}
 const TMDB_BASE  = 'https://api.themoviedb.org/3';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
 
 const TMDB_DELAY_MS   = 300;
 const GEMINI_DELAY_MS = 1000;
@@ -106,7 +112,8 @@ async function tmdbSearchPerson(nameRu) {
  * Returns { celebrity_en, movie_en, title_en } — any field may be null.
  */
 async function geminiTranslate(row) {
-  if (!GEMINI_KEY) return null;
+  const GEMINI_URL = nextGeminiUrl();
+  if (!GEMINI_URL) return null;
 
   const descLine = row.description_ru ? `\nDescription (Russian): ${row.description_ru}` : '';
 
@@ -145,10 +152,11 @@ Return JSON object with exactly these fields:
 // --- MAIN ---
 
 async function main() {
-  if (!TMDB_KEY && !GEMINI_KEY) {
+  if (!TMDB_KEY && GEMINI_KEYS.length === 0) {
     console.error('[ERROR] Neither TMDB_API_KEY nor GEMINI_API_KEY configured in .env');
     process.exit(1);
   }
+  console.log(`[CONFIG] TMDB key: ${TMDB_KEY ? 'YES' : 'NO'}, Gemini keys: ${GEMINI_KEYS.length} (round-robin)`);
 
   const rows = await query(
     `SELECT id, title_ru, celebrity_name_ru, movie_title_ru, movie_year, description_ru

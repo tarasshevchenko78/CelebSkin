@@ -50,6 +50,7 @@ export async function GET() {
         elapsed: rawStatus.uptime_sec || rawStatus.elapsed || 0,
       },
       counts: rawStatus.totals || {},
+      home_worker: rawStatus.home_worker || { online: false },
     };
     return NextResponse.json({ status, videos: mappedVideos });
   } catch (err: unknown) {

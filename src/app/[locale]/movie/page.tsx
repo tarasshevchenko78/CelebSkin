@@ -30,7 +30,7 @@ export default async function MoviesPage({
     const locale = params.locale;
     const sort = searchParams.sort || 'scenes';
     const page = parseInt(searchParams.page || '1');
-    const perPage = 20;
+    const perPage = 40;
 
     const sortMap: Record<string, string> = {
         scenes: 'scenes_count',

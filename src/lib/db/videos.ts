@@ -115,7 +115,7 @@ export async function getLatestVideos(limit: number = 12): Promise<Video[]> {
         const result = await pool.query(
             `SELECT * FROM videos
          WHERE status = 'published'
-         ORDER BY published_at DESC
+         ORDER BY published_at DESC NULLS LAST
          LIMIT $1`,
             [limit]
         );
@@ -129,7 +129,7 @@ export async function getPopularVideos(limit: number = 10): Promise<Video[]> {
             `SELECT * FROM videos
          WHERE status = 'published'
            AND published_at < NOW() - INTERVAL '3 days'
-         ORDER BY likes_count DESC NULLS LAST, views_count DESC NULLS LAST, published_at DESC
+         ORDER BY likes_count DESC NULLS LAST, views_count DESC NULLS LAST, published_at DESC NULLS LAST
          LIMIT $1`,
             [limit]
         );
@@ -160,7 +160,7 @@ export async function getVideosForCelebrity(
             `SELECT v.* FROM videos v
        JOIN video_celebrities vc ON vc.video_id = v.id
        WHERE vc.celebrity_id = $1 AND v.status = 'published'
-       ORDER BY v.published_at DESC
+       ORDER BY v.published_at DESC NULLS LAST
        LIMIT $2 OFFSET $3`,
             [celebrityId, limit, offset]
         ),
@@ -195,7 +195,7 @@ export async function getVideosForMovie(
             `SELECT v.* FROM videos v
        JOIN movie_scenes ms ON ms.video_id = v.id
        WHERE ms.movie_id = $1 AND v.status = 'published'
-       ORDER BY ms.scene_number ASC, v.published_at DESC
+       ORDER BY ms.scene_number ASC, v.published_at DESC NULLS LAST
        LIMIT $2 OFFSET $3`,
             [movieId, limit, offset]
         ),
@@ -231,7 +231,7 @@ export async function getVideosByTag(
        JOIN video_tags vt ON vt.video_id = v.id
        JOIN tags t ON t.id = vt.tag_id
        WHERE t.slug = $1 AND v.status = 'published'
-       ORDER BY v.published_at DESC
+       ORDER BY v.published_at DESC NULLS LAST
        LIMIT $2 OFFSET $3`,
             [tagSlug, limit, offset]
         ),
@@ -483,7 +483,7 @@ export async function getAdjacentVideos(
         pool.query(
             `SELECT slug->>'en' as en, slug->>$2 as loc FROM videos
              WHERE published_at < $1 AND status = 'published' AND id != $3
-             ORDER BY published_at DESC LIMIT 1`,
+             ORDER BY published_at DESC NULLS LAST LIMIT 1`,
             [publishedAt, locale, excludeId]
         ),
         pool.query(

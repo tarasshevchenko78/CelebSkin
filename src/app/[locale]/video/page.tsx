@@ -68,7 +68,7 @@ export default async function VideosPage({
     const sort = searchParams.sort || 'latest';
     const tagSlug = searchParams.tag || '';
     const page = Math.max(1, parseInt(searchParams.page || '1') || 1);
-    const perPage = 20;
+    const perPage = 40;
 
     const orderBy = sortMap[sort] || 'published_at';
 
@@ -137,12 +137,12 @@ export default async function VideosPage({
             {/* ── Sticky Filter Bar ── */}
             <div className="sticky top-[84px] md:top-[96px] z-40 -mx-4 px-4 bg-brand-bg/95 backdrop-blur-sm border-b border-brand-accent/20 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
                 {/* Sort tabs */}
-                <div className="flex items-center gap-1 pt-2.5 pb-0 overflow-x-auto scrollbar-hide">
+                <div className="flex items-center gap-1 pt-1 pb-0 overflow-x-auto scrollbar-hide">
                     {sortTabs.map(({ key, label, href }) => (
                         <a
                             key={key}
                             href={href}
-                            className={`shrink-0 px-3.5 py-2 text-sm font-medium transition-colors border-b-2 ${
+                            className={`shrink-0 px-3.5 py-1.5 text-sm font-medium transition-colors border-b-2 ${
                                 sort === key
                                     ? 'text-brand-gold-light border-brand-accent'
                                     : 'text-gray-400 border-transparent hover:text-gray-200'
@@ -153,7 +153,7 @@ export default async function VideosPage({
                     ))}
                 </div>
                 {/* Tag chips */}
-                <div className="py-2">
+                <div className="py-1">
                     <VideoCatalogFilters
                         tags={tagChips}
                         selectedTag={tagSlug}

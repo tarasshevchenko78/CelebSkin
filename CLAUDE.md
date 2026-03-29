@@ -180,6 +180,11 @@ libx264, preset `fast`, CRF `19`, aac 128k, mp4 faststart
 ### ХАРДЛИНКИ (ВАЖНО!)
 `run-xcadr-pipeline.js` и `pipeline-api.js` — хардлинки между `/opt/celebskin/scripts/` и `/opt/celebskin/site/scripts/`. Один файл = один inode. Менять в `/opt/celebskin/scripts/`.
 
+**ВНИМАНИЕ:** Хардлинки работают только ВНУТРИ одного сервера. Между AbeloHost и Contabo — это **отдельные копии**. При изменении pipeline скриптов ОБЯЗАТЕЛЬНО синхронизировать на Contabo:
+```bash
+scp /opt/celebskin/site/scripts/run-xcadr-pipeline.js root@161.97.142.117:/opt/celebskin/scripts/run-xcadr-pipeline.js
+```
+
 ### Legacy xcadr (deprecated)
 Файлы: xcadr/auto-import.js, xcadr/download-and-process.js — не используются
 
@@ -388,6 +393,8 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - Актрисы и фильмы хранятся с АНГЛИЙСКИМИ именами, локализация в JSONB (name_localized, title_localized)
 - Дедупликация xcadr видео по `source_url` (уникальный индекс), НЕ по original_title
 - xcadr_imports: Cleanup — UPDATE status='failed' (НЕ DELETE) для записей старше 24ч, не трогает in-progress
+- **CLEANUP при рестарте удаляет xcadr-work dirs!** Не удаляет если temp video в состоянии media_cdn_done/watermarked/watermarking_home. Publish, Media, CdnUpload имеют fallback чтение из pipeline-work/{videoId}/ если xcadr-work пустой. home-poll восстанавливает xcadr-meta.json из xcadr_imports если директория удалена.
+- **Два рабочих каталога**: `xcadr-work/{xcadrId}/` (основной) и `pipeline-work/{videoId}/` (shared с home worker). ВСЕГДА проверяй оба при чтении файлов!
 - Pipeline запускается ТОЛЬКО из UI (`/admin/xcadr-pipeline`), НЕ из CLI
 - Админка на русском языке
 - Полное ТЗ XCADR Pipeline: `/opt/celebskin/XCADR_PIPELINE_TZ.md`

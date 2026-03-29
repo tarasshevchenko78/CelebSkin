@@ -39,7 +39,7 @@ export default async function CelebritiesPage({
     const sort = searchParams.sort || 'popular';
     const letter = searchParams.letter || '';
     const page = parseInt(searchParams.page || '1');
-    const perPage = 56;
+    const perPage = 112;
 
     const sortMap: Record<string, string> = {
         popular: 'videos_count',

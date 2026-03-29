@@ -18,8 +18,14 @@ import { query, pool } from '../lib/db.js';
 import { config } from '../lib/config.js';
 import { extractGeminiJSON } from '../lib/gemini.js';
 
-const GEMINI_KEY = config.ai.geminiApiKey;
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_KEY}`;
+const GEMINI_KEYS = (config.ai.geminiApiKey || '').split(',').map(k => k.trim()).filter(Boolean);
+let geminiKeyIndex = 0;
+function nextGeminiUrl() {
+  if (GEMINI_KEYS.length === 0) return null;
+  const key = GEMINI_KEYS[geminiKeyIndex % GEMINI_KEYS.length];
+  geminiKeyIndex++;
+  return `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${key}`;
+}
 const GEMINI_DELAY_MS = 1000;
 
 const LOCALES = ['en', 'de', 'fr', 'es', 'it', 'pt', 'pl', 'nl', 'tr', 'ru'];
@@ -79,7 +85,8 @@ function makeSlug(text) {
  * Returns a URL-safe slug string like "nude" or "shower-scene", or null.
  */
 async function geminiTranslateRuTagToSlug(tagRu) {
-  if (!GEMINI_KEY) return null;
+  const GEMINI_URL = nextGeminiUrl();
+  if (!GEMINI_URL) return null;
 
   const prompt = `Translate this Russian content tag to English. Used on a celebrity movie scene database. Return ONLY the English translation as a single short phrase, lowercase (2-4 words max). No quotes, no explanation.
 Russian tag: "${tagRu}"`;
@@ -108,7 +115,8 @@ Russian tag: "${tagRu}"`;
  * Returns { en, ru, de, fr, es, it, pt, pl, nl, tr } or null.
  */
 async function geminiTranslateTag(englishSlug) {
-  if (!GEMINI_KEY) return null;
+  const GEMINI_URL = nextGeminiUrl();
+  if (!GEMINI_URL) return null;
 
   const englishLabel = englishSlug.replace(/-/g, ' ');
   const prompt = `Translate this content tag used on a movie scene database to these languages.
@@ -139,7 +147,8 @@ Example for "nude": {"en":"Nude","ru":"Обнажённая","de":"Nackt","fr":"
  * Returns { en, ru, de, fr, es, it, pt, pl, nl, tr } or null.
  */
 async function geminiTranslateCollection(nameRu) {
-  if (!GEMINI_KEY) return null;
+  const GEMINI_URL = nextGeminiUrl();
+  if (!GEMINI_URL) return null;
 
   const prompt = `Translate this Russian movie collection name to all these languages.
 It's used as a category name on a celebrity movie scene website.
