@@ -1,7 +1,7 @@
-import { config } from '../config';
 import { getGeminiUrl, extractGeminiJSON } from '../gemini';
 import { cached } from '../cache';
 import { logger } from '../logger';
+import { getSettingOrEnv } from '../db/settings';
 
 export interface ExpandedQuery {
     detectedLang: string;
@@ -29,8 +29,14 @@ Rules:
 Return valid JSON only. Keep arrays empty if not applicable. Be concise.`;
 
 export async function expandQueryWithGemini(query: string): Promise<ExpandedQuery | null> {
-    const apiKey = config.geminiApiKey;
-    if (!apiKey) return null;
+    // Read keys from DB settings (UI), with .env fallback
+    const keysStr = await getSettingOrEnv('gemini_api_key');
+    const keys = keysStr.split(',').map(k => k.trim()).filter(Boolean);
+    if (keys.length === 0) return null;
+
+    // Rotate keys based on query hash
+    const hash = query.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+    const apiKey = keys[hash % keys.length];
 
     return cached<ExpandedQuery | null>(
         `search:gemini:${query.toLowerCase()}`,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { SUPPORTED_LOCALES, LOCALE_NAMES, type SupportedLocale } from '@/lib/i18n';
 import { useAuth } from './AuthProvider';
@@ -15,8 +15,22 @@ const navLinks = [
 
 export default function Header({ locale }: { locale: string }) {
     const [langOpen, setLangOpen] = useState(false);
+    const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+    const mobileSearchInputRef = useRef<HTMLInputElement>(null);
     const { user, loading, openAuthModal } = useAuth();
     const pathname = usePathname();
+
+    // Close mobile search on navigation
+    useEffect(() => {
+        setMobileSearchOpen(false);
+    }, [pathname]);
+
+    // Focus input when mobile search opens
+    useEffect(() => {
+        if (mobileSearchOpen) {
+            setTimeout(() => mobileSearchInputRef.current?.focus(), 100);
+        }
+    }, [mobileSearchOpen]);
     // Strip current locale prefix to get the path after locale
     const pathWithoutLocale = pathname.replace(/^\/[a-z]{2}/, '') || '/';
     const buildLocaleHref = (loc: string) => `/${loc}${pathWithoutLocale}`;
@@ -121,15 +135,60 @@ export default function Header({ locale }: { locale: string }) {
                 </div>
             </div>
 
+            {/* Mobile Search Overlay */}
+            {mobileSearchOpen && (
+                <div className="fixed inset-0 z-[60] bg-brand-bg md:hidden overflow-y-auto">
+                    <div className="flex items-center gap-3 px-4 pt-4 pb-2">
+                        <button
+                            onClick={() => setMobileSearchOpen(false)}
+                            className="shrink-0 w-10 h-10 rounded-full flex items-center justify-center bg-brand-bg border border-brand-accent/30 text-brand-secondary"
+                        >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                            </svg>
+                        </button>
+                        <div className="flex-1">
+                            <SearchDropdown locale={locale} />
+                        </div>
+                    </div>
+                    {/* Hint text */}
+                    <div className="px-6 pt-6">
+                        <p className="text-sm text-brand-secondary/60">
+                            {locale === 'ru' ? 'Начните вводить имя актрисы, фильм или тег...' : 'Start typing a celebrity name, movie or tag...'}
+                        </p>
+                        <div className="flex flex-wrap gap-2 mt-4">
+                            {['Demi Moore', 'Margot Robbie', 'sex scene', 'topless', 'shower', 'lesbian'].map(tag => (
+                                <button
+                                    key={tag}
+                                    onClick={() => {
+                                        const input = document.querySelector<HTMLInputElement>('.fixed input[type="text"]');
+                                        if (input) {
+                                            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                                            nativeInputValueSetter?.call(input, tag);
+                                            input.dispatchEvent(new Event('input', { bubbles: true }));
+                                            input.dispatchEvent(new Event('change', { bubbles: true }));
+                                            input.focus();
+                                        }
+                                    }}
+                                    className="px-3 py-1.5 text-xs font-medium rounded-full bg-brand-accent/10 border border-brand-accent/25 text-brand-gold-light hover:bg-brand-accent/20 transition-colors"
+                                >
+                                    {tag}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Mobile Split Header */}
             <div className="flex md:hidden relative items-center justify-between h-14 mt-3 px-2">
                 {/* Left side: Search trigger for mobile */}
                 <div className="flex-1 flex justify-start relative z-20">
-                    <a href={`/${locale}/search`} className="w-12 h-12 rounded-full flex items-center justify-center bg-brand-bg/90 backdrop-blur-md text-brand-secondary hover:text-brand-gold-light border border-brand-accent/40 shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
+                    <button onClick={() => setMobileSearchOpen(true)} className="w-12 h-12 rounded-full flex items-center justify-center bg-brand-bg/90 backdrop-blur-md text-brand-secondary hover:text-brand-gold-light border border-brand-accent/40 shadow-[0_4px_15px_rgba(0,0,0,0.4)]">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                         </svg>
-                    </a>
+                    </button>
                 </div>
 
                 {/* Center: Logo overlay */}

@@ -196,8 +196,8 @@ export default async function VideoDetailPage({
             {videoLd && <JsonLd data={videoLd} />}
             <JsonLd data={breadcrumbLd} />
 
-            {/* ── 1. Video Player — edge-to-edge on mobile ── */}
-            <div className="-mx-4 md:mx-0 [&>div]:rounded-none md:[&>div]:rounded-xl">
+            {/* ── 1. Video Player — edge-to-edge on mobile, sticky below header on scroll ── */}
+            <div className="-mx-4 md:mx-0 [&>div]:rounded-none md:[&>div]:rounded-xl sticky top-[84px] md:static z-40">
                 {(video.video_url_watermarked || video.video_url) ? (
                     <VideoPlayer
                         key={video.id}

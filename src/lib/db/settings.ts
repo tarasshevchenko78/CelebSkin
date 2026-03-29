@@ -21,7 +21,7 @@ export interface SettingInfo {
 // ── Map DB key → env fallback ────────────────────────────────────────────────
 
 const ENV_FALLBACKS: Record<string, string> = {
-    gemini_api_key: config.geminiApiKey,
+    gemini_api_key: '', // DB-only: ключи Gemini управляются через веб-интерфейс
     tmdb_api_key: config.tmdbApiKey,
 };
 

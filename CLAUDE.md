@@ -83,8 +83,8 @@ db/
 - Contabo: ТОЛЬКО pipeline скрипты. Триггерится через SSH с AbeloHost
 - Pipeline scripts на Contabo коннектятся к БД на AbeloHost (DB_HOST=185.224.82.214)
 - Никогда не запускать pipeline на AbeloHost
-- API ключи (Gemini, TMDB) хранятся в `settings` таблице БД (приоритет) + fallback на .env
-- `getSettingOrEnv(dbKey, envFallback)` — единый геттер для API ключей
+- API ключи Gemini — ТОЛЬКО из БД (`settings.gemini_api_key`), без fallback на .env. TMDB — из БД с fallback на .env
+- `getSettingOrEnv(dbKey)` — единый геттер. Для Gemini: DB-only (ENV_FALLBACKS = empty string)
 
 ## Pipeline конвейер (Contabo)
 
@@ -376,6 +376,26 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - AI Vision concurrency: 3 → 2 воркера
   - DB constraint `videos_ai_vision_status_check`: добавлен статус `error`
   - Pipeline-api.js запускать из `/opt/celebskin/scripts/` (там node_modules), НЕ из `/opt/celebskin/site/scripts/`
+- **Gemini DB-Only Keys (29.03.2026)**:
+  - Web app (Next.js) читает Gemini ключи ТОЛЬКО из БД (`settings.gemini_api_key`), без .env fallback
+  - `query-expander.ts`: ключи из `getSettingOrEnv('gemini_api_key')` + ротация по hash запроса
+  - `re-enrich/route.ts`: убран explicit env fallback
+  - `settings/route.ts`: `has_gemini_key` проверяет БД вместо `config.geminiApiKey`
+  - `settings.ts` ENV_FALLBACKS: `gemini_api_key: ''` (пустая строка)
+  - Pipeline на Contabo по-прежнему использует `.env` (другой runtime)
+- **Mobile UI Fixes (29.03.2026)**:
+  - Sticky video player: `sticky top-[84px] md:static z-40` — видео фиксируется ниже хедера при скролле
+  - Footer: `pb-16 md:pb-0` для BottomNav, `flex-col md:flex-row` responsive, уменьшены gap языковых ссылок
+  - `overflow-x-hidden` на body — нет горизонтального скролла
+  - Mobile search overlay: полноэкранный поиск по кнопке 🔍, SearchDropdown + популярные теги
+  - Overlay закрывается при навигации (useEffect на pathname)
+- **Search Multilingual (29.03.2026)**:
+  - 30 русских синонимов в `search_synonyms` (сосет→blowjob, минет→blowjob, голая→nude, секс→sex-scene и т.д.)
+- **WARP Death Spiral Fix (29.03.2026)**:
+  - Парсер (parse-xcadr.js) больше НЕ перезапускает warp-svc — только ждёт 10с и retry
+  - Pipeline: ensureWarpAlive() проверяет `warp-cli status` первым, cooldown 60с
+  - Cron `/tmp/fix-stale-watermark.sh` каждую минуту: фиксит xcadr_imports застрявшие в watermarking
+  - Phase 2: Gemini semantic expansion для любого языка
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса

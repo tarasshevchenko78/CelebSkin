@@ -8,13 +8,20 @@ const footerLinks = [
     { key: 'contact', labels: { en: 'Contact', ru: 'Контакты', de: 'Kontakt', fr: 'Contact', es: 'Contacto', pt: 'Contato', it: 'Contatto', pl: 'Kontakt', nl: 'Contact', tr: 'İletişim' } },
 ];
 
+const navLinks = [
+    { href: '/video', labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Videos', pt: 'Vídeos', it: 'Video', pl: 'Wideo', nl: "Video's", tr: 'Videolar' } },
+    { href: '/celebrity', labels: { en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités', es: 'Celebridades', pt: 'Celebridades', it: 'Celebrità', pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler' } },
+    { href: '/movie', labels: { en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films', es: 'Películas', pt: 'Filmes', it: 'Film', pl: 'Filmy', nl: 'Films', tr: 'Filmler' } },
+    { href: '/collection', labels: { en: 'Collections', ru: 'Коллекции', de: 'Sammlungen', fr: 'Collections', es: 'Colecciones', pt: 'Coleções', it: 'Collezioni', pl: 'Kolekcje', nl: 'Collecties', tr: 'Koleksiyonlar' } },
+];
+
 export default function Footer({ locale }: { locale: string }) {
     return (
-        <footer className="mt-auto border-t border-brand-border bg-brand-bg">
+        <footer className="mt-auto border-t border-brand-border bg-brand-bg pb-16 md:pb-0">
             {/* Main content */}
             <div className="mx-auto max-w-[1600px] px-4 py-2">
-                <div className="flex items-center justify-between flex-wrap gap-3">
-                    {/* Left: logo + description in 2 lines */}
+                <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    {/* Left: logo + description */}
                     <div className="flex items-center gap-3 shrink-0">
                         <a href={`/${locale}`} className="inline-flex items-center shrink-0">
                             <img
@@ -23,26 +30,21 @@ export default function Footer({ locale }: { locale: string }) {
                                 className="h-9 w-auto object-contain grayscale opacity-70 hover:grayscale-0 hover:opacity-100 transition-all"
                             />
                         </a>
-                        <p className="text-xs text-brand-muted max-w-[360px] leading-snug">
+                        <p className="text-xs text-brand-muted leading-snug">
                             Celebrity nude scenes from movies and TV shows. All content is sourced from publicly available materials.
                         </p>
                     </div>
 
                     {/* Right: links in 2 rows */}
-                    <div className="flex flex-col gap-1 items-end">
-                        <div className="flex flex-wrap gap-x-6 gap-y-1">
-                            {[
-                                { href: `/${locale}/video`, labels: { en: 'Videos', ru: 'Видео', de: 'Videos', fr: 'Vidéos', es: 'Videos', pt: 'Vídeos', it: 'Video', pl: 'Wideo', nl: "Video's", tr: 'Videolar' } },
-                                { href: `/${locale}/celebrity`, labels: { en: 'Celebrities', ru: 'Знаменитости', de: 'Prominente', fr: 'Célébrités', es: 'Celebridades', pt: 'Celebridades', it: 'Celebrità', pl: 'Celebryci', nl: 'Beroemdheden', tr: 'Ünlüler' } },
-                                { href: `/${locale}/movie`, labels: { en: 'Movies', ru: 'Фильмы', de: 'Filme', fr: 'Films', es: 'Películas', pt: 'Filmes', it: 'Film', pl: 'Filmy', nl: 'Films', tr: 'Filmler' } },
-                                { href: `/${locale}/collection`, labels: { en: 'Collections', ru: 'Коллекции', de: 'Sammlungen', fr: 'Collections', es: 'Colecciones', pt: 'Coleções', it: 'Collezioni', pl: 'Kolekcje', nl: 'Collecties', tr: 'Koleksiyonlar' } },
-                            ].map((item) => (
-                                <a key={item.href} href={item.href} className="text-sm font-medium text-brand-secondary hover:text-brand-accent transition-colors duration-200">
+                    <div className="flex flex-col gap-1 md:items-end">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                            {navLinks.map((item) => (
+                                <a key={item.href} href={`/${locale}${item.href}`} className="text-sm font-medium text-brand-secondary hover:text-brand-accent transition-colors duration-200">
                                     {(item.labels as Record<string, string>)[locale] || item.labels.en}
                                 </a>
                             ))}
                         </div>
-                        <div className="flex flex-wrap gap-x-6 gap-y-1">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
                             {footerLinks.map((link) => (
                                 <a
                                     key={link.key}
@@ -62,28 +64,25 @@ export default function Footer({ locale }: { locale: string }) {
 
             {/* Bottom: languages + copyright */}
             <div className="mx-auto max-w-[1600px] px-4 py-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                    {/* Language links */}
-                    <div className="flex flex-wrap items-center gap-3">
-                        <span className="text-xs text-brand-muted">🌐</span>
-                        {SUPPORTED_LOCALES.map((loc, i) => (
-                            <span key={loc} className="flex items-center gap-3">
-                                <a
-                                    href={`/${loc}`}
-                                    className={`text-xs transition-colors duration-200 ${loc === locale
-                                        ? 'text-brand-accent font-medium'
-                                        : 'text-brand-muted hover:text-brand-secondary'
-                                        }`}
-                                >
-                                    {LOCALE_NAMES[loc]}
-                                </a>
-                                {i < SUPPORTED_LOCALES.length - 1 && (
-                                    <span className="text-brand-border text-xs">·</span>
-                                )}
-                            </span>
-                        ))}
-                    </div>
-                    <p className="text-xs text-brand-muted">18+ Only</p>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="text-xs text-brand-muted">🌐</span>
+                    {SUPPORTED_LOCALES.map((loc, i) => (
+                        <span key={loc} className="inline-flex items-center gap-2">
+                            <a
+                                href={`/${loc}`}
+                                className={`text-xs transition-colors duration-200 ${loc === locale
+                                    ? 'text-brand-accent font-medium'
+                                    : 'text-brand-muted hover:text-brand-secondary'
+                                    }`}
+                            >
+                                {LOCALE_NAMES[loc]}
+                            </a>
+                            {i < SUPPORTED_LOCALES.length - 1 && (
+                                <span className="text-brand-border text-xs">·</span>
+                            )}
+                        </span>
+                    ))}
+                    <span className="ml-auto text-xs text-brand-muted">18+</span>
                 </div>
                 <p className="text-xs text-brand-muted mt-1">© 2026 CelebSkin. All rights reserved.</p>
             </div>

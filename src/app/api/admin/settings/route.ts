@@ -73,7 +73,7 @@ export async function GET() {
                 bunny_storage_zone: config.bunny.storageZone,
                 cdn_url: config.bunny.cdnUrl,
                 has_bunny_key: !!config.bunny.storageKey,
-                has_gemini_key: !!config.geminiApiKey,
+                has_gemini_key: !!(await getSetting('gemini_api_key')),
                 has_tmdb_key: !!config.tmdbApiKey,
             },
         });

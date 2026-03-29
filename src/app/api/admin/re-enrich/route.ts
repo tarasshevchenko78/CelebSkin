@@ -17,7 +17,7 @@ type Locale = typeof LOCALES[number];
 // ── Dynamic API key helpers ──────────────────────────────────────────────────
 
 async function getGeminiUrl(): Promise<string | null> {
-    const key = await getSettingOrEnv('gemini_api_key', config.geminiApiKey);
+    const key = await getSettingOrEnv('gemini_api_key');
     if (!key) return null;
     return `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`;
 }

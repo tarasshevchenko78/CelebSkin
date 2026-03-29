@@ -53,7 +53,7 @@ export default function LocaleLayout({
                     rel="stylesheet"
                 />
             </head>
-            <body className="min-h-screen bg-brand-bg text-brand-text font-sans antialiased flex flex-col">
+            <body className="min-h-screen bg-brand-bg text-brand-text font-sans antialiased flex flex-col overflow-x-hidden">
                 <AuthProvider locale={locale}>
                     <AgeGate />
                     <Header locale={locale} />
