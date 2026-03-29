@@ -143,7 +143,7 @@ async function executeGeminiSearch(q: string): Promise<SmartSearchResult> {
         : [q];
     const tagSlugs = expanded.exactTagSlugs;
 
-    return callSmartSearchAndGroup(q, tokensEN, tokensOriginal, celebrityNames, tagSlugs);
+    return callSmartSearchAndGroup(q, tokensEN, tokensOriginal, celebrityNames, tagSlugs, 100);
 }
 
 // ── Shared: call smart_search, dedup, group ──
@@ -154,11 +154,12 @@ async function callSmartSearchAndGroup(
     tokensOriginal: string[],
     celebrityNames: string[],
     tagSlugs: string[],
+    limit: number = 30,
 ): Promise<SmartSearchResult> {
     const searchResult = await pool.query(
         `SELECT entity_type, entity_id, entity_slug, display_name, rank_score, match_type
-         FROM smart_search($1, $2, $3, $4, $5, 30)`,
-        [original, tokensEN, tokensOriginal, celebrityNames, tagSlugs],
+         FROM smart_search($1, $2, $3, $4, $5, $6)`,
+        [original, tokensEN, tokensOriginal, celebrityNames, tagSlugs, limit],
     );
 
     // Deduplicate by entity_type+entity_id, keep max rank_score

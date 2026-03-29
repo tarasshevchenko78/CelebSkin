@@ -289,7 +289,8 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
 - Pipeline конвейер: event-driven scheduler, мгновенный re-spawn, parallel steps
 - Publish автомодерация: полные → published, неполные → needs_review
 - Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
-- Документация деплоя: Web App НЕ на Vercel! Работает через PM2 на AbeloHost. Деплой: `cd /opt/celebskin/site && npm run build && pm2 restart celebskin`. Git push НЕ деплоит автоматически.
+- Документация деплоя: Web App НЕ на Vercel! Работает через PM2 на AbeloHost. Деплой: `cd /opt/celebskin/site && ./rebuild.sh`. Git push НЕ деплоит автоматически.
+- **CRITICAL: rebuild.sh** — ВСЕГДА использовать `./rebuild.sh` для пересборки. НИКОГДА не делать `rm -rf .next && npm run build` напрямую! Next.js 14.2.35 баг: без workaround файлов в `.next/server/pages/` билд падает для App Router only проектов.
 - **PM2 auto-startup**: systemd `pm2-root.service` enabled. PM2 автоматически стартует при рестарте сервера. `pm2 save` обязателен после любых изменений процессов.
 - Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
 - **Watermark fix (13.03.2026)**: `-sar 1:1`, `-keyint_min 48 -sc_threshold 0`, `-af aresample=async=1:first_pts=0`, `-fflags +genpts+discardcorrupt`, `-max_muxing_queue_size 4096` — исправляет PIPELINE_ERROR_DECODE при seek в Chrome
@@ -396,6 +397,20 @@ node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug
   - Pipeline: ensureWarpAlive() проверяет `warp-cli status` первым, cooldown 60с
   - Cron `/tmp/fix-stale-watermark.sh` каждую минуту: фиксит xcadr_imports застрявшие в watermarking
   - Phase 2: Gemini semantic expansion для любого языка
+- **Slug Redirects (29.03.2026)**:
+  - Таблица `slug_redirects` (old_slug PK, new_slug, entity_type, locale) — 33,926 записей
+  - 4018 видео × 9 локалей — старые не-EN slug-и → redirect на EN slug
+  - Данные из бэкапа `celebskin_20260322_030001.dump` (до коммита 2daede6)
+  - `getSlugRedirect()` в `lib/db/videos.ts` — проверяет таблицу, кэш 24ч Redis
+  - `permanentRedirect()` (308) в video page если slug не найден но есть redirect
+  - GRANT SELECT ON slug_redirects TO celebskin
+- **AI Search (29.03.2026)**:
+  - `search_index` бэкфил AI данных (scene_analysis, hot_moments, content_markers) — 10,730 видео
+  - Phase 2 всегда запускается (не только при <20 результатов), лимит 100 (вместо 30)
+  - Gemini query-expander: расширенный промпт с 5-10 синонимами, maxOutputTokens 1024, таймаут 8с
+  - Fallback JSON парсинг для Gemini 2.5 Flash thinking-mode
+  - AI секция на странице поиска: фиолетовая рамка, плашка "AI Search", отдельный grid
+  - `rebuild.sh` — скрипт безопасной пересборки (Next.js 14.2.35 workaround)
 
 ## Правила
 - НИКОГДА не менять AI модели без явного запроса Тараса

@@ -1,8 +1,8 @@
 import type { Metadata } from 'next';
-import { notFound } from 'next/navigation';
+import { notFound, permanentRedirect } from 'next/navigation';
 import { getLocalizedField, getLocalizedSlug } from '@/lib/i18n';
 import { buildAlternates } from '@/lib/seo';
-import { getVideoBySlug, getRelatedVideos, getOtherVideosByCelebrity, getOtherVideosByMovie, getAdjacentVideos } from '@/lib/db';
+import { getVideoBySlug, getRelatedVideos, getOtherVideosByCelebrity, getOtherVideosByMovie, getAdjacentVideos, getSlugRedirect } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import VideoPlayer from '@/components/VideoPlayer';
 import VideoCard from '@/components/VideoCard';
@@ -24,6 +24,11 @@ export async function generateMetadata({
     let video;
     try {
         video = await getVideoBySlug(params.slug, params.locale);
+        if (!video) {
+            // Try slug redirect
+            const newSlug = await getSlugRedirect(params.slug, 'video');
+            if (newSlug) video = await getVideoBySlug(newSlug, params.locale);
+        }
     } catch (error) {
         logger.error('Video detail metadata DB error', { page: 'video/detail', error: error instanceof Error ? error.message : String(error) });
     }
@@ -109,6 +114,11 @@ export default async function VideoDetailPage({
     }
 
     if (!video) {
+        // Check slug_redirects for 301
+        const newSlug = await getSlugRedirect(params.slug, 'video');
+        if (newSlug) {
+            permanentRedirect(`/${locale}/video/${newSlug}`);
+        }
         notFound();
     }
 

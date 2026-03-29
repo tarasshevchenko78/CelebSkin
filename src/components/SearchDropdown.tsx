@@ -92,13 +92,17 @@ export default function SearchDropdown({ locale }: { locale: string }) {
         };
     }, [query, fetchPhase]);
 
+    function goToSearch(q: string) {
+        setOpen(false);
+        router.push(`/${locale}/search?q=${encodeURIComponent(q)}`);
+        // Notify search page about query change (for same-page navigation)
+        window.dispatchEvent(new CustomEvent('header-search', { detail: q }));
+    }
+
     function handleKeyDown(e: React.KeyboardEvent) {
         if (e.key === 'Enter') {
             e.preventDefault();
-            setOpen(false);
-            if (query.trim()) {
-                router.push(`/${locale}/search?q=${encodeURIComponent(query.trim())}`);
-            }
+            if (query.trim()) goToSearch(query.trim());
         }
         if (e.key === 'Escape') {
             setOpen(false);
@@ -144,10 +148,7 @@ export default function SearchDropdown({ locale }: { locale: string }) {
             <button
                 type="button"
                 onClick={() => {
-                    if (query.trim()) {
-                        setOpen(false);
-                        router.push(`/${locale}/search?q=${encodeURIComponent(query.trim())}`);
-                    }
+                    if (query.trim()) goToSearch(query.trim());
                 }}
                 className="absolute left-4 top-1/2 -translate-y-1/2 text-brand-secondary hover:text-brand-gold-light transition-colors"
             >

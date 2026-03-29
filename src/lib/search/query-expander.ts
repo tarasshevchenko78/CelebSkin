@@ -13,7 +13,7 @@ export interface ExpandedQuery {
 }
 
 const SYSTEM_PROMPT = `You are a search query analyzer for a celebrity nude scenes database.
-Given a user search query, extract structured information for the search engine.
+Given a user search query, extract structured information AND generate expanded synonyms for better search.
 
 Available tag slugs (use ONLY these exact values):
 bdsm, bed-scene, bikini, blowjob, body-double, bush, butt, cleavage, explicit, full-frontal, gang-rape, lesbian, lingerie, masturbation, movie, music-video, nude, on-stage, oral, photoshoot, prosthetic, rape-scene, romantic, rough, sex-scene, sexy, shower, skinny-dip, striptease, threesome, topless, tv-show
@@ -21,12 +21,12 @@ bdsm, bed-scene, bikini, blowjob, body-double, bush, butt, cleavage, explicit, f
 Rules:
 - detectedLang: ISO 639-1 code of the query language (en, ru, de, fr, es, pt, it, pl, nl, tr)
 - celebrityNames: full names of celebrities mentioned (proper casing)
-- searchTokensEN: English search keywords extracted from query (lowercase)
-- searchTokensOriginal: keywords in the original language if not English (lowercase)
+- searchTokensEN: English search keywords — include the original query PLUS 5-10 synonyms, related words and scene descriptions that could match video descriptions. E.g. "on stage" → ["on stage", "stage", "performance", "theater", "concert", "live show", "performing", "audience", "theatrical"]. Think about how scenes are described in video titles and reviews.
+- searchTokensOriginal: keywords in the original language if not English (lowercase), also with synonyms
 - exactTagSlugs: matching tag slugs from the list above
 - movieTitles: movie/TV show titles mentioned
 
-Return valid JSON only. Keep arrays empty if not applicable. Be concise.`;
+Return valid JSON only. Keep arrays empty if not applicable.`;
 
 export async function expandQueryWithGemini(query: string): Promise<ExpandedQuery | null> {
     // Read keys from DB settings (UI), with .env fallback
@@ -48,7 +48,7 @@ export async function expandQueryWithGemini(query: string): Promise<ExpandedQuer
 async function callGemini(query: string, apiKey: string): Promise<ExpandedQuery | null> {
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3000);
+        const timeout = setTimeout(() => controller.abort(), 8000);
 
         const response = await fetch(getGeminiUrl(apiKey), {
             method: 'POST',
@@ -58,7 +58,7 @@ async function callGemini(query: string, apiKey: string): Promise<ExpandedQuery 
                 contents: [{ parts: [{ text: query }] }],
                 generationConfig: {
                     temperature: 0.1,
-                    maxOutputTokens: 300,
+                    maxOutputTokens: 1024,
                     responseMimeType: 'application/json',
                 },
             }),
@@ -68,13 +68,28 @@ async function callGemini(query: string, apiKey: string): Promise<ExpandedQuery 
         clearTimeout(timeout);
 
         if (!response.ok) {
-            logger.warn('Gemini search expand failed', { status: response.status });
+            const body = await response.text().catch(() => '');
+            logger.warn('Gemini search expand failed', { status: response.status, body: body.slice(0, 200) });
             return null;
         }
 
         const data = await response.json();
-        const parsed = extractGeminiJSON(data);
-        if (!parsed) return null;
+        // Try extractGeminiJSON first, fallback to direct text parse
+        let parsed = extractGeminiJSON(data);
+        if (!parsed) {
+            // Direct parse from candidates text
+            const text = data?.candidates?.[0]?.content?.parts
+                ?.filter((p: Record<string, unknown>) => p.text && !p.thought)
+                ?.map((p: Record<string, unknown>) => p.text)
+                ?.join('') || '';
+            const clean = text.trim().replace(/^```json\s*/i, '').replace(/\s*```$/g, '');
+            try { parsed = JSON.parse(clean); } catch { /* ignore */ }
+        }
+        if (!parsed) {
+            logger.warn('Gemini search expand: no JSON parsed', { query, raw: JSON.stringify(data).slice(0, 500) });
+            return null;
+        }
+        logger.info('Gemini search expanded', { query, tokensEN: parsed.searchTokensEN, tags: parsed.exactTagSlugs });
 
         return {
             detectedLang: parsed.detectedLang || 'en',

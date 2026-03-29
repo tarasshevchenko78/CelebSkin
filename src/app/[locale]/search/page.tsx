@@ -66,7 +66,7 @@ function totalCount(r: HydratedResult) {
 
 // ── Page ──
 
-export default function SearchPage({ params, searchParams }: { params: { locale: string }; searchParams: { q?: string } }) {
+export default function SearchPage({ params, searchParams }: { params: { locale: string }; searchParams?: { q?: string } }) {
     const locale = params.locale;
     const initialQuery = searchParams?.q || '';
     const [query, setQuery] = useState(initialQuery);
@@ -109,13 +109,11 @@ export default function SearchPage({ params, searchParams }: { params: { locale:
             setPhase1(r1);
             setLoadingP1(false);
 
-            // Auto phase 2 if few results
-            if (totalCount(r1) < 20) {
-                setLoadingP2(true);
-                const r2 = await fetchPhase(q, '2', signal);
-                setPhase2(r2);
-                setLoadingP2(false);
-            }
+            // Always run phase 2 (AI search) for AI badges
+            setLoadingP2(true);
+            const r2 = await fetchPhase(q, '2', signal);
+            setPhase2(r2);
+            setLoadingP2(false);
         } catch (err: unknown) {
             if (err instanceof DOMException && err.name === 'AbortError') return;
             setError(true);
@@ -124,13 +122,28 @@ export default function SearchPage({ params, searchParams }: { params: { locale:
         }
     }, [fetchPhase]);
 
-    // Initial load
+    // Initial load — fetch on mount if we have a query
     useEffect(() => {
         if (initialQuery && !initialFetched.current) {
             initialFetched.current = true;
             doSearch(initialQuery);
         }
-    }, [initialQuery, doSearch]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
+    // Listen for header search bar navigation (same-page)
+    useEffect(() => {
+        function onHeaderSearch(e: Event) {
+            const q = (e as CustomEvent).detail as string;
+            if (q && q !== query) {
+                setQuery(q);
+                initialFetched.current = true;
+                doSearch(q);
+            }
+        }
+        window.addEventListener('header-search', onHeaderSearch);
+        return () => window.removeEventListener('header-search', onHeaderSearch);
+    }, [query, doSearch]);
 
     // Debounced typing
     useEffect(() => {
@@ -159,11 +172,10 @@ export default function SearchPage({ params, searchParams }: { params: { locale:
     };
     const hasP2 = totalCount(p2New) > 0;
 
-    const allVideos = [...phase1.videos, ...p2New.videos];
     const allCelebs = [...phase1.celebrities, ...p2New.celebrities];
     const allCollections = [...phase1.collections, ...p2New.collections];
     const allTags = [...phase1.tags, ...p2New.tags];
-    const hasResults = allVideos.length > 0 || allCelebs.length > 0 || allCollections.length > 0 || allTags.length > 0;
+    const hasResults = phase1.videos.length > 0 || allCelebs.length > 0 || allCollections.length > 0 || allTags.length > 0 || p2New.videos.length > 0;
 
     const sl = (section: string) => sectionLabels[section]?.[locale] || sectionLabels[section]?.en || section;
 
@@ -299,12 +311,12 @@ export default function SearchPage({ params, searchParams }: { params: { locale:
                         </section>
                     )}
 
-                    {/* Videos */}
-                    {allVideos.length > 0 && (
+                    {/* Phase 1 Videos */}
+                    {phase1.videos.length > 0 && (
                         <section>
-                            <h2 className="text-lg font-semibold text-white mb-3">{sl('videos')} ({allVideos.length})</h2>
+                            <h2 className="text-lg font-semibold text-white mb-3">{sl('videos')} ({phase1.videos.length})</h2>
                             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-                                {allVideos.map(v => (
+                                {phase1.videos.map(v => (
                                     <VideoCard key={v.id} video={v} locale={locale} />
                                 ))}
                             </div>
@@ -313,22 +325,54 @@ export default function SearchPage({ params, searchParams }: { params: { locale:
 
                     {/* Phase 2 loading indicator */}
                     {loadingP2 && (
-                        <div className="flex items-center gap-2 py-4 text-brand-secondary/60 text-sm animate-fadeIn">
-                            <svg className="w-4 h-4 animate-spin text-brand-accent/60" viewBox="0 0 24 24" fill="none">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                            </svg>
-                            {locale === 'ru' ? 'Ищу ещё...' : 'Finding more results...'}
+                        <div className="flex items-center gap-3 py-6 animate-fadeIn">
+                            <div className="flex-1 h-px bg-purple-500/20" />
+                            <div className="flex items-center gap-2 text-purple-400/80 text-sm">
+                                <svg className="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                                </svg>
+                                {locale === 'ru' ? 'AI ищет похожие видео...' : 'AI is searching for similar videos...'}
+                            </div>
+                            <div className="flex-1 h-px bg-purple-500/20" />
                         </div>
                     )}
 
-                    {/* Phase 2 divider */}
-                    {hasP2 && !loadingP2 && (
-                        <div className="flex items-center gap-3 py-2 animate-fadeIn">
-                            <div className="flex-1 h-px bg-brand-accent/20" />
-                            <span className="text-xs text-brand-secondary/50">{locale === 'ru' ? '✨ Ещё результаты' : '✨ More results'}</span>
-                            <div className="flex-1 h-px bg-brand-accent/20" />
-                        </div>
+                    {/* Phase 2 AI Results — separate section */}
+                    {hasP2 && !loadingP2 && p2New.videos.length > 0 && (
+                        <section className="animate-fadeIn">
+                            <div className="relative rounded-xl border border-purple-500/30 bg-purple-950/20 p-4 sm:p-6 mt-2">
+                                {/* AI section header */}
+                                <div className="flex items-center gap-3 mb-4">
+                                    <div className="flex items-center gap-2 bg-purple-600/90 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg">
+                                        <svg className="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61z"/></svg>
+                                        AI Search
+                                    </div>
+                                    <div>
+                                        <h3 className="text-white font-semibold text-base">
+                                            {locale === 'ru' ? 'AI нашёл ещё' : 'AI found more'} ({p2New.videos.length})
+                                        </h3>
+                                        <p className="text-purple-300/60 text-xs mt-0.5">
+                                            {locale === 'ru'
+                                                ? 'Найдено с помощью анализа содержания видео'
+                                                : 'Found by analyzing video content'}
+                                        </p>
+                                    </div>
+                                </div>
+                                {/* AI videos grid */}
+                                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+                                    {p2New.videos.map(v => (
+                                        <div key={v.id} className="relative">
+                                            <div className="absolute top-2 right-2 z-10 flex items-center gap-1 bg-purple-600/90 backdrop-blur-sm text-white text-[10px] font-bold px-1.5 py-0.5 rounded-md shadow-lg">
+                                                <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61z"/></svg>
+                                                AI
+                                            </div>
+                                            <VideoCard video={v} locale={locale} />
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </section>
                     )}
                 </div>
             )}

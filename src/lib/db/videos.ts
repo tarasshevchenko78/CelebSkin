@@ -3,6 +3,20 @@ import { cached } from '../cache';
 import type { Video, PaginatedResult } from '../types';
 
 // ============================================
+// Slug Redirects (old slug → new slug, 301)
+// ============================================
+
+export async function getSlugRedirect(oldSlug: string, entityType: string): Promise<string | null> {
+    return cached(`slug_redirect:${entityType}:${oldSlug}`, async () => {
+        const result = await pool.query(
+            `SELECT new_slug FROM slug_redirects WHERE old_slug = $1 AND entity_type = $2 LIMIT 1`,
+            [oldSlug, entityType],
+        );
+        return result.rows[0]?.new_slug || null;
+    }, 86400); // 24h cache
+}
+
+// ============================================
 // Videos
 // ============================================
 
