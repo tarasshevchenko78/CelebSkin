@@ -1,435 +1,281 @@
 # CelebSkin — CLAUDE.md
 
-## Архитектура
-- **AbeloHost** (185.224.82.214): Next.js 14 App Router + TypeScript, PostgreSQL 16, Redis, Nginx, PM2
-- **Contabo** (161.97.142.117): Pipeline scripts, FFmpeg, Playwright, AI processing (Gemini 3-flash-preview)
-- **Home PC** (92.209.206.116): Windows, parallel watermark worker (`watermark_worker.py`), web dashboard :8585
-- **Bunny CDN** (celebskin-cdn.b-cdn.net): Видео, скриншоты, фото, постеры
-- **Домен**: celeb.skin (Namecheap)
-- **GitHub**: tarasshevchenko78/CelebSkin
+> Последнее обновление: 29.03.2026
 
-## Стек
-- Next.js 14 App Router, TypeScript
-- PostgreSQL 16 с JSONB для 10 языков (ru, en, de, fr, es, pt, it, pl, nl, tr)
-- Redis — кэширование (TTL 60-300с)
-- BunnyCDN — медиа хранилище и доставка
-- Gemini 3-flash-preview — AI Vision анализ видео (без цензуры на explicit контент)
-- Gemini 2.5 Flash — AI переводы, описания (legacy)
-- TMDB API — метаданные фильмов и актрис
-- PM2 — процесс менеджер
-- FFmpeg — обработка видео
+## Оглавление
+1. [Quick Start](#quick-start)
+2. [Архитектура: Два сервера + Home Worker](#архитектура)
+3. [Структура проекта](#структура-проекта)
+4. [XCADR Pipeline (основной)](#xcadr-pipeline)
+5. [Pipeline v2 (парсинг BubsRadar)](#pipeline-v2)
+6. [Home Watermark Worker](#home-watermark-worker)
+7. [Web App](#web-app)
+8. [Правила (ДЕЛАТЬ / НЕ ДЕЛАТЬ)](#правила)
+9. [Справочник](#справочник)
+
+---
+
+## Quick Start
+
+**Ты на AbeloHost** (185.224.82.214) — здесь web app, БД, Redis.
+
+- Пересборка сайта: `cd /opt/celebskin/site && ./rebuild.sh` (НИКОГДА не `rm -rf .next && npm run build` — есть Next.js 14.2.35 баг)
+- Pipeline запускается ТОЛЬКО из UI (`/admin/xcadr-pipeline`), ТОЛЬКО на Contabo
+- Исходники pipeline — на AbeloHost (`site/scripts/`), деплой на Contabo через `scp`
+- Gemini API ключи — ТОЛЬКО из БД (`settings.gemini_api_key`), НЕ из .env
+- Админка на русском языке
+- GitHub: tarasshevchenko78/CelebSkin
+
+---
+
+## Архитектура
+
+### Три машины
+
+| Машина | IP | Роль | PM2 процесс |
+|--------|----|------|-------------|
+| **AbeloHost** | 185.224.82.214 | Next.js 14, PostgreSQL 16, Redis, Nginx | `celebskin` |
+| **Contabo** | 161.97.142.117 | Pipeline scripts, FFmpeg, Playwright, WARP | `pipeline-api` |
+| **Home PC** | 92.209.206.116 | Windows, `watermark_worker.py`, dashboard :8585 | — |
+
+**Bunny CDN**: celebskin-cdn.b-cdn.net — видео, скриншоты, фото, постеры
+**Домен**: celeb.skin (Namecheap)
+
+### Env файлы
+- AbeloHost: `/opt/celebskin/site/.env.local` — DB, API keys (Gemini из БД, НЕ из .env)
+- Contabo: `/opt/celebskin/scripts/.env` — DB_HOST, GEMINI_API_KEY, TMDB_API_KEY, BUNNY_STORAGE_KEY
+
+### Деплой pipeline изменений (AbeloHost → Contabo)
+
+Исходники pipeline хранятся на AbeloHost в `/opt/celebskin/site/scripts/`. На Contabo — рабочие копии в `/opt/celebskin/scripts/`. Синхронизация через scp:
+
+```bash
+scp /opt/celebskin/site/scripts/run-xcadr-pipeline.js root@161.97.142.117:/opt/celebskin/scripts/
+scp /opt/celebskin/site/scripts/xcadr/parse-xcadr.js root@161.97.142.117:/opt/celebskin/scripts/xcadr/
+# После изменения скриптов — перезапуск:
+ssh root@161.97.142.117 "cd /opt/celebskin/scripts && pm2 restart pipeline-api"
+```
+
+> **pipeline-api.js** — Express API (порт 3100) на Contabo. Хардлинк между `/opt/celebskin/scripts/pipeline-api.js` и `/opt/celebskin/site/scripts/pipeline-api.js` НА CONTABO. На AbeloHost хардлинков нет.
+
+---
 
 ## Структура проекта
+
 ```
-src/
-  app/
-    [locale]/          — публичные страницы (10 локалей)
-    admin/             — админка (русский интерфейс)
-    api/admin/         — API админки
-    api/search/        — двухфазный поисковый API (Phase 1 synonym+fulltext, Phase 2 Gemini)
-  lib/
-    db/                — модули БД (pool, videos, celebrities, movies, search, settings, etc.)
-    config.ts          — централизованный конфиг
-    cache.ts           — Redis кэш с инвалидацией
-    logger.ts          — структурированные логи
-    gemini.ts          — Gemini API хелперы
-    seo.ts             — hreflang хелпер
-    bunny.ts           — Bunny CDN upload helper
-    search/
-      query-expander.ts — Gemini 2.5 Flash расширение поисковых запросов (Phase 2)
-  components/
-    VideoCard.tsx      — универсальная карточка видео с hover preview
-    SearchDropdown.tsx — двухфазный поисковый dropdown в хедере
-    BottomNav.tsx      — мобильная навигация
-    ChipFilter.tsx     — chip-фильтры
-    admin/             — компоненты админки
-scripts/
-  lib/
-    config.js          — конфиг pipeline
-    db.js              — подключение к БД
-    bunny.js           — Bunny CDN операции
-    retry.js           — retry wrapper
-    dead-letter.js     — очередь ошибок
-    state-machine.js   — state machine видео
-    gemini.js          — Gemini API хелперы
-    tags.js            — Tag system v3: 32 тега, 4 измерения, COUNTRY_GROUPS, normalizeTags()
-  run-pipeline-v2.js   — Pipeline v2.0 оркестратор (8 in-memory queues, auto-resume)
-  ai-vision-analyze.js — AI Vision анализ видео (Gemini 3-flash-preview, File API)
-  run-xcadr-pipeline.js — XCADR Pipeline оркестратор (7 in-memory queues, данные в БД только при publish)
-  xcadr/
-    parse-xcadr.js     — парсер xcadr.online
-    translate-xcadr.js — перевод через TMDB + Gemini
-    match-xcadr.js     — поиск совпадений в БД
-    map-tags.js        — маппинг тегов и коллекций
-    download-and-process.js — скачивание + обработка видео (legacy)
-    auto-import.js     — автоматический оркестратор (legacy)
-    test-gemini.js     — тест Gemini API
-  watermark.js         — наложение водяного знака (ultrafast + threads 0)
-  generate-thumbnails.js — скриншоты + sprites + GIF (с CDN fallback)
-  generate-preview.js  — hover preview clip (6с)
-  upload-to-cdn.js     — загрузка на BunnyCDN (graceful skip при missing workdir)
-  publish-to-site.js   — публикация с автомодерацией
-  run-pipeline.js      — конвейер с event-driven scheduler
-  sync-categories.js   — синхронизация категорий из boobsradar в БД
-  deploy-web.sh
-  deploy-pipeline.sh
-  backup-db.sh
-db/
-  migrations/          — SQL миграции (001-012, 012 = pipeline v2)
+site/
+  src/
+    app/
+      [locale]/              — публичные страницы (10 локалей: ru,en,de,fr,es,pt,it,pl,nl,tr)
+      admin/                 — админка (русский интерфейс)
+      api/admin/             — API админки
+      api/search/            — двухфазный поисковый API
+    lib/
+      db/                    — модули БД (pool, videos, celebrities, movies, search, settings)
+      config.ts              — централизованный конфиг
+      cache.ts               — Redis кэш с инвалидацией
+      gemini.ts              — Gemini API хелперы
+      search/query-expander.ts — Gemini 2.5 Flash расширение запросов (Phase 2)
+    components/
+      VideoCard.tsx          — карточка видео с hover preview
+      SearchDropdown.tsx     — двухфазный dropdown в хедере
+  scripts/
+    run-xcadr-pipeline.js    — XCADR Pipeline оркестратор (основной)
+    run-pipeline-v2.js       — Pipeline v2 оркестратор (парсинг BubsRadar)
+    pipeline-api.js          — Express API для UI (порт 3100 на Contabo)
+    ai-vision-analyze.js     — Gemini AI Vision анализ видео
+    xcadr/                   — парсер, перевод, маппинг для xcadr.online
+    lib/                     — общие модули pipeline (config, db, bunny, retry, gemini, tags)
+  db/migrations/             — SQL миграции (001-012)
+  rebuild.sh                 — безопасная пересборка (Next.js 14.2.35 workaround)
 ```
 
-## Два сервера — строгое разделение
-- AbeloHost: ТОЛЬКО web app, БД, Redis. Никакого FFmpeg, AI обработки
-- Contabo: ТОЛЬКО pipeline скрипты. Триггерится через SSH с AbeloHost
-- Pipeline scripts на Contabo коннектятся к БД на AbeloHost (DB_HOST=185.224.82.214)
-- Никогда не запускать pipeline на AbeloHost
-- API ключи Gemini — ТОЛЬКО из БД (`settings.gemini_api_key`), без fallback на .env. TMDB — из БД с fallback на .env
-- `getSettingOrEnv(dbKey)` — единый геттер. Для Gemini: DB-only (ENV_FALLBACKS = empty string)
+---
 
-## Pipeline конвейер (Contabo)
-
-### Основной flow
-Scrape → AI → TMDB Enrich → Watermark → Thumbnails → CDN Upload → Preview → Publish
-
-### Конвейерный принцип
-- **Event-driven scheduler**: child exit → wakeScheduler() → мгновенный re-spawn (0мс вместо 3с)
-- **3 параллельных видео**: каждый шаг обрабатывает до 3 видео одновременно
-- **Конкурентные шаги**: AI + Watermark + CDN работают одновременно для разных видео
-- **Водяной знак**: preset `veryfast` CRF 22, shared DB queue с Home Worker
-- **CDN upload**: graceful skip если workdir удалён но CDN watermark уже есть
-- **Thumbnails**: fallback на CDN URL если локальный tmp/ файл удалён
-
-### Автопубликация / Модерация
-- Полное видео (постер + фото актрис + описание + CDN) → `published`
-- Неполное (нет постера / фото / описания / актрис) → `needs_review` → ручная модерация
-- `fullPipelineReset()` сохраняет видео в статусе `needs_review`
-
-### TMDB Enrichment
-- Валидация TMDB_API_KEY при старте (exit если пустой)
-- Не-найденные актрисы: `tmdb_id = -1` (не перепроверяются при следующих запусках)
-- Multi-strategy search: year ± 1, без диакритики, TV show fallback
-
-### scripts/.env (НЕ в git, нужен на ОБОИХ серверах)
-Обязательные ключи: `DB_HOST`, `DB_PASSWORD`, `BUNNY_STORAGE_KEY`, `BUNNY_CDN_URL`, `GEMINI_API_KEY`, `TMDB_API_KEY`
-
-## XCADR Pipeline (Contabo) — АКТУАЛЬНЫЙ (март 2026)
+## XCADR Pipeline (основной)
 
 > Полное ТЗ: `/opt/celebskin/XCADR_PIPELINE_TZ.md`
 
-### Оркестратор: `run-xcadr-pipeline.js` (1324 строки)
-Единый pipeline с in-memory queues. **Данные в БД (videos/celebrities/movies) только при publish.**
+Единый pipeline для парсинга xcadr.online. Данные в production БД **только при publish**.
 
-### Pre-pipeline
-- `parse-xcadr.js`: парсит xcadr.online → `xcadr_imports` staging
-- Дедупликация: `published`/`duplicate` → пропуск; `failed`/`error` → сброс в `parsed`
+### Оркестратор: `run-xcadr-pipeline.js`
 
-### 7 worker шагов
+Streaming: парсер в фоне → feeder polls DB каждые 5 сек → 7 in-memory queues.
+
 | # | Шаг | Workers | Описание |
 |---|------|---------|----------|
-| 1 | download | 2 | KVS patterns → yt-dlp → video.mp4 (fallback boobsradar) |
-| 2 | ai_vision | 2 | Temp video → Gemini 3-flash-preview → ai-results.json → cleanup temp |
-| 3 | watermark | 1 | FFmpeg delogo xcadr 4 corners + overlay celeb.skin (preset fast, CRF 19). 1 слот Contabo, остальное → Home Worker |
+| 1 | download | 2 | yt-dlp через WARP SOCKS5 → video.mp4 |
+| 2 | ai_vision | 2 | Gemini 3-flash-preview → ai-results.json |
+| 3 | watermark | 1 | FFmpeg delogo 4 углов + overlay celeb.skin. 1 слот Contabo, остальное → Home Worker |
 | 4 | media | 2 | 8 screenshots, preview.mp4 (6s), preview.gif (4s) |
 | 5 | cdn_upload | 3 | Все файлы → Bunny CDN |
-| 6 | publish | 2 | CREATE video/celebrity/movie + TMDB enrich + bio/desc 10 langs + link all |
+| 6 | publish | 2 | CREATE video/celebrity/movie + TMDB enrich + перевод 10 языков + tags + collections |
 | 7 | cleanup | 2 | rm workdir |
 
-### Publish: 4-шаговый поиск актрис/фильмов
-1. По английскому имени → 2. По русскому имени → 3. TMDB API → 4. Create new (EN name)
-
-### Publish: обогащение
-- **enrichCelebTMDB**: фото, дата рождения, национальность, bio → перевод на 10 языков (Gemini). Если TMDB нашёл но нет фото → fallback на xcadr
-- **enrichMovieTMDB**: постер, жанры, студия, countries (production_countries ISO), description → перевод на 10 языков (Gemini). Если TMDB нашёл но нет постера/стран → fallback на xcadr
-- **Связи**: video_celebrities, movie_scenes, movie_celebrities, video_tags, collection_videos
+### Publish: поиск актрис
+1. По EN имени → 2. По RU имени → 3. TMDB API → 4. Create new
 
 ### WARP auto-recovery
-- `ensureWarpAlive()` — проверяет xcadr.online через SOCKS5 прокси, автоматически `warp-cli disconnect && connect` при падении
-- Вызывается перед каждым yt-dlp в download step и при SOCKS ошибках в retry loop
-- `warpReconnecting` mutex — предотвращает параллельные reconnect (другие воркеры ждут)
-- Feeder авто-ресетит SOCKS-failed записи (`pipeline_error LIKE '%Socks%'`) обратно в `translated`
-- RETRY_DELAYS: `[10s, 30s, 60s, 120s]` — 4 ретрая с WARP recovery между попытками
+- `ensureWarpAlive()`: сначала `warp-cli status` → перезапуск ТОЛЬКО если Disconnected, cooldown 60с
+- Парсер НЕ перезапускает warp-svc — только ждёт 10с и retry
+- RETRY_DELAYS: `[10s, 30s, 60s, 120s]`
 
-### Устойчивость к крэшам (ночной режим 1000+ видео)
-- **File-based stdio**: `pipeline-api.js` запускает дочерний процесс с логами в файл (`logs/xcadr-pipeline-{ts}.log`), не через pipe → выживает при `pm2 restart pipeline-api`
-- **EPIPE обработка**: `process.stdout/stderr.on('error')` игнорирует EPIPE (сломанный pipe от мёртвого родителя)
-- **Умный SIGTERM**: первый SIGTERM от рестарта pipeline-api **игнорируется** — pipeline продолжает работу. Кнопка "Стоп" в UI записывает `stop` в PID файл → тогда SIGTERM реально останавливает. Второй SIGTERM = force stop.
-
-### Теги из xcadr
-- Парсер: `tags_ru[]` из `<a href="/tags/.../">` → `xcadr_imports.tags_ru`
-- `map-tags.js`: хардкодный словарь RU→EN + Gemini fallback → `xcadr_tag_mapping` + `xcadr_collection_mapping`
-- Publish: AI теги (приоритет) + xcadr теги (всегда дополнительно) → `video_tags`; коллекции → `collection_videos`
-
-### AI Vision описание
-- Gemini 3-flash-preview: ~4000 слов промпт → JSON с description_en, scene_analysis, all_tags, hot_moments, nudity_level, content_markers
-- Результат: `videos.ai_raw_response` (полный JSON), `videos.ai_tags`, `videos.hot_moments`, `videos.best_thumbnail_sec`
+### Устойчивость к крэшам
+- File-based stdio (не через pipe) → выживает при `pm2 restart pipeline-api`
+- Умный SIGTERM: первый от pm2 restart **игнорируется**, кнопка "Стоп" в UI → PID file → реальный stop
+- EPIPE обработка
 
 ### Дедупликация
-- `source_url` (xcadr URL) — уникальный индекс в `videos`
-- Тройная проверка в publish: source_url → xcadr video ID pattern → xcadr_imports published
-- При старте: UPDATE status='failed' (НЕ DELETE) для записей старше 24ч
+- `source_url` — уникальный индекс в `videos`
+- Тройная проверка в publish: source_url → xcadr video ID → xcadr_imports published
 
-### Кодирование видео
-libx264, preset `fast`, CRF `19`, aac 128k, mp4 faststart
+### Cleanup при старте
+- `cleanupOnStart()` удаляет xcadr-work dirs (НЕ удаляет watermarked/media_cdn_done/watermarking_home)
+- Два рабочих каталога: `xcadr-work/{xcadrId}/` (основной) + `pipeline-work/{videoId}/` (shared с Home Worker)
 
-### UI + API
-- Admin UI: `/admin/xcadr-pipeline` — прогресс-бары, вкладки Pipeline/Published/Failed/Import
-- API proxy: `/api/admin/xcadr-pipeline/route.ts` → Contabo :3100
-- AdminVideosTable: колонки «Источник» (xcadr/boobsradar) и «AI» (confidence bar / vision badge)
-- Фильтрация по текущему запуску (`started_at`)
+---
 
-### ХАРДЛИНКИ (ВАЖНО!)
-`run-xcadr-pipeline.js` и `pipeline-api.js` — хардлинки между `/opt/celebskin/scripts/` и `/opt/celebskin/site/scripts/`. Один файл = один inode. Менять в `/opt/celebskin/scripts/`.
-
-**ВНИМАНИЕ:** Хардлинки работают только ВНУТРИ одного сервера. Между AbeloHost и Contabo — это **отдельные копии**. При изменении pipeline скриптов ОБЯЗАТЕЛЬНО синхронизировать на Contabo:
-```bash
-scp /opt/celebskin/site/scripts/run-xcadr-pipeline.js root@161.97.142.117:/opt/celebskin/scripts/run-xcadr-pipeline.js
-```
-
-### Legacy xcadr (deprecated)
-Файлы: xcadr/auto-import.js, xcadr/download-and-process.js — не используются
-
-## Pipeline v2.0 (Contabo) — НОВЫЙ
+## Pipeline v2 (парсинг BubsRadar)
 
 ### Оркестратор: `run-pipeline-v2.js`
-PipelineQueue + WorkerPool. Шаги download→ai_vision используют in-memory очереди. Watermark опрашивает БД (`watermark_ready`) через `FOR UPDATE SKIP LOCKED` — конкурирует с Home Worker.
 
-### 8 шагов
+Используется для парсинга с boobsradar.com. PipelineQueue + WorkerPool, 8 in-memory очередей.
+
 | # | Шаг | Workers | Описание |
 |---|------|---------|----------|
-| 1 | download | 3 | Playwright network intercept → axios stream, 5min timeout, DOWNLOAD_QUEUE_MAX=5 |
-| 2 | tmdb_enrich | 4 | TMDB API (Bearer JWT), nationality (ISO 2-letter), countries, draft статус |
-| 3 | ai_vision | 3 | subprocess ai-vision-analyze.js + generate-multilang.js (10 locales) |
-| 4 | watermark | 2 | FFmpeg veryfast CRF22, ATOMIC SQL claim (prevents double-processing with Home Worker) |
-| 5 | media | 3 | Screenshots (1280px) at hot_moments timestamps, preview.mp4 (6s), preview.gif (4s) |
-| 6 | cdn_upload | 4 | uploadFile() → Bunny Storage, все файлы → videos/{videoId}/ |
-| 7 | publish | 3 | CDN HEAD check >500KB, verify translations 10 locales, block censored AI, link collection |
-| 8 | cleanup | 3 | rm workdir (только если published + CDN URLs present), raw_videos → processed |
+| 1 | download | 3 | Playwright network intercept → axios stream |
+| 2 | tmdb_enrich | 4 | TMDB API, nationality, countries, draft статус |
+| 3 | ai_vision | 3 | Gemini AI Vision + generate-multilang.js (10 локалей) |
+| 4 | watermark | 2 | FFmpeg veryfast CRF22, atomic SQL claim (shared с Home Worker) |
+| 5 | media | 3 | Screenshots + preview.mp4 + preview.gif |
+| 6 | cdn_upload | 4 | uploadFile() → Bunny Storage |
+| 7 | publish | 3 | CDN HEAD >500KB, verify 10 locales, link collections |
+| 8 | cleanup | 3 | rm workdir |
 
-### CRITICAL: Watermark double-processing prevention
-- Contabo watermark queue + Home worker polling can grab same video simultaneously
-- processWatermark uses ATOMIC SQL claim: `UPDATE videos SET status='watermarking' WHERE id=$1 AND status NOT IN ('watermarking','watermarking_home','watermarked','published','failed','needs_review') AND pipeline_step NOT IN ('watermarked','media','cdn_upload','publish','cleanup')`
-- If rowCount=0 → skip (another worker already claimed)
-
-### CRITICAL: Donor video URL extraction
-- boobsradar.com loads video URL via JavaScript (not in static HTML)
-- Adapter uses Playwright with `networkidle` to intercept actual CDN URL
-- Video URL chain: boobsradar → fuckcelebs.net/get_file → vcdn.fuckcelebs.net → ahcdn.com (real mp4)
-- Some videos return 48-byte GIF stub instead of real video — processPublish HEAD-checks CDN file >500KB
-
-### AI Vision
-- **Модель**: gemini-3-flash-preview (primary) → gemini-3.1-pro-preview → gemini-2.5-pro (fallback)
-- **Gemini 3.x не имеет цензуры** на explicit контент (проверено)
-- File API для видео >18MB (resumable upload)
-- Fallback на donor tags через mapDonorTags() если все модели отказали
-
-### Tag System v3 (`lib/tags.js`)
-- **32 тега** в 4 измерениях: nudity_level (8), scene_type (12), context (7), media_type (5)
-- `normalizeTags()`: 1 nudity + [bush] + 0-1 scene + 0-2 context + 1 media
-- `mapDonorTags(donorTags)`: маппинг тегов донора → наша система
-- `tag_mapping` таблица в DB (72 маппинга, migration 012)
-
-### Страны и национальность
-- `celebrities.nationality` → ISO 2-letter код (из TMDB place_of_birth через `extractNationality()`)
-- `movies.countries` → VARCHAR(2)[] массив ISO кодов (из TMDB production_countries)
-- `COUNTRY_GROUPS` в tags.js: asian, scandinavian, latin, eastern-european, western-european
-- `BIRTH_COUNTRY_MAP`: 54 маппинга для парсинга "Springfield, Illinois, USA" → "US"
-
-### Draft статус
-- Celebrities и movies создаются со `status = 'draft'` в шаге tmdb_enrich
-- Публикуются в шаге publish только вместе с видео
-- Если CDN URLs отсутствуют → video → `needs_review` (не publish)
-
-### Чистый старт (cleanupOnStart) — БЕЗ auto-resume
-- **Новый запуск = чистый старт.** Никаких процессов из предыдущих запусков
-- `cleanupOnStart()` при каждом старте:
-  1. Удаляет ВСЕ незавершённые видео из DB (не published/failed/needs_review)
-  2. Удаляет ВСЕ рабочие папки `/opt/celebskin/pipeline-work/` (ВРЕМЕННЫЕ файлы, не DB/CDN/scripts)
-  3. Сбрасывает raw_videos `processing` → `pending` если видео не опубликовано
-- **pipeline-work = ВРЕМЕННЫЕ файлы**: original.mp4, watermarked.mp4, thumbs, previews — всё что опубликовано уже на CDN
-- raw_videos lifecycle: `pending` → `processing` → `processed`. Не опубликовано = сброс в `pending`
-
-### Retry и dead-letter
-- 3 retry на каждый шаг (5s, 15s, 45s delays)
-- При исчерпании retries → dead_letter через `recordFailure()`
-- Graceful shutdown: SIGINT/SIGTERM → workers завершают текущую работу
+### Ключевые особенности
+- **Donor URL extraction**: boobsradar → fuckcelebs.net → ahcdn.com (real mp4). Playwright + networkidle
+- **GIF stub detection**: HEAD check CDN >500KB (некоторые видео отдают 48-byte GIF)
+- **Draft статус**: celebrities/movies создаются как draft, публикуются вместе с видео
+- **Чистый старт**: `cleanupOnStart()` удаляет все незавершённые, сбрасывает processing → pending
 
 ### CLI
 ```bash
-node run-pipeline-v2.js                    # полный pipeline (чистый старт)
-node run-pipeline-v2.js --limit=10         # макс 10 новых видео
+node run-pipeline-v2.js                    # полный pipeline
+node run-pipeline-v2.js --limit=10         # макс 10 видео
 node run-pipeline-v2.js --step=ai_vision   # только один шаг (debug)
 ```
 
-### Миграция 012 (pipeline v2)
-Новые колонки videos: `ai_vision_status`, `ai_vision_model`, `best_thumbnail_sec`, `preview_start_sec`, `donor_tags`, `pipeline_step`, `pipeline_error`
-Новые статусы: downloading, downloaded, tmdb_enriching, tmdb_enriched, ai_analyzing, ai_analyzed, watermarking, media_generating, media_generated, cdn_uploading, cdn_uploaded, publishing, failed, draft
-Таблица `tag_mapping`: donor_tag → our_tag_slug (72 записи)
-`movies.countries`: VARCHAR(2)[] массив ISO кодов
+---
 
-## Известные баги (март 2026)
-1. ~~Import пишет boobsradar URL в video_url~~ — ИСПРАВЛЕНО
-2. ~~Скачивается 480p~~ — quality определяется ffprobe
-3. ~~Водяной знак xcadr.online не убирается~~ — ИСПРАВЛЕНО: delogo в watermark шаге XCADR pipeline
-4. ~~Коллекции не привязываются~~ — ИСПРАВЛЕНО
-5. ~~Draft статус для актрис/фильмов~~ — РЕАЛИЗОВАНО
-6. AI описание — промт не обновлён на эротический стиль
-7. Удаление видео из админки может не работать
-8. Часть админки всё ещё на английском
-9. ~~PIPELINE_ERROR_DECODE при перемотке~~ — ИСПРАВЛЕНО (SAR=1:1). 303 старых видео нужна перекодировка
-10. ~~Дубликаты фильмов с русскими названиями~~ — ИСПРАВЛЕНО: 4-шаговый поиск EN→RU→TMDB→create
+## Home Watermark Worker
 
-## Реализовано (март 2026)
-- Settings table: управление API ключами (Gemini, TMDB) из админки `/admin/settings`
-- AI re-enrich: динамические ключи из DB, логирование ошибок, детальные сообщения
-- Скриншоты: lightbox с навигацией, захват кадра с видео (canvas + FFmpeg fallback), разрешение 1280px, восстановлен ScreenshotPicker в админке
-- Водяной знак: UI для загрузки PNG, выбор паттерна движения, настройка прозрачности/масштаба
-- Категории boobsradar: `sync-categories.js` с реальными счётчиками (pagination × 20) напрямую в таблицу `collections`, фильтр в pipeline UI
-- XCadr: dropdown категорий, badges коллекций в таблице импорта
-- Pipeline reset: `fullPipelineReset()` при старте — сохраняет needs_review видео
-- Pipeline конвейер: event-driven scheduler, мгновенный re-spawn, parallel steps
-- Publish автомодерация: полные → published, неполные → needs_review
-- Интеграция "Подборок" (Collections) вместо старых категорий в Scraper Pipeline: UI скрапера теперь читает актуальные счётчики из `collections`.
-- Документация деплоя: Web App НЕ на Vercel! Работает через PM2 на AbeloHost. Деплой: `cd /opt/celebskin/site && ./rebuild.sh`. Git push НЕ деплоит автоматически.
-- **CRITICAL: rebuild.sh** — ВСЕГДА использовать `./rebuild.sh` для пересборки. НИКОГДА не делать `rm -rf .next && npm run build` напрямую! Next.js 14.2.35 баг: без workaround файлов в `.next/server/pages/` билд падает для App Router only проектов.
-- **PM2 auto-startup**: systemd `pm2-root.service` enabled. PM2 автоматически стартует при рестарте сервера. `pm2 save` обязателен после любых изменений процессов.
-- Фиксы багов: устранены дубликаты фильмов (проверка точного названия в `xcadr/route.ts`), восстановлен UI скриншотов в админке, исправлены локальные ссылки CDN на `celebskin-cdn.b-cdn.net`.
-- **Watermark fix (13.03.2026)**: `-sar 1:1`, `-keyint_min 48 -sc_threshold 0`, `-af aresample=async=1:first_pts=0`, `-fflags +genpts+discardcorrupt`, `-max_muxing_queue_size 4096` — исправляет PIPELINE_ERROR_DECODE при seek в Chrome
-- Новые скрипты: `scan-broken-videos.js` (сканирование SAR), `reprocess-broken-videos.js` (перекодировка старых видео)
-- **Pipeline v2.0 (15.03.2026)**: `run-pipeline-v2.js` — 8-шаговый оркестратор с in-memory очередями, AI Vision (Gemini 3-flash-preview), Tag System v3 (32 тега), auto-resume, draft статус для celebrities/movies, миграция 012
-- **Теги и UI (16.03.2026)**:
-  - 32 канонических тега с `is_canonical=true`, `name_localized` (10 языков), `videos_count`
-  - `backfill-tags.js` — бэкфил тегов для 613 старых видео через `tag_mapping` + `DONOR_MAP`
-  - Публичный сайт: только canonical теги из `video_tags JOIN tags WHERE is_canonical=true`; categories не показываются
-  - Панель тегов `/video`: sticky, золотая тема (`brand-accent`), drag-scroll, sort dropdown отдельно
-  - `getAllTags()`: фильтр `is_canonical=true AND videos_count > 0`
-- **Pipeline fixes (16.03.2026)**:
-  - Дедупликация: скрапер проверяет `videos JOIN raw_videos` вместо только `raw_videos`
-  - `resumeFromWorkdirs()`: удаляет orphan raw_videos + сбрасывает stuck `processing` → `processed`
-  - `fetchPendingVideos()`: fix `$2::text` cast для PostgreSQL type inference
-  - Early stop: скрапер прекращает сканирование при достижении limit новых видео (`earlyStop` flag)
-  - Stop endpoint: `SIGTERM` → 5s timeout → `SIGKILL` fallback
-  - SIGTERM kills scraper subprocess immediately (`scraperChild.kill("SIGKILL")`)
-- **Pipeline v2 fixes (16.03.2026)**:
-  - AI Vision: fixed `bestResult.model` → `model` in saveResults() (was crashing all saves)
-  - maxOutputTokens: 2048 → 8192 (prevent JSON truncation)
-  - Detached child process: file-based stdio, survives `pm2 restart pipeline-api`
-  - File size limit: `maxSizeMb` param, HEAD request check before download
-  - Start button: source default `''` → `'boobsradar'`
-  - Category counts: query fix `collections WHERE is_auto = true` → `collections`
-- **Home Watermark Worker (16.03.2026, updated 27.03.2026)**:
-  - `watermark_worker.py` — Python script on user's Windows PC, web dashboard on `:8585`
-  - Shared DB queue: Contabo (1 slot) + home worker poll `watermark_ready` with `FOR UPDATE SKIP LOCKED`
-  - **Delogo**: 4 corners (28% width, 10% height, margin=2) — same algorithm as Contabo
-  - Flow: SCP download → FFmpeg (delogo + overlay) → BunnyCDN upload → SCP back → DB update
-  - Pipeline polls for `watermarked` videos from home worker → enqueues to `media` step
-  - Error retry: 3 attempts, then `watermark_failed`. CDN upload: 3 retries with 10s delay
-  - Pipeline completion waits for `watermarking_home` videos in DB
-- **Watermark Race Condition Fix (27.03.2026)**:
-  - XCADR pipeline watermark claim rewritten to match pipeline v2 approach
-  - SELECT status check before atomic UPDATE claim (was: only UPDATE, rowCount=0 assumed home worker)
-  - Now correctly distinguishes: another Contabo worker (skip) vs home worker (wait) vs already done (copy)
-  - Contabo watermark concurrency reduced to 1 slot — rest goes to Home Worker for CPU offload
-- **Pipeline Hardening & Data Quality (18.03.2026)**:
-  - Scraper speedup: page-level early stop (2 consecutive full-skip pages → stop), Set preloading, silent skipping
-  - Broken thumbnails: `repair-thumbnails.js` + API endpoint + admin UI (scan/repair buttons)
-  - CDN download: Storage API (`storage.bunnycdn.com` + AccessKey) instead of CDN URL (was 403)
-  - Dynamic FFmpeg timeout: 5× duration, min 60 min (was fixed 30 min)
-  - Stuck video recovery: main loop re-enqueues videos stuck >10 min
-  - 404/403 instant fail: `NonRetryableError` class, no retries for HTTP 404/403
-  - video_url fix: removed `raw?.video_file_url` fallback — no more boobsradar URLs in player
-  - Celebrity name cleanup: `cleanCelebrityName()` in pipeline, regex fix in adapter, 47 garbage entries fixed
-  - Duration backfill: 8 videos → ffprobe via Bunny Storage API
-  - Quality backfill: 119 videos HD/SD/Unknown → real quality via ffprobe
-  - Collections Title Case: 37 ALL CAPS → Title Case, `toTitleCase()` in `sync-categories.js`
-  - setsar=1 in FFmpeg watermark, AI Vision timeout 5→10 min
-  - Dedup by original_title: backfilled 2135 videos, scraper checks publishedTitles Set
+`watermark_worker.py` — Python скрипт на Windows PC (Home), web dashboard на `:8585`.
 
-- **Pipeline Restoration (18.03.2026)**:
-  - `generate-multilang.js` recreated (was missing) — Gemini 3-flash-preview, 10 locales, accepts `--video-id`
-  - Gemini key rotation: comma-separated keys, `nextSessionKey()` locks one key per upload+generate cycle (File API key-bound)
-  - Translation check in processPublish: blocks without ru title/review/seo
-  - Collection linking: `donor_category` from `raw_videos` → `collection_videos`
-  - Download timeout 10→30 min
-  - Start button debounce (3s yellow "Запускается...")
-  - `resetInProgressVideos` preserves `needs_review` and `failed`
-  - `ai_vision_error` written on Gemini fallback for UI display
-  - 133 orphan Bunny folders deleted
+### Full flow (не только watermark!)
+1. Claims видео из DB: `status='watermarking_home'`
+2. SCP download с Contabo → FFmpeg (delogo 4 углов + overlay celeb.skin)
+3. Screenshots + preview → BunnyCDN upload → SCP results back → DB update
+4. `pipeline_step='media_cdn_done'` → pipeline маршрутизирует в publish (bypass media/cdn)
 
-- **Система поиска (18-19.03.2026)**:
-  - PostgreSQL: `search_index` (unified full-text), `search_synonyms` (69 строк, 10 языков), `smart_search()` функция (5-уровневый скоринг: exact_tag 100 → celebrity_fuzzy 80 → fulltext_en 50 → fulltext_all 40 → trigram 30)
-  - Расширения: pg_trgm, unaccent
-  - 8 триггеров автообновления search_index при CRUD videos/celebrities/collections/tags
-  - Детерминистичные UUID: celebrities (0001-{id}), collections (0002-{id}), tags (0003-{id})
-  - API: `GET /api/search?q=&phase=1|2&lang=&hydrate=true` — synonym lookup, smart_search, dedup, grouping, Redis cache (1ч)
-  - Phase 2: Gemini 2.5 Flash (`query-expander.ts`) — извлечение имён, тегов, фильмов, 3с timeout, 24ч Redis cache
-  - `SearchDropdown.tsx`: двухфазный dropdown в Header, debounce 400мс, auto phase 2 при <20 результатах, solid bg #11100e
-  - `[locale]/search/page.tsx`: полная страница результатов с гидрированными сущностями, горизонтальные скроллы, grid видео, noindex
-  - Header обновлён: SearchDropdown вместо статичной формы
+### Координация с Contabo
+- Shared DB queue: Contabo (1 слот) + Home (4 FFmpeg workers) опрашивают `watermark_ready`
+- `FOR UPDATE SKIP LOCKED` — atomic claim
+- SkipError pattern: Contabo мгновенно пропускает если Home уже обработал
+- Файл на Contabo: `/opt/celebskin/watermark_worker.py`
 
-- **Gemini API Key Fixes (25.03.2026)**:
-  - 3 Gemini API ключа (Paid Tier 1) — ротация через запятую в `GEMINI_API_KEY`
-  - Ключи хранятся в БД `settings.gemini_api_key` (через запятую) + `.env` на Contabo
-  - UI Настроек: 3 отдельных поля `gemini_api_key_1/2/3` → мержатся в одну строку `gemini_api_key`
-  - **CRITICAL FIX**: dotenv НЕ перезаписывает уже установленные `process.env` vars. Pipeline-api.js передаёт `env: {...process.env}` дочерним процессам. При обновлении ключей — **ОБЯЗАТЕЛЬНО перезапустить pipeline-api.js** на Contabo: `cd /opt/celebskin/scripts && kill $(pgrep -f pipeline-api) && nohup node pipeline-api.js > logs/pipeline-api.log 2>&1 &`
-  - `isTransientError`: добавлены `quota`, `exceeded`, `RESOURCE_EXHAUSTED` — quota ошибки → `error` (retryable), не `censored`
-  - Quota break: при 429/quota — break + sleep 15s → следующая модель с другим ключом
-  - Throttle 10s между моделями при ошибках
-  - AI Vision concurrency: 3 → 2 воркера
-  - DB constraint `videos_ai_vision_status_check`: добавлен статус `error`
-  - Pipeline-api.js запускать из `/opt/celebskin/scripts/` (там node_modules), НЕ из `/opt/celebskin/site/scripts/`
-- **Gemini DB-Only Keys (29.03.2026)**:
-  - Web app (Next.js) читает Gemini ключи ТОЛЬКО из БД (`settings.gemini_api_key`), без .env fallback
-  - `query-expander.ts`: ключи из `getSettingOrEnv('gemini_api_key')` + ротация по hash запроса
-  - `re-enrich/route.ts`: убран explicit env fallback
-  - `settings/route.ts`: `has_gemini_key` проверяет БД вместо `config.geminiApiKey`
-  - `settings.ts` ENV_FALLBACKS: `gemini_api_key: ''` (пустая строка)
-  - Pipeline на Contabo по-прежнему использует `.env` (другой runtime)
-- **Mobile UI Fixes (29.03.2026)**:
-  - Sticky video player: `sticky top-[84px] md:static z-40` — видео фиксируется ниже хедера при скролле
-  - Footer: `pb-16 md:pb-0` для BottomNav, `flex-col md:flex-row` responsive, уменьшены gap языковых ссылок
-  - `overflow-x-hidden` на body — нет горизонтального скролла
-  - Mobile search overlay: полноэкранный поиск по кнопке 🔍, SearchDropdown + популярные теги
-  - Overlay закрывается при навигации (useEffect на pathname)
-- **Search Multilingual (29.03.2026)**:
-  - 30 русских синонимов в `search_synonyms` (сосет→blowjob, минет→blowjob, голая→nude, секс→sex-scene и т.д.)
-- **WARP Death Spiral Fix (29.03.2026)**:
-  - Парсер (parse-xcadr.js) больше НЕ перезапускает warp-svc — только ждёт 10с и retry
-  - Pipeline: ensureWarpAlive() проверяет `warp-cli status` первым, cooldown 60с
-  - Cron `/tmp/fix-stale-watermark.sh` каждую минуту: фиксит xcadr_imports застрявшие в watermarking
-  - Phase 2: Gemini semantic expansion для любого языка
-- **Slug Redirects (29.03.2026)**:
-  - Таблица `slug_redirects` (old_slug PK, new_slug, entity_type, locale) — 33,926 записей
-  - 4018 видео × 9 локалей — старые не-EN slug-и → redirect на EN slug
-  - Данные из бэкапа `celebskin_20260322_030001.dump` (до коммита 2daede6)
-  - `getSlugRedirect()` в `lib/db/videos.ts` — проверяет таблицу, кэш 24ч Redis
-  - `permanentRedirect()` (308) в video page если slug не найден но есть redirect
-  - GRANT SELECT ON slug_redirects TO celebskin
-- **AI Search (29.03.2026)**:
-  - `search_index` бэкфил AI данных (scene_analysis, hot_moments, content_markers) — 10,730 видео
-  - Phase 2 всегда запускается (не только при <20 результатов), лимит 100 (вместо 30)
-  - Gemini query-expander: расширенный промпт с 5-10 синонимами, maxOutputTokens 1024, таймаут 8с
-  - Fallback JSON парсинг для Gemini 2.5 Flash thinking-mode
-  - AI секция на странице поиска: фиолетовая рамка, плашка "AI Search", отдельный grid
-  - `rebuild.sh` — скрипт безопасной пересборки (Next.js 14.2.35 workaround)
+---
+
+## Web App
+
+### Поисковая система (двухфазная)
+
+**Phase 1**: Синонимы (`search_synonyms`, 69 строк) + `smart_search()` PostgreSQL функция (5-уровневый скоринг: exact_tag → celebrity_fuzzy → fulltext_en → fulltext_all → trigram)
+
+**Phase 2**: Gemini 2.5 Flash (`query-expander.ts`) — семантическое расширение запроса, 5-10 синонимов, лимит 100. Всегда запускается. AI результаты в отдельной фиолетовой секции "AI Search".
+
+API: `GET /api/search?q=&phase=1|2&lang=&hydrate=true`
+
+### Slug Redirects (33,926 записей)
+- Таблица `slug_redirects` (old_slug PK → new_slug, entity_type, locale)
+- 4018 видео × 9 локалей — старые не-EN slug → redirect на EN slug
+- `getSlugRedirect()` в `lib/db/videos.ts`, кэш 24ч Redis
+- `permanentRedirect()` (308) в video page
+
+### Redis кэширование
+- TTL 60-300с для страниц, 1ч для поиска, 24ч для slug redirects
+- `cache.ts` — `cached(key, fn, ttl)` wrapper
+
+### Пересборка
+```bash
+cd /opt/celebskin/site && ./rebuild.sh
+```
+`rebuild.sh` — останавливает PM2, чистит .next, создаёт workaround файлы (Next.js 14.2.35 баг), билдит, стартует PM2, проверяет.
+
+---
 
 ## Правила
-- НИКОГДА не менять AI модели без явного запроса Тараса
-- НИКОГДА не запускать pipeline на AbeloHost — только на Contabo
-- НИКОГДА не записывать boobsradar search URL в video_url
-- НИКОГДА не публиковать видео без русских переводов (title.ru, review.ru, seo_title.ru)
-- НИКОГДА не использовать `process-with-ai.js` в pipeline v2 (это v1 скрипт для raw_videos)
-- `generate-multilang.js` — единственный скрипт для переводов в pipeline v2
-- Gemini File API: upload и generateContent ОБЯЗАНЫ использовать ОДИН И ТОТ ЖЕ API ключ
-- Gemini AI Vision: gemini-3-flash-preview. Legacy: gemini-2.5-flash
-- video_url при создании = NULL, заполняется pipeline (cdn_upload шаг)
-- При смене Gemini API ключей — ОБЯЗАТЕЛЬНО: `pm2 restart pipeline-api --update-env`
-- Pipeline-api.js управляется через PM2 на Contabo (process name: `pipeline-api`)
-- `run-xcadr-pipeline.js` и `pipeline-api.js` — ХАРДЛИНКИ, менять в `/opt/celebskin/scripts/`
-- Актрисы и фильмы хранятся с АНГЛИЙСКИМИ именами, локализация в JSONB (name_localized, title_localized)
-- Дедупликация xcadr видео по `source_url` (уникальный индекс), НЕ по original_title
-- xcadr_imports: Cleanup — UPDATE status='failed' (НЕ DELETE) для записей старше 24ч, не трогает in-progress
-- **CLEANUP при рестарте удаляет xcadr-work dirs!** Не удаляет если temp video в состоянии media_cdn_done/watermarked/watermarking_home. Publish, Media, CdnUpload имеют fallback чтение из pipeline-work/{videoId}/ если xcadr-work пустой. home-poll восстанавливает xcadr-meta.json из xcadr_imports если директория удалена.
-- **Два рабочих каталога**: `xcadr-work/{xcadrId}/` (основной) и `pipeline-work/{videoId}/` (shared с home worker). ВСЕГДА проверяй оба при чтении файлов!
-- Pipeline запускается ТОЛЬКО из UI (`/admin/xcadr-pipeline`), НЕ из CLI
-- Админка на русском языке
-- Полное ТЗ XCADR Pipeline: `/opt/celebskin/XCADR_PIPELINE_TZ.md`
+
+### НИКОГДА
+- НЕ менять AI модели без запроса Тараса
+- НЕ запускать pipeline на AbeloHost — только на Contabo
+- НЕ записывать URL boobsradar в `video_url`
+- НЕ публиковать видео без русских переводов (title.ru, review.ru, seo_title.ru)
+- НЕ использовать `rm -rf .next && npm run build` — только `./rebuild.sh`
+- НЕ удалять опубликованные видео без разрешения Тараса
+- НЕ убивать процессы без разрешения
+
+### ВСЕГДА
+- Pipeline — ТОЛЬКО из UI (`/admin/xcadr-pipeline`)
+- Имена актрис/фильмов — АНГЛИЙСКИЕ (локализация в JSONB)
+- Gemini File API: upload и generateContent — ОДИН И ТОТ ЖЕ API ключ
+- При смене Gemini ключей → `pm2 restart pipeline-api --update-env` на Contabo
+- При изменении pipeline скриптов → scp на Contabo
+- Cleanup: UPDATE status='failed', НЕ DELETE
+- Batch все изменения кода → один `./rebuild.sh` в конце
+
+---
+
+## Справочник
+
+### Gemini модели
+| Модель | Назначение |
+|--------|-----------|
+| gemini-3-flash-preview | AI Vision анализ видео (primary), переводы |
+| gemini-2.5-flash | Query expansion (Phase 2 поиск), legacy переводы |
+
+### Ключевые таблицы БД
+| Таблица | Назначение |
+|---------|-----------|
+| `videos` | Видео (source_url уникальный, JSONB title/slug/review × 10 языков) |
+| `celebrities` | Актрисы (name EN, slug unique, name_localized JSONB, bio JSONB) |
+| `movies` | Фильмы (title EN, countries varchar(2)[] ISO) |
+| `xcadr_imports` | Staging для XCADR pipeline |
+| `slug_redirects` | 33,926 редиректов старых slug → EN slug |
+| `search_index` | Unified full-text поиск |
+| `search_synonyms` | 69 синонимов для поиска (10 языков) |
+| `settings` | API ключи, настройки (gemini_api_key через запятую) |
+| `tags` | 32 канонических тега (is_canonical, name_localized) |
+
+### Полезные команды
+```bash
+# Пересборка сайта
+cd /opt/celebskin/site && ./rebuild.sh
+
+# Деплой pipeline скрипта на Contabo
+scp /opt/celebskin/site/scripts/<file> root@161.97.142.117:/opt/celebskin/scripts/<file>
+
+# SSH на Contabo
+ssh root@161.97.142.117
+
+# Логи сайта
+pm2 logs celebskin --lines 50
+
+# Логи pipeline (на Contabo)
+ssh root@161.97.142.117 "pm2 logs pipeline-api --lines 50"
+
+# БД
+psql -U celebskin -d celebskin
+
+# Статус WARP (на Contabo)
+ssh root@161.97.142.117 "warp-cli status"
+```
