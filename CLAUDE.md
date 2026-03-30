@@ -47,8 +47,8 @@
 
 | Путь | AbeloHost | Contabo |
 |------|-----------|---------|
-| `/opt/celebskin/site/` | Git repo, Next.js app (PM2: `celebskin`) | Git repo (может отставать от AbeloHost) |
-| `/opt/celebskin/site/scripts/` | Исходники pipeline (git-tracked) | Рабочие скрипты pipeline + ~20 доп. скриптов (только на Contabo) |
+| `/opt/celebskin/site/` | Git repo, Next.js app (PM2: `celebskin`) | Git repo (отстаёт, НЕТ .next/ и node_modules/) |
+| `/opt/celebskin/site/scripts/` | Исходники pipeline (git-tracked), `legacy/` подпапка | Рабочие скрипты + ~20 доп. (свои node_modules/) |
 | `/opt/celebskin/scripts` | НЕТ (удалена) | **Симлинк** → `site/scripts` |
 | `/opt/celebskin/site/.env.local` | DB, API keys | — |
 | `/opt/celebskin/site/scripts/.env` | — | DB_HOST, GEMINI_API_KEY, TMDB_API_KEY, BUNNY_STORAGE_KEY |
@@ -101,6 +101,7 @@ site/
     ai-vision-analyze.js     — Gemini AI Vision анализ видео
     xcadr/                   — парсер, перевод, маппинг для xcadr.online
     lib/                     — общие модули pipeline (config, db, bunny, retry, gemini, tags)
+    legacy/                  — устаревшие скрипты (run-pipeline.js v1, deploy-*.sh и др.)
   db/migrations/             — SQL миграции (001-012)
   rebuild.sh                 — безопасная пересборка (Next.js 14.2.35 workaround)
 ```
