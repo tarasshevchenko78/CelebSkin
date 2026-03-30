@@ -41,22 +41,37 @@
 **Bunny CDN**: celebskin-cdn.b-cdn.net — видео, скриншоты, фото, постеры
 **Домен**: celeb.skin (Namecheap)
 
-### Env файлы
-- AbeloHost: `/opt/celebskin/site/.env.local` — DB, API keys (Gemini из БД, НЕ из .env)
-- Contabo: `/opt/celebskin/scripts/.env` — DB_HOST, GEMINI_API_KEY, TMDB_API_KEY, BUNNY_STORAGE_KEY
+### Файловая структура на двух серверах
 
-### Деплой pipeline изменений (AbeloHost → Contabo)
+**Оба сервера** имеют `/opt/celebskin/site/` — это один и тот же git repo (GitHub: tarasshevchenko78/CelebSkin), но **git pull делается независимо** и версии могут расходиться.
 
-Исходники pipeline хранятся на AbeloHost в `/opt/celebskin/site/scripts/`. На Contabo — рабочие копии в `/opt/celebskin/scripts/`. Синхронизация через scp:
+| Путь | AbeloHost | Contabo |
+|------|-----------|---------|
+| `/opt/celebskin/site/` | Git repo, Next.js app (PM2: `celebskin`) | Git repo (может отставать от AbeloHost) |
+| `/opt/celebskin/site/scripts/` | Исходники pipeline (git-tracked) | Рабочие скрипты pipeline + ~20 доп. скриптов (только на Contabo) |
+| `/opt/celebskin/scripts` | НЕТ (удалена) | **Симлинк** → `site/scripts` |
+| `/opt/celebskin/site/.env.local` | DB, API keys | — |
+| `/opt/celebskin/site/scripts/.env` | — | DB_HOST, GEMINI_API_KEY, TMDB_API_KEY, BUNNY_STORAGE_KEY |
+| `/opt/celebskin/pipeline-work/` | — | Рабочие файлы (shared с Home Worker) |
+| `/opt/celebskin/xcadr-work/` | — | Рабочие файлы XCADR |
+| `/opt/celebskin/watermark_worker.py` | — | Python скрипт для Home Worker |
+
+### Деплой изменений
+
+**Web app (AbeloHost):** редактировать файлы → `./rebuild.sh` → PM2 рестартует
+
+**Pipeline скрипты (Contabo):** на Contabo `/opt/celebskin/scripts` — это симлинк на `site/scripts`, поэтому файлы деплоятся через scp напрямую в `site/scripts/`:
 
 ```bash
-scp /opt/celebskin/site/scripts/run-xcadr-pipeline.js root@161.97.142.117:/opt/celebskin/scripts/
-scp /opt/celebskin/site/scripts/xcadr/parse-xcadr.js root@161.97.142.117:/opt/celebskin/scripts/xcadr/
-# После изменения скриптов — перезапуск:
+# Деплой конкретного файла
+scp /opt/celebskin/site/scripts/run-xcadr-pipeline.js root@161.97.142.117:/opt/celebskin/site/scripts/
+scp /opt/celebskin/site/scripts/xcadr/parse-xcadr.js root@161.97.142.117:/opt/celebskin/site/scripts/xcadr/
+
+# Перезапуск pipeline API после изменений
 ssh root@161.97.142.117 "cd /opt/celebskin/scripts && pm2 restart pipeline-api"
 ```
 
-> **pipeline-api.js** — Express API (порт 3100) на Contabo. Хардлинк между `/opt/celebskin/scripts/pipeline-api.js` и `/opt/celebskin/site/scripts/pipeline-api.js` НА CONTABO. На AbeloHost хардлинков нет.
+> **ВАЖНО:** `git pull` на Contabo может затереть файлы которые были изменены через scp! Contabo часто отстаёт от AbeloHost по git. Pipeline скрипты синхронизируются через scp, НЕ через git pull.
 
 ---
 
@@ -258,24 +273,28 @@ cd /opt/celebskin/site && ./rebuild.sh
 
 ### Полезные команды
 ```bash
-# Пересборка сайта
+# Пересборка сайта (AbeloHost)
 cd /opt/celebskin/site && ./rebuild.sh
 
-# Деплой pipeline скрипта на Contabo
-scp /opt/celebskin/site/scripts/<file> root@161.97.142.117:/opt/celebskin/scripts/<file>
+# Деплой pipeline скрипта на Contabo (через scp, НЕ git pull!)
+scp /opt/celebskin/site/scripts/<file> root@161.97.142.117:/opt/celebskin/site/scripts/<file>
 
 # SSH на Contabo
 ssh root@161.97.142.117
 
-# Логи сайта
+# Логи сайта (AbeloHost)
 pm2 logs celebskin --lines 50
 
-# Логи pipeline (на Contabo)
+# Логи pipeline (Contabo)
 ssh root@161.97.142.117 "pm2 logs pipeline-api --lines 50"
 
-# БД
+# БД (AbeloHost)
 psql -U celebskin -d celebskin
 
-# Статус WARP (на Contabo)
+# Статус WARP (Contabo)
 ssh root@161.97.142.117 "warp-cli status"
+
+# Проверить расхождение git между серверами
+git log --oneline -1  # AbeloHost HEAD
+ssh root@161.97.142.117 "git -C /opt/celebskin/site log --oneline -1"  # Contabo HEAD
 ```
