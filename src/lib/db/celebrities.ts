@@ -15,11 +15,10 @@ export async function getCelebrityBySlug(slug: string): Promise<Celebrity | null
 }
 
 /**
- * Check if a celebrity needs enrichment (missing TMDB photo)
- * Used to add noindex meta tag on detail pages
+ * Check if celebrity page should be noindex (only if 0 videos — thin content)
  */
 export function celebrityNeedsEnrichment(celeb: Celebrity): boolean {
-    return !celeb.photo_url;
+    return (celeb.videos_count || 0) === 0;
 }
 
 export async function getCelebrities(

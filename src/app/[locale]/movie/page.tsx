@@ -81,8 +81,8 @@ export default async function MoviesPage({
                     return (
                         <a key={movie.id} href={`/${locale}/movie/${movie.slug}`} className="group rounded-lg overflow-hidden transition-transform duration-200 hover:scale-[1.02]">
                             <div className="relative aspect-[2/3] bg-brand-card rounded-lg overflow-hidden">
-                                {movie.poster_url ? (
-                                    <img src={movie.poster_url} alt={movieTitle} loading="lazy" className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105" />
+                                {(movie.poster_url || (movie as unknown as Record<string,string>).fallback_thumbnail) ? (
+                                    <img src={movie.poster_url || (movie as unknown as Record<string,string>).fallback_thumbnail} alt={movieTitle} loading="lazy" className="w-full h-full object-cover transition-all duration-300 group-hover:brightness-110 group-hover:scale-105" />
                                 ) : (
                                     <div className="w-full h-full bg-gradient-to-br from-brand-card via-brand-hover to-brand-card flex flex-col items-center justify-center p-3">
                                         <svg className="w-8 h-8 text-brand-muted mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 4v16M17 4v16M3 8h4m10 0h4M3 12h18M3 16h4m10 0h4M4 20h16a1 1 0 001-1V5a1 1 0 00-1-1H4a1 1 0 00-1 1v14a1 1 0 001 1z" /></svg>

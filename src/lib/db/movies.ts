@@ -15,11 +15,10 @@ export async function getMovieBySlug(slug: string): Promise<Movie | null> {
 }
 
 /**
- * Check if a movie needs enrichment (missing TMDB poster)
- * Used to add noindex meta tag on detail pages
+ * Check if movie page should be noindex (only if 0 scenes — thin content)
  */
 export function movieNeedsEnrichment(movie: Movie): boolean {
-    return !movie.poster_url;
+    return (movie.scenes_count || 0) === 0;
 }
 
 export async function getMovies(
@@ -36,9 +35,11 @@ export async function getMovies(
 
         const [dataResult, countResult] = await Promise.all([
             pool.query(
-                `SELECT * FROM movies
-           WHERE status = 'published'
-           ORDER BY ${order} ${dir}
+                `SELECT m.*,
+                 (SELECT v.thumbnail_url FROM videos v JOIN movie_scenes ms2 ON ms2.video_id = v.id WHERE ms2.movie_id = m.id AND v.thumbnail_url IS NOT NULL LIMIT 1) AS fallback_thumbnail
+                 FROM movies m
+           WHERE m.status = 'published'
+           ORDER BY m.${order} ${dir}
            LIMIT $1 OFFSET $2`,
                 [limit, offset]
             ),
@@ -73,7 +74,9 @@ export async function getNewMovies(limit: number = 12): Promise<Movie[]> {
 
 export async function getMoviesForCelebrity(celebrityId: number): Promise<Movie[]> {
     const result = await pool.query(
-        `SELECT m.* FROM movies m
+        `SELECT m.*,
+         (SELECT v.thumbnail_url FROM videos v JOIN movie_scenes ms2 ON ms2.video_id = v.id WHERE ms2.movie_id = m.id AND v.thumbnail_url IS NOT NULL LIMIT 1) AS fallback_thumbnail
+         FROM movies m
          JOIN movie_celebrities mc ON mc.movie_id = m.id
          WHERE mc.celebrity_id = $1 AND m.status = 'published'
          GROUP BY m.id
@@ -85,7 +88,9 @@ export async function getMoviesForCelebrity(celebrityId: number): Promise<Movie[
 
 export async function getCelebritiesForMovie(movieId: number): Promise<Celebrity[]> {
     const result = await pool.query(
-        `SELECT c.* FROM celebrities c
+        `SELECT c.*,
+         (SELECT v.thumbnail_url FROM videos v JOIN video_celebrities vc ON vc.video_id = v.id WHERE vc.celebrity_id = c.id AND v.thumbnail_url IS NOT NULL LIMIT 1) AS fallback_thumbnail
+         FROM celebrities c
          JOIN movie_celebrities mc ON mc.celebrity_id = c.id
          WHERE mc.movie_id = $1
          ORDER BY c.total_views DESC`,
@@ -101,7 +106,9 @@ export async function getSimilarMovies(
 ): Promise<Movie[]> {
     return cached(`similar_movies:${movieId}:${limit}`, async () => {
         const result = await pool.query(
-            `SELECT DISTINCT m.* FROM movies m
+            `SELECT DISTINCT m.*,
+             (SELECT v.thumbnail_url FROM videos v JOIN movie_scenes ms2 ON ms2.video_id = v.id WHERE ms2.movie_id = m.id AND v.thumbnail_url IS NOT NULL LIMIT 1) AS fallback_thumbnail
+             FROM movies m
              JOIN movie_celebrities mc ON mc.movie_id = m.id
              WHERE mc.celebrity_id IN (
                  SELECT celebrity_id FROM movie_celebrities WHERE movie_id = $1

@@ -169,9 +169,9 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
             <div className="flex flex-col items-center md:items-start md:flex-row gap-6 md:gap-8">
                 {/* Poster */}
                 <div className="w-48 md:w-56 shrink-0 aspect-[2/3] rounded-xl overflow-hidden border border-gray-800 bg-gray-800">
-                    {movie.poster_url ? (
+                    {(movie.poster_url || videos[0]?.thumbnail_url) ? (
                         <SafeImage
-                            src={movie.poster_url}
+                            src={movie.poster_url || videos[0]?.thumbnail_url || ''}
                             alt={title}
                             loading="eager"
                             className="w-full h-full object-cover"
@@ -285,9 +285,9 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
                                     className="group flex flex-col items-center shrink-0 w-[100px] md:w-auto transition-transform hover:scale-[1.03]"
                                 >
                                     <div className="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden bg-gray-800 border border-gray-700 group-hover:border-gray-500 transition-colors">
-                                        {c.photo_url ? (
+                                        {(c.photo_url || (c as unknown as Record<string,string>).fallback_thumbnail) ? (
                                             <SafeImage
-                                                src={c.photo_url}
+                                                src={c.photo_url || (c as unknown as Record<string,string>).fallback_thumbnail || ''}
                                                 alt={celName}
                                                 className="w-full h-full object-cover"
                                                 fallback={
@@ -337,9 +337,9 @@ export default async function MovieDetailPage({ params }: { params: { locale: st
                                     className="group relative"
                                 >
                                     <div className="aspect-[2/3] rounded-lg overflow-hidden bg-gray-800 border border-gray-700 group-hover:border-gray-500 transition-colors">
-                                        {m.poster_url ? (
+                                        {(m.poster_url || (m as unknown as Record<string,string>).fallback_thumbnail) ? (
                                             <SafeImage
-                                                src={m.poster_url}
+                                                src={m.poster_url || (m as unknown as Record<string,string>).fallback_thumbnail || ''}
                                                 alt={mTitle}
                                                 className="w-full h-full object-cover"
                                                 fallback={

@@ -45,11 +45,39 @@ const sortMap: Record<string, string> = {
 // Metadata
 // ============================================
 
+const descriptions: Record<string, string> = {
+    en: 'Celebrity nude scenes from movies and TV shows. Watch HD clips on CelebSkin.',
+    ru: 'Обнажённые сцены знаменитостей из фильмов и сериалов. Смотрите HD клипы на CelebSkin.',
+    de: 'Nacktszenen von Prominenten aus Filmen und Serien. HD-Clips auf CelebSkin.',
+    fr: 'Scènes de nu de célébrités dans les films et séries. Clips HD sur CelebSkin.',
+    es: 'Escenas de desnudos de celebridades en películas y series. Clips HD en CelebSkin.',
+    pt: 'Cenas de nudez de celebridades em filmes e séries. Clips HD no CelebSkin.',
+    it: 'Scene di nudo di celebrità in film e serie TV. Clip HD su CelebSkin.',
+    pl: 'Nagie sceny celebrytów z filmów i seriali. Klipy HD na CelebSkin.',
+    nl: 'Naaktscènes van beroemdheden uit films en series. HD-clips op CelebSkin.',
+    tr: 'Film ve dizilerden ünlü çıplak sahneleri. CelebSkin\'de HD klipler.',
+};
+
 export async function generateMetadata({ params }: { params: { locale: string } }): Promise<Metadata> {
     const locale = params.locale as SupportedLocale;
+    const title = `${titles[locale] || titles.en} — CelebSkin`;
+    const description = descriptions[locale] || descriptions.en;
     return {
-        title: `${titles[locale] || titles.en} — CelebSkin`,
+        title,
+        description,
         alternates: buildAlternates(locale, '/video'),
+        openGraph: {
+            title,
+            description,
+            url: `https://celeb.skin/${locale}/video`,
+            siteName: 'CelebSkin',
+            type: 'website',
+        },
+        twitter: {
+            card: 'summary_large_image',
+            title,
+            description,
+        },
     };
 }
 
@@ -160,6 +188,15 @@ export default async function VideosPage({
                     />
                 </div>
             </div>
+
+            {/* ── SSR tag links for SEO (hidden visually, crawlable by Googlebot) ── */}
+            <nav className="sr-only" aria-label="Tags">
+                {allTags.map((t) => (
+                    <a key={t.id} href={`/${locale}/tag/${t.slug}`}>
+                        {getLocalizedField(t.name_localized, locale) || t.name}
+                    </a>
+                ))}
+            </nav>
 
             {/* ── Result count ── */}
             <div className="mt-4 mb-3">

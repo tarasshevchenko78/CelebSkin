@@ -178,6 +178,10 @@ const LOCALES = ["en", "ru", "de", "fr", "es", "pt", "it", "pl", "nl", "tr"];con
 const PROGRESS_INTERVAL_MS = 3000;
 const SUBPROCESS_TIMEOUT = 600000;
 
+// Gemini consecutive failure counter — stop pipeline after 5 in a row
+let _consecutiveGeminiFails = 0;
+const MAX_CONSECUTIVE_GEMINI_FAILS = 5;
+
 const STEP_ORDER = ['download', 'ai_vision', 'watermark', 'media', 'cdn_upload', 'publish', 'cleanup'];
 
 let STEP_CONCURRENCY = {
@@ -475,12 +479,33 @@ async function processAiVision(xcadrId, stepName) {
   const aiError = vc?.ai_vision_error || vr.error?.substring(0, 300) || '';
 
   if (vr.exitCode !== 0) {
+    // key_error from ai-vision-analyze.js — don't delete video, mark needs_review
+    if (aiStatus === 'key_error') {
+      _consecutiveGeminiFails++;
+      logger.error(`[${stepName}:${xcadrId}] 🔑 Gemini failure #${_consecutiveGeminiFails}/${MAX_CONSECUTIVE_GEMINI_FAILS}: ${aiError.substring(0, 100)}`);
+      if (_consecutiveGeminiFails >= MAX_CONSECUTIVE_GEMINI_FAILS) {
+        logger.error(`🛑 PIPELINE STOPPED: ${_consecutiveGeminiFails} consecutive Gemini failures. Update keys in /admin/settings and restart.`);
+        process.exit(1);
+      }
+      // Don't delete — video will go to needs_review via WorkerPool error handling
+      throw new Error(`[key_error] ${aiError || 'Gemini API key not valid'}`);
+    }
     // Accept: completed, timeout_fallback, censored (continues with donor tag fallback)
     if (!vc || !['completed', 'timeout_fallback', 'censored'].includes(aiStatus)) {
       // Classify error for UI display
       let errorCategory = 'unknown';
       const errLower = (aiError || '').toLowerCase();
-      if (errLower.includes('429') || errLower.includes('quota') || errLower.includes('resource_exhausted') || errLower.includes('exceeded')) errorCategory = 'quota';
+      if (errLower.includes('429') || errLower.includes('quota') || errLower.includes('resource_exhausted') || errLower.includes('exceeded')) {
+        errorCategory = 'quota';
+        _consecutiveGeminiFails++;
+        logger.error(`[${stepName}:${xcadrId}] 🔑 Gemini failure #${_consecutiveGeminiFails}/${MAX_CONSECUTIVE_GEMINI_FAILS}: quota`);
+        if (_consecutiveGeminiFails >= MAX_CONSECUTIVE_GEMINI_FAILS) {
+          logger.error(`🛑 PIPELINE STOPPED: ${_consecutiveGeminiFails} consecutive Gemini failures. Update keys in /admin/settings and restart.`);
+          process.exit(1);
+        }
+        // Don't delete — keep for needs_review
+        throw new Error(`[quota] ${aiError || 'Gemini quota exceeded'}`);
+      }
       else if (errLower.includes('api key') || errLower.includes('invalid key') || errLower.includes('permission') || errLower.includes('403')) errorCategory = 'key_error';
       else if (errLower.includes('timeout') || errLower.includes('etimedout') || errLower.includes('econnreset')) errorCategory = 'timeout';
 
@@ -490,6 +515,9 @@ async function processAiVision(xcadrId, stepName) {
     }
     logger.warn(`[${stepName}:${xcadrId}] AI Vision status=${aiStatus}, continuing with fallback`);
   }
+
+  // AI succeeded — reset Gemini failure counter
+  _consecutiveGeminiFails = 0;
 
   // Save AI vision status info to step-progress for UI
   if (aiStatus === 'censored') {

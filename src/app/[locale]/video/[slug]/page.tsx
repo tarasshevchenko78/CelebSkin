@@ -312,8 +312,8 @@ export default async function VideoDetailPage({
                                 <span>{video.duration_formatted}</span>
                             )}
 
-                            {/* Quality badge */}
-                            {video.quality && (
+                            {/* Quality badge — only show HD+ */}
+                            {video.quality && !['360p', '480p', 'unknown'].includes(video.quality) && (
                                 <span className="bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 rounded">
                                     {video.quality}
                                 </span>

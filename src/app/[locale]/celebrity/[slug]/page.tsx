@@ -69,7 +69,7 @@ export async function generateMetadata({
         : undefined;
     const photoUrl = celeb?.photo_url || null;
 
-    // noindex for celebrities without photo or bio (needs enrichment)
+    // noindex only if 0 videos (thin content)
     const noindex = celeb ? celebrityNeedsEnrichment(celeb) : false;
 
     return {
@@ -185,9 +185,9 @@ export default async function CelebrityDetailPage({
             <div className="flex flex-col items-center md:items-start md:flex-row gap-5 md:gap-6">
                 {/* Photo */}
                 <div className="w-32 h-32 md:w-40 md:h-40 rounded-2xl overflow-hidden border-2 border-gray-800 shrink-0 bg-gray-800">
-                    {celeb.photo_url ? (
+                    {(celeb.photo_url || videos[0]?.thumbnail_url) ? (
                         <SafeImage
-                            src={celeb.photo_url}
+                            src={celeb.photo_url || videos[0]?.thumbnail_url || ''}
                             alt={name}
                             loading="eager"
                             className="w-full h-full object-cover"
@@ -255,6 +255,29 @@ export default async function CelebrityDetailPage({
                 </section>
             )}
 
+            {/* ── 2b. FILMOGRAPHY (SSR for SEO) ── */}
+            {celebMovies.length > 0 && (
+                <nav className="mt-6 pt-6 border-t border-gray-800/50" aria-label="Filmography">
+                    <h2 className="text-lg font-semibold text-white mb-3">
+                        {locale === 'ru' ? 'Фильмография' : 'Filmography'}
+                    </h2>
+                    <div className="flex flex-wrap gap-2">
+                        {celebMovies.map((m) => {
+                            const mTitle = getLocalizedField(m.title_localized, locale) || m.title;
+                            return (
+                                <a
+                                    key={m.id}
+                                    href={`/${locale}/movie/${m.slug}`}
+                                    className="px-3 py-1.5 rounded-lg text-sm bg-gray-800/40 text-gray-300 border border-gray-700 hover:border-gray-500 hover:text-white transition-colors"
+                                >
+                                    {mTitle}{m.year ? ` (${m.year})` : ''}
+                                </a>
+                            );
+                        })}
+                    </div>
+                </nav>
+            )}
+
             {/* ── 3. TABS ── */}
             <section className="mt-6 pt-6 border-t border-gray-800/50">
                 <CelebrityTabs
@@ -277,7 +300,7 @@ export default async function CelebrityDetailPage({
                             return (
                                 <a
                                     key={tag.id}
-                                    href={`/${locale}/video?tag=${tag.slug}`}
+                                    href={`/${locale}/tag/${tag.slug}`}
                                     className="px-2.5 py-1 rounded-full text-xs bg-gray-800/50 text-gray-400 border border-gray-700 hover:border-gray-500 hover:text-gray-300 transition-colors"
                                 >
                                     {tagName}

@@ -9,7 +9,7 @@ import { query } from './lib/db.js';
 import slugify from 'slugify';
 
 const LOCALES = ['en', 'ru', 'de', 'fr', 'es', 'pt', 'it', 'pl', 'nl', 'tr'];
-let GEMINI_API_KEYS = (config.ai.geminiApiKey || '').split(',').map(k => k.trim()).filter(Boolean);
+let GEMINI_API_KEYS = []; // loaded from DB only, no .env fallback
 let _keyIdx = 0;
 function getApiKey() { return GEMINI_API_KEYS[_keyIdx++ % GEMINI_API_KEYS.length] || ''; }
 const GEMINI_MODEL = 'gemini-3-flash-preview';
@@ -26,13 +26,15 @@ const videoId = videoIdArg ? videoIdArg.split('=').slice(1).join('=') : null;
 if (!videoId) { console.error('Usage: node generate-multilang.js --video-id=UUID'); process.exit(1); }
 
 async function main() {
-  // Load API keys from DB (overrides .env)
+  // Load API keys from DB
   try {
     const { rows } = await query(
-      `SELECT key, value FROM settings WHERE key IN ('gemini_api_key_1', 'gemini_api_key_2', 'gemini_api_key_3') ORDER BY key`
+      `SELECT value FROM settings WHERE key = 'gemini_api_key' LIMIT 1`
     );
-    const dbKeys = rows.map(r => r.value?.trim()).filter(Boolean);
-    if (dbKeys.length > 0) { GEMINI_API_KEYS = dbKeys; log(`Loaded ${dbKeys.length} key(s) from DB`); }
+    if (rows[0]?.value) {
+      const dbKeys = rows[0].value.split(',').map(k => k.trim()).filter(Boolean);
+      if (dbKeys.length > 0) { GEMINI_API_KEYS = dbKeys; log(`Loaded ${dbKeys.length} key(s) from DB`); }
+    }
   } catch {}
   if (GEMINI_API_KEYS.length === 0) { console.error('GEMINI_API_KEY not set (DB or .env)'); process.exit(1); }
   const { rows: [video] } = await query(
@@ -94,7 +96,7 @@ async function main() {
           contents: [{ parts: [{ text: prompt }] }],
           generationConfig: { temperature: 0.7, maxOutputTokens: 8192, responseMimeType: 'application/json' },
         }),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(30000),
       });
       if (!resp.ok) {
         log('Gemini error ' + resp.status);
