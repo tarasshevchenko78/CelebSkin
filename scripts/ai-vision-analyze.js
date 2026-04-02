@@ -49,8 +49,8 @@ const VISION_MODELS = [
 // Для 2.5-pro: тоже default (BLOCK_NONE даёт пустой ответ!)
 
 const MAX_INLINE_SIZE = 18 * 1024 * 1024; // 18MB safe limit for inline base64
-const BIG_FILE_THRESHOLD = 100 * 1024 * 1024; // 100MB: use screenshot frames instead of File API
-const BIG_FILE_FRAME_COUNT = 8; // frames to extract for big-file analysis
+const BIG_FILE_THRESHOLD = 0; // ALWAYS use screenshot frames (cheaper than video upload)
+const BIG_FILE_FRAME_COUNT = 8; // default frame count, overridden by duration/2 in main()
 const execFileAsync = promisify(execFileCb);
 const MAX_RETRIES = 2;
 const RETRY_DELAY_MS = 5000;
@@ -196,7 +196,13 @@ List ALL applicable markers in "content_markers" array. Tag ONLY what you actual
 You MUST identify the most scandalous, provocative, eye-catching moments for thumbnails and preview:
 
 - **hot_moments**: List ALL moments where nudity appears or intensifies. Order by visual impact (most revealing first). Include EVERY timestamp where skin is first shown, clothing removed, or intimacy peaks. Minimum 3, maximum 8.
-- **best_thumbnail_sec**: The SINGLE most provocative frame that would make someone click. This should show the MAXIMUM nudity level visible in the video — topless > cleavage, nude > topless. Pick a frame where the actress is facing camera, well-lit, and the nudity is clearly visible. NOT a dark frame, NOT a face closeup, NOT a clothed moment.
+- **best_thumbnail_sec**: The SINGLE most provocative frame for thumbnail. STRICT PRIORITY ORDER — pick the FIRST matching level:
+  1. **full-frontal/vagina visible** — if ANY frame shows genitals, ALWAYS use that frame
+  2. **nude/bush** — full body nudity, pubic area visible
+  3. **topless** — breasts clearly visible, well-lit, facing camera
+  4. **butt** — bare buttocks visible
+  5. **cleavage/lingerie** — if no nudity exists, pick sexiest clothed frame
+  The frame MUST be: well-lit (not dark), actress facing camera (not turned away), nudity clearly visible (not obscured). NOT a face closeup, NOT a clothed moment when nudity exists elsewhere.
 - **preview_start_sec**: Start the 6-second preview clip 2-4 seconds BEFORE the peak moment (best_thumbnail_sec). The preview must SHOW the hottest action — undressing, the reveal, the sex scene climax. If there are multiple peak moments, pick the one that starts with clothed and TRANSITIONS to nude within the 6 seconds — this creates the most compelling preview.
 
 ## OUTPUT FORMAT
@@ -848,17 +854,24 @@ async function main() {
   let videoBuffer = null;
   let frameBuffers = null;
 
-  if (fileStat.size > BIG_FILE_THRESHOLD) {
-    const sizeMB = (fileStat.size / 1024 / 1024).toFixed(0);
-    console.log(`\nFile > 100MB (${sizeMB}MB) — extracting ${BIG_FILE_FRAME_COUNT} frames instead of File API upload...`);
-    frameBuffers = await extractFrameBuffers(videoPath, BIG_FILE_FRAME_COUNT);
+  // Always use screenshot frames instead of video upload (50% cheaper on Gemini tokens)
+  {
+    // Calculate frame count: 1 frame per 2 seconds, min 8, max 60
+    let duration = 0;
+    try {
+      const { stdout } = await execFileAsync('ffprobe', [
+        '-v', 'error', '-select_streams', 'v:0',
+        '-show_entries', 'format=duration', '-of', 'csv=p=0', videoPath,
+      ], { timeout: 15000 });
+      duration = parseFloat(stdout.trim()) || 0;
+    } catch { duration = 120; }
+    const frameCount = Math.min(60, Math.max(8, Math.floor(duration / 2)));
+    console.log(`\nExtracting ${frameCount} frames from ${duration.toFixed(0)}s video (1 per 2s, cheaper than video upload)...`);
+    frameBuffers = await extractFrameBuffers(videoPath, frameCount);
     if (frameBuffers.length === 0) {
       console.log('  Frame extraction failed, falling back to full video read...');
       videoBuffer = await readFile(videoPath);
     }
-  } else {
-    console.log('\nReading video file...');
-    videoBuffer = await readFile(videoPath);
   }
 
   // 4. Try models in cascade

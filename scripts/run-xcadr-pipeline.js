@@ -162,6 +162,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 import { config } from './lib/config.js';
 import { query, pool } from './lib/db.js';
+import { translate, translateToAll, translateFromRu } from './lib/translate.js';
 import { extractNationality, mapDonorTags } from './lib/tags.js';
 import { uploadFile } from './lib/bunny.js';
 import logger from './lib/logger.js';
@@ -185,7 +186,7 @@ const MAX_CONSECUTIVE_GEMINI_FAILS = 5;
 const STEP_ORDER = ['download', 'ai_vision', 'watermark', 'media', 'cdn_upload', 'publish', 'cleanup'];
 
 let STEP_CONCURRENCY = {
-  download: 3, ai_vision: 3, watermark: 2, media: 3, cdn_upload: 3, publish: 3, cleanup: 3,
+  download: 3, ai_vision: 3, watermark: 1, media: 3, cdn_upload: 3, publish: 3, cleanup: 3,
 };
 
 function writeStepProgress(xcadrId, data) {
@@ -479,45 +480,38 @@ async function processAiVision(xcadrId, stepName) {
   const aiError = vc?.ai_vision_error || vr.error?.substring(0, 300) || '';
 
   if (vr.exitCode !== 0) {
-    // key_error from ai-vision-analyze.js — don't delete video, mark needs_review
-    if (aiStatus === 'key_error') {
+    // Classify error
+    const errLower = (aiError || '').toLowerCase();
+    const isGeminiError = aiStatus === 'key_error' || errLower.includes('429') || errLower.includes('quota') || errLower.includes('resource_exhausted') || errLower.includes('api key') || errLower.includes('403');
+
+    if (isGeminiError) {
       _consecutiveGeminiFails++;
       logger.error(`[${stepName}:${xcadrId}] 🔑 Gemini failure #${_consecutiveGeminiFails}/${MAX_CONSECUTIVE_GEMINI_FAILS}: ${aiError.substring(0, 100)}`);
+
       if (_consecutiveGeminiFails >= MAX_CONSECUTIVE_GEMINI_FAILS) {
         logger.error(`🛑 PIPELINE STOPPED: ${_consecutiveGeminiFails} consecutive Gemini failures. Update keys in /admin/settings and restart.`);
         process.exit(1);
       }
-      // Don't delete — video will go to needs_review via WorkerPool error handling
-      throw new Error(`[key_error] ${aiError || 'Gemini API key not valid'}`);
+
+      // FALLBACK: skip AI Vision, continue pipeline with donor tags only.
+      // Video will publish as needs_review (no AI description) but with watermark+media+CDN.
+      logger.warn(`[${stepName}:${xcadrId}] ⚠ AI Vision skipped (Gemini error) — continuing with donor tags. Will publish as needs_review.`);
+      await query(`UPDATE videos SET ai_vision_status='error', ai_vision_error=$2, pipeline_error='Gemini unavailable — AI Vision skipped' WHERE id=$1`, [tempVideoId, aiError.substring(0, 500)]);
+      // Don't throw — let pipeline continue to watermark → media → CDN → publish
     }
     // Accept: completed, timeout_fallback, censored (continues with donor tag fallback)
-    if (!vc || !['completed', 'timeout_fallback', 'censored'].includes(aiStatus)) {
-      // Classify error for UI display
-      let errorCategory = 'unknown';
-      const errLower = (aiError || '').toLowerCase();
-      if (errLower.includes('429') || errLower.includes('quota') || errLower.includes('resource_exhausted') || errLower.includes('exceeded')) {
-        errorCategory = 'quota';
-        _consecutiveGeminiFails++;
-        logger.error(`[${stepName}:${xcadrId}] 🔑 Gemini failure #${_consecutiveGeminiFails}/${MAX_CONSECUTIVE_GEMINI_FAILS}: quota`);
-        if (_consecutiveGeminiFails >= MAX_CONSECUTIVE_GEMINI_FAILS) {
-          logger.error(`🛑 PIPELINE STOPPED: ${_consecutiveGeminiFails} consecutive Gemini failures. Update keys in /admin/settings and restart.`);
-          process.exit(1);
-        }
-        // Don't delete — keep for needs_review
-        throw new Error(`[quota] ${aiError || 'Gemini quota exceeded'}`);
-      }
-      else if (errLower.includes('api key') || errLower.includes('invalid key') || errLower.includes('permission') || errLower.includes('403')) errorCategory = 'key_error';
-      else if (errLower.includes('timeout') || errLower.includes('etimedout') || errLower.includes('econnreset')) errorCategory = 'timeout';
-
+    else if (!vc || !['completed', 'timeout_fallback', 'censored'].includes(aiStatus)) {
+      const errCategory = errLower.includes('timeout') || errLower.includes('etimedout') ? 'timeout' : 'unknown';
       await query(`DELETE FROM videos WHERE id=$1`, [tempVideoId]);
       await rm(v2Dir, { recursive: true, force: true }).catch(() => {});
-      throw new Error(`[${errorCategory}] ${aiError || 'ai-vision failed'}`);
+      throw new Error(`[${errCategory}] ${aiError || 'ai-vision failed'}`);
+    } else {
+      logger.warn(`[${stepName}:${xcadrId}] AI Vision status=${aiStatus}, continuing with fallback`);
     }
-    logger.warn(`[${stepName}:${xcadrId}] AI Vision status=${aiStatus}, continuing with fallback`);
   }
 
   // AI succeeded — reset Gemini failure counter
-  _consecutiveGeminiFails = 0;
+  if (vr.exitCode === 0) _consecutiveGeminiFails = 0;
 
   // Save AI vision status info to step-progress for UI
   if (aiStatus === 'censored') {
@@ -527,7 +521,23 @@ async function processAiVision(xcadrId, stepName) {
   }
 
   writeStepProgress(xcadrId, { step: 'ai_vision', status: 'running', percent: 60, detail: 'Languages...' });
-  await runScript('generate-multilang.js', [`--video-id=${tempVideoId}`], stepName, String(xcadrId));
+  const mlResult = await runScript('generate-multilang.js', [`--video-id=${tempVideoId}`], stepName, String(xcadrId));
+  if (mlResult.exitCode !== 0) {
+    // Gemini failed for translations — fallback: translate original_title via LibreTranslate
+    logger.warn(`[${stepName}:${xcadrId}] generate-multilang failed, using LibreTranslate fallback`);
+    try {
+      const origTitle = meta.originalTitle || meta.titleRu || meta.titleEn || '';
+      if (origTitle) {
+        const isRu = /[а-яА-Я]/.test(origTitle);
+        const titles = isRu ? await translateFromRu(origTitle) : await translateToAll(origTitle);
+        const enSlug = slugify(titles.en || origTitle, { lower: true, strict: true }).substring(0, 200);
+        const slugs = {}; for (const l of LOCALES) slugs[l] = enSlug;
+        await query(`UPDATE videos SET title=$2::jsonb, slug=$3::jsonb, updated_at=NOW() WHERE id=$1`,
+          [tempVideoId, JSON.stringify(titles), JSON.stringify(slugs)]);
+        logger.info(`[${stepName}:${xcadrId}] LibreTranslate fallback: title in ${Object.keys(titles).length} languages`);
+      }
+    } catch (e) { logger.warn(`[${stepName}:${xcadrId}] LibreTranslate fallback failed: ${e.message}`); }
+  }
 
   // Copy metadata.json to xcadr workdir
   if (existsSync(join(v2Dir, 'metadata.json')))
@@ -1295,10 +1305,11 @@ Return ONLY valid JSON:
   const hotMoments = aiMeta?.hot_moments || aiRes?.hot_moments || null;
   const aiRawResponse = aiRes?.ai_raw_response || aiMeta?.ai_raw_response || null;
 
-  // Determine publish status: require russian translations
+  // Determine publish status: require russian translations + AI Vision
   const tObj=typeof title==='string'?JSON.parse(title):title;
   const hasRuTranslation = tObj.ru && tObj.ru.length > 3;
-  const status = hasRuTranslation ? 'published' : 'needs_review';
+  const aiVisionOk = aiMeta?.model_used && aiMeta.model_used !== 'fallback-donor-tags';
+  const status = (hasRuTranslation && aiVisionOk) ? 'published' : 'needs_review';
   // Duplicate check: source_url + xcadr video ID + xcadr_imports
   const sourceUrl = meta.xcadr_url || item.xcadr_url || '';
   if(sourceUrl){
@@ -1471,27 +1482,17 @@ async function enrichCelebTMDB(id, name, xcadrMeta) {
   const det = d.data;
   const bioEn = det.biography || "";
 
-  // Translate name and bio to 10 languages
-  let nameLocalized = {}, bio = {};
-  if (bioEn || name) {
-    const prompt = `Translate the following celebrity information to these languages: ${LOCALES.join(", ")}.
-Celebrity name (English): "${name}"
-Biography (English): "${bioEn.substring(0, 2000)}"
-
-Return ONLY valid JSON object with two fields:
-- "name_localized": object with language codes as keys and translated/transliterated name as values (for Latin-script languages keep original English name, for ru/pl/tr etc transliterate appropriately)
-- "bio": object with language codes as keys and translated biography as values (2-3 sentences each, keep factual)
-
-Example: {"name_localized":{"en":"...","ru":"..."},"bio":{"en":"...","ru":"..."}}`;
-    const translated = await translateWithGemini(prompt);
-    if (translated) {
-      nameLocalized = translated.name_localized || {};
-      bio = translated.bio || {};
-    }
+  // Translate name and bio to 10 languages via LibreTranslate (FREE)
+  let nameLocalized = { en: name };
+  let bio = {};
+  if (bioEn) {
+    bio = await translateToAll(bioEn.substring(0, 2000));
   }
-  // Ensure English values
-  if (!nameLocalized.en) nameLocalized.en = name;
-  if (!bio.en) bio.en = bioEn;
+  // Name: keep English for Latin-script languages, translate for RU
+  if (name) {
+    const nameRu = await translate(name, 'en', 'ru');
+    nameLocalized = { en: name, ru: nameRu || name, de: name, fr: name, es: name, pt: name, it: name, pl: name, nl: name, tr: name };
+  }
 
   let celebPhotoUrl = det.profile_path ? `https://image.tmdb.org/t/p/w500${det.profile_path}` : null;
 
@@ -1625,26 +1626,16 @@ async function enrichMovieTMDB(id, title, year, xcadrMeta) {
   const director = null; // Could fetch credits but keep it simple
   const studio = isTV ? (det.data?.networks?.[0]?.name || null) : (det.data?.production_companies?.[0]?.name || null);
 
-  // Translate title and description to 10 languages
-  let titleLocalized = {}, description = {};
-  if (descEn || title) {
-    const prompt = `Translate the following movie/TV show information to these languages: ${LOCALES.join(", ")}.
-Title (English): "${title}"
-Description (English): "${descEn.substring(0, 2000)}"
-Year: ${year || "unknown"}
-
-Return ONLY valid JSON object with two fields:
-- "title_localized": object with language codes as keys and translated title as values (keep original English title for Latin-script languages if well-known)
-- "description": object with language codes as keys and translated description as values (2-3 sentences)
-
-Example: {"title_localized":{"en":"...","ru":"..."},"description":{"en":"...","ru":"..."}}`;
-    const translated = await translateWithGemini(prompt);
-    if (translated) {
-      titleLocalized = translated.title_localized || {};
-      description = translated.description || {};
-    }
+  // Translate title and description via LibreTranslate (FREE)
+  let titleLocalized = { en: title };
+  let description = {};
+  if (title) {
+    const titleRu = await translate(title, 'en', 'ru');
+    titleLocalized = { en: title, ru: titleRu || title, de: title, fr: title, es: title, pt: title, it: title, pl: title, nl: title, tr: title };
   }
-  if (!titleLocalized.en) titleLocalized.en = title;
+  if (descEn) {
+    description = await translateToAll(descEn.substring(0, 2000));
+  }
   if (!description.en) description.en = descEn;
 
   // Extract countries from TMDB
